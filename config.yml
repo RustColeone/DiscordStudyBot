@@ -3,5 +3,6 @@ ID_CHANNEL: Channel ID Here
 ID_CHANNEL1: Bot Announcement ID Here
 ID_MESSAGE: Message Discord Bot Edit Here
 ID_VOICECHANNEL: Voice Channel ID Here
+OPENAI_API_KEY: Open Ai API Key Here
 WOLFRAM_APPID: Wolfram Alpha App ID Here
 WOLFRAM_PATH: Wolfram Kernal Path, for example, C:/Program Files/Wolfram Research/Wolfram Engine/12.2/WolframKernel.exe

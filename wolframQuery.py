@@ -4,7 +4,7 @@ import requests
 import urllib.parse
 
 with open("config.yml", "r") as ymlfile:
-    botConfig = yaml.load(ymlfile)
+    botConfig = yaml.safe_load(ymlfile)
 
 appid = botConfig['WOLFRAM_APPID']
 def queryWolfram(input):

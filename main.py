@@ -6,6 +6,7 @@ import asyncio
 import pytz
 import ascii
 import wolframQuery
+import chatGPTQuery
 import googleQuery
 import pathlib
 
@@ -13,10 +14,10 @@ from wolframclient.evaluation import WolframLanguageSession
 from wolframclient.language import wl, wlexpr
 
 with open("config.yml", "r") as ymlfile:
-    botConfig = yaml.load(ymlfile)
+    botConfig = yaml.safe_load(ymlfile)
 
 session = WolframLanguageSession(botConfig["WOLFRAM_PATH"])
-bot = discord.Client(command_prefic = '$')
+bot = discord.Client(intents=discord.Intents.all(), command_prefic = '$')
 
 timeZoneUTC = pytz.utc
 timeZoneCNBJ = pytz.timezone("Asia/Shanghai")
@@ -51,40 +52,40 @@ async def on_ready():
 async def on_message(message):
 	global voice_chat
 	msgText = message.content
-
+	print(message)
 	if message.author == bot.user:
 		return
-	elif msgText.startswith('/help'):
+	elif msgText.startswith('$help'):
 		help = "```" \
-			+ "Start Clock    => /start\n"\
-			+ "Stopp Clock    => /stop\n"\
-			+ "Print time     => /time\n"\
-			+ "Remind         => /remindMeIn <minutes> <msg>\n"\
-			+ "Play Music     => /music initialize\n"\
+			+ "Start Clock    => $start\n"\
+			+ "Stopp Clock    => $stop\n"\
+			+ "Print time     => $time\n"\
+			+ "Remind         => $remindMeIn <minutes> <msg>\n"\
+			+ "Play Music     => $music initialize\n"\
 			+ "          play =>        play\n"\
 			+ "         pause =>        pause\n"\
 			+ "      get name =>        name\n"\
 			+ "     next song =>        next\n"\
 			+ "     last song =>        previous\n"\
-			+ "Type Set math  => /typeSetMath <equation>\n"\
-			+ "Search Wolfram => /wolfram <query>\n"\
-			+ "Search Google  => /google <query>\n"\
+			+ "Type Set math  => $typeSetMath <equation>\n"\
+			+ "Search Wolfram => $wolfram <query>\n"\
+			+ "Search Google  => $google <query> (DOWN for now)\n"\
 			+ "```"
 		await message.channel.send(help)
-	elif msgText.startswith('/time'):
+	elif msgText.startswith('$time'):
 		timeCNBJ, timeUSCA, timeUKLD, timerM, timerS = get_time_zone_info()
 		text = built_clock_string(timeCNBJ, timeUSCA, timeUKLD, timerM, timerS)
 		await message.channel.send(text)
-	elif msgText.startswith('/start'):
+	elif msgText.startswith('$start'):
 		await message.channel.send('Starting Clock')
 		bot.loop.create_task(get_time_info(channel))
-	elif msgText.startswith('/stop'):
+	elif msgText.startswith('$stop'):
 		await message.channel.send('Stopping Timer')
 		bot.loop.stop()
-	elif msgText.startswith('/remindMeIn'):
+	elif msgText.startswith('$remindMeIn'):
 		await message.channel.send('Timer Set')
 		parameters = message.content.split(" ")
-		timerMinutes = 5;
+		timerMinutes = 5
 		try:
 			timerMinutes = float(parameters[1])
 		except:
@@ -97,9 +98,9 @@ async def on_message(message):
 		except:
 			await message.channel.send('without messages')
 		bot.loop.create_task((remind_me_in(timerMinutes, message.author, msg)))
-	elif msgText.startswith('/broadcast'):
+	elif msgText.startswith('$broadcast'):
 		await channel1.send(message.content.replace('/broadcast ',''))
-	elif msgText.startswith('/music'):
+	elif msgText.startswith('$music'):
 		parameters = message.content.split(" ")
 		if parameters[1] == "playTest":
 			await playMusicTest(voice_channel)
@@ -131,15 +132,15 @@ async def on_message(message):
 			await playMusic(False)
 			previous()
 			await playMusic(True)
-	elif msgText.startswith('/typeSetMath'):
+	elif msgText.startswith('$typeSetMath'):
 		ans = session.evaluate(wlexpr('ToString[' + msgText[12:] + ']'))
 		tempText = "```md\n" + ans + "\n```"
 		await message.channel.send(tempText)
-	elif msgText.startswith('/wolfram'):
+	elif msgText.startswith('$wolfram'):
 		ans = wolframQuery.queryWolfram(msgText[8:])
 		tempText = "Wolfram Replied>\n```md\n" + ans + "\n```"
 		await message.channel.send(tempText)
-	elif msgText.startswith('/google'):
+	elif msgText.startswith('$google'):
 		tempText = "Google Replied>\n"
 		resultTitle, resultLink, resultDescription = googleQuery.queryGoogle(msgText[7:])
 		embed=discord.Embed(title="Googled results of {}".format(msgText[7:]))
@@ -148,6 +149,12 @@ async def on_message(message):
 			description += "[{}]({})\n{}\n\n".format(resultTitle[i], resultLink[i], resultDescription[i])
 		embed.description = description
 		await message.channel.send(tempText, embed = embed)
+	elif msgText.startswith('$chat'):
+        #Default reply by chat gpt
+		ans = chatGPTQuery.queryChatGPT(msgText[5:])
+		await message.channel.send(ans)
+
+		
 
 async def get_time_info(channel):
 	#message = await channel.fetch_message(botConfig["ID_MESSAGE"])
