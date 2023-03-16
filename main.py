@@ -52,7 +52,14 @@ async def on_ready():
 async def on_message(message):
 	global voice_chat
 	msgText = message.content
-	print(message)
+	msgChannel = "Private/"
+	if type(message.guild) is not type(None):
+		msgChannel = message.guild.name
+	if message.channel.type.name == "private":
+		msgChannel = msgChannel + "/DM"
+	elif type(message.channel) is not type(None) : 
+		msgChannel = msgChannel + "/" + message.channel.name
+	print("From " + msgChannel + ", by " + message.author.name + ": \"" + msgText + "\"" )
 	if message.author == bot.user:
 		return
 	elif msgText.startswith('$help'):
@@ -70,6 +77,9 @@ async def on_message(message):
 			+ "Type Set math  => $typeSetMath <equation>\n"\
 			+ "Search Wolfram => $wolfram <query>\n"\
 			+ "Search Google  => $google <query> (DOWN for now)\n"\
+			+ "Chat GPT       => $chat <query>\n"\
+			+ "         clear => $chatClear\n"\
+			+ "        Prompt => $chatPrompt <index>\n"\
 			+ "```"
 		await message.channel.send(help)
 	elif msgText.startswith('$time'):
@@ -149,11 +159,21 @@ async def on_message(message):
 			description += "[{}]({})\n{}\n\n".format(resultTitle[i], resultLink[i], resultDescription[i])
 		embed.description = description
 		await message.channel.send(tempText, embed = embed)
-	elif msgText.startswith('$chat'):
+	elif msgText.startswith('$chat '):
         #Default reply by chat gpt
-		ans = chatGPTQuery.queryChatGPT(msgText[5:])
+		ans = chatGPTQuery.queryChatGPT(msgText[6:], message.channel.id, message.created_at)
 		await message.channel.send(ans)
-
+	elif msgText.startswith('$chatClear'):
+		chatGPTQuery.clearHistory(message.channel.id)
+		await message.channel.send("Cleared")
+	elif msgText.startswith('$chatPrompt'):
+		index = 0
+		try:
+			index = int(msgText[11:])
+		except ValueError:
+			await message.channel.send("That was not a valid integer")
+		chatGPTQuery.changePrompt(message.channel.id, index, message.created_at)
+		await message.channel.send("Prompt changed")
 		
 
 async def get_time_info(channel):
@@ -183,8 +203,8 @@ def built_clock_string(timeCNBJ, timeUSCA, timeUKLD, timerM, timerS):
 	if(timerM < 45): 
 		tempText += "md\n"
 		breakTimeText = "Not Break Time just Yet"
-	tempText += "#" + "#" * 33 + "\n";
-	tempText += "#" + " " * 32 + "#\n";
+	tempText += "#" + "#" * 33 + "\n"
+	tempText += "#" + " " * 32 + "#\n"
 
 	for i in range(5):
 		text[i] = "# "
@@ -192,7 +212,7 @@ def built_clock_string(timeCNBJ, timeUSCA, timeUKLD, timerM, timerS):
 			text[i] += ascii.numbers[0][i] + ascii.numbers[timerM][i]
 		else:
 			text[i] += ascii.numbers[int(timerM / 10)][i] + ascii.numbers[timerM % 10][i]
-		text[i] += ascii.coloum[i];
+		text[i] += ascii.coloum[i]
 		if timerS < 10:
 			text[i] += ascii.numbers[0][i] + ascii.numbers[timerS][i]
 		else:
@@ -204,7 +224,7 @@ def built_clock_string(timeCNBJ, timeUSCA, timeUKLD, timerM, timerS):
 	tempText += breakTimeText
 	tempText += codeblock + "ml\n"
 	tempText += "Last updated in \n" + timeCNBJ + timeUSCA + timeUKLD + codeblock
-	return tempText;
+	return tempText
 
 async def remind_me_in(minutes, member, message):
 	if(message != ""):
