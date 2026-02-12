@@ -15,10 +15,14 @@ with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
 
 # Use environment variable if available, otherwise use config
-api_key = os.getenv('OPENAI_API_KEY') or botConfig['OPENAI_API_KEY']
-client = OpenAI(api_key=api_key)
+# DeepSeek uses OpenAI-compatible API
+api_key = os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', '')
+client = OpenAI(
+    api_key=api_key,
+    base_url="https://api.deepseek.com"
+)
 
-AI_MODEL_NAME = "chatgpt"
+AI_MODEL_NAME = "deepseek"
 
 def _load_history_from_db(channelID):
     """Load chat history from database"""
@@ -32,7 +36,7 @@ def _load_history_from_db(channelID):
     
     return history
 
-def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo"):
+def queryDeepSeek(user_input, channelID, time, model="deepseek-chat"):
     # Load history from database
     history = _load_history_from_db(channelID)
     
@@ -41,7 +45,7 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo"):
     history.append(prompt)
     db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", user_input)
     
-    # Query ChatGPT
+    # Query DeepSeek
     params = {
         "messages": history,
         "model": model,
@@ -57,7 +61,7 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo"):
         
         return replied
     except Exception as e:
-        return f"ChatGPT error: {str(e)}"
+        return f"DeepSeek error: {str(e)}"
 
 
 def clearHistory(channelID):

@@ -1,0 +1,137 @@
+# Discord Study Bot - Quick Reference
+Use: $help <topic> for detailed info (chat, music, search, time, db)
+
+## Time & Reminders
+$time              Show current time
+$start             Start live clock
+$stop              Stop clock/timer
+$remindMeIn -t <min> -m <msg>   Set reminder
+
+## Music Player
+$music -i          Connect to voice
+$music -p          Play/pause
+$music -n/-prev    Next/previous song
+$music --name      Show current song
+
+## AI Chat
+$chat -s <msg>     Send to active LLM
+$chat -l <llm>     Set LLM (chatgpt/gemini/deepseek)
+$chat -m <model>   Set model
+$chat -p <0-3>     Set prompt preset
+$chat --listen     Toggle auto-respond mode
+$chat --models     List LLMs & models
+
+## Search
+$wolfram -q <query>    Wolfram Alpha
+$google -s <query>     Google Search
+
+## Database
+$db -s             View stats
+$db -e/-i          Export/import
+
+---DETAILED-HELP---
+
+=== CHAT ===
+# Unified AI Chat System
+
+Basic Usage:
+$chat                    Show current status
+$chat -s <message>       Send message (or --send)
+
+Configuration:
+$chat -l <name>          Set LLM: chatgpt, gemini, deepseek (or --llm)
+$chat -m <name>          Set model for current LLM (or --model)
+$chat --models           List all available LLMs and models
+$chat -st                Show configuration (or --status)
+
+Prompts:
+$chat -p list            List preset prompts (or --prompt)
+$chat -p show            Show current prompt
+$chat -p <0-3>           Set preset by index
+$chat -p set <text>      Set custom prompt
+
+History & Modes:
+$chat -c                 Clear chat history (or --clear)
+$chat --listen           Toggle listen mode (auto-respond to all messages)
+
+Command Chaining Examples:
+$chat -l gemini -m gemini-1.5-pro -s Hello
+$chat -c -l deepseek -p 2 -s Fresh start with custom prompt
+$chat -l chatgpt -m gpt-4 -p 0 -s Test
+
+Available LLMs:
+• chatgpt: gpt-3.5-turbo, gpt-4, gpt-4-turbo
+• gemini: gemini-2.0-flash-exp, gemini-2.5-pro, gemini-2.5-flash
+• deepseek: deepseek-chat, deepseek-reasoner
+
+Preset Prompts:
+• 0: Short Assistant (default)
+• 1: Blank
+• 2: Misaka Minoto
+• 3: Saber
+
+=== MUSIC ===
+# Music Player Commands
+
+Initialize:
+$music -i                Connect to your voice channel (or --init)
+
+Playback:
+$music -p                Play/resume (or --play)
+$music --pause           Pause playback
+$music -s                Stop and disconnect (or --stop)
+
+Navigation:
+$music -n                Next song (or --next)
+$music --prev            Previous song (or --previous)
+$music --name            Show current song name
+
+Legacy Format:
+Old commands still work: $music initialize, $music play, etc.
+
+=== SEARCH ===
+# Search & Computation
+
+Wolfram Alpha:
+$wolfram -q <query>      Query Wolfram Alpha (or --query)
+$wolfram <text>          Legacy format (no flag)
+
+Google Search:
+$google -s <query>       Search with SerpAPI (or --search, -q)
+$google <text>           Legacy format (no flag)
+
+Examples:
+$wolfram -q integrate x^2
+$google -s Python documentation
+
+=== TIME ===
+# Time & Reminders
+
+Time Display:
+$time                    Show current time (multiple timezones)
+$start                   Start live updating clock
+$stop                    Stop clock/timer display
+
+Reminders:
+$remindMeIn -t <minutes> -m <message>   Set reminder
+$remindMeIn --time 5 --message Break    Alternative format
+$remindMeIn 5 Take a break              Legacy format
+
+Examples:
+$remindMeIn -t 30 -m Review notes
+$start
+
+=== DB ===
+# Database Management
+
+Statistics:
+$db -s                   View database stats (or --stats)
+
+Backup:
+$db -e                   Export database to JSON (or --export)
+$db -i                   Import database from JSON (or --import)
+
+Legacy Commands:
+$dbStats, $dbExport, $dbImport still work
+
+

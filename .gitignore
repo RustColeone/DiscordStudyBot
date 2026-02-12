@@ -1,0 +1,41 @@
+# Configuration file with sensitive data
+config.yml
+
+# Database files
+bot_data.db
+bot_data.db-journal
+*.db
+*.db-journal
+bot_data_export.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

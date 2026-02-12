@@ -1,4 +1,5 @@
 import yaml
+import os
 from pprint import pprint
 import requests
 import urllib.parse
@@ -6,7 +7,8 @@ import urllib.parse
 with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
 
-appid = botConfig['WOLFRAM_APPID']
+# Use environment variable if available, otherwise use config
+appid = os.getenv('WOLFRAM_APPID') or botConfig['WOLFRAM_APPID']
 def queryWolfram(input):
     if input == None:
         input = "lifespan of a mosquito"
