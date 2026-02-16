@@ -60,7 +60,7 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
     chat_sessions[str(channelID)] = chat
     return chat
 
-def queryGemini(user_input, channelID, time, model="gemini-2.5-flash"):
+def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None):
     # Get or create chat session
     if str(channelID) not in chat_sessions:
         prompt_idx = _get_current_prompt_index(channelID)
@@ -68,12 +68,15 @@ def queryGemini(user_input, channelID, time, model="gemini-2.5-flash"):
     
     chat = chat_sessions[str(channelID)]
     
+    # Prepend username to message if provided
+    message_content = f"[{username}]: {user_input}" if username else user_input
+    
     # Save user message to database
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", user_input)
+    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
     
     try:
         response = chat.send_message(
-            user_input,
+            message_content,
             generation_config=genai.types.GenerationConfig(
                 max_output_tokens=500,
                 temperature=0.5,

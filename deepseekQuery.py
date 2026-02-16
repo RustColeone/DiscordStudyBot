@@ -36,14 +36,17 @@ def _load_history_from_db(channelID):
     
     return history
 
-def queryDeepSeek(user_input, channelID, time, model="deepseek-chat"):
+def queryDeepSeek(user_input, channelID, time, model="deepseek-chat", username=None):
     # Load history from database
     history = _load_history_from_db(channelID)
     
+    # Prepend username to message if provided
+    message_content = f"[{username}]: {user_input}" if username else user_input
+    
     # Add user message to history
-    prompt = {"role": "user", "content": user_input}
+    prompt = {"role": "user", "content": message_content}
     history.append(prompt)
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", user_input)
+    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
     
     # Query DeepSeek
     params = {

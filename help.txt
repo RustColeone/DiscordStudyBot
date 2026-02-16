@@ -1,5 +1,5 @@
 # Discord Study Bot - Quick Reference
-Use: $help <topic> for detailed info (chat, music, search, time, db)
+Use: $help <topic> for detailed info (chat, music, clip, search, bridge, time, db)
 
 ## Time & Reminders
 $time              Show current time
@@ -12,14 +12,29 @@ $music -i          Connect to voice
 $music -p          Play/pause
 $music -n/-prev    Next/previous song
 $music --name      Show current song
+$music -y "url"    Play YouTube (skip to it)
+$music -y "url" --queue   Queue without playing
 
 ## AI Chat
 $chat -s <msg>     Send to active LLM
 $chat -l <llm>     Set LLM (chatgpt/gemini/deepseek)
 $chat -m <model>   Set model
 $chat -p <0-3>     Set prompt preset
-$chat --listen     Toggle auto-respond mode
+$chat --listen on/off   Enable/disable auto-respond mode
 $chat --models     List LLMs & models
+
+## Bridge (External Apps)
+$bridge --init              Initialize bridge
+$bridge --send "msg"        Send message
+$bridge --listen on/off     Enable/disable auto-forward
+$bridge --status            Show status
+$bridge --disconnect        Close bridge
+
+## Video Clips
+$clip -u "url" -s 5 -e 15    Preview clip (5-15 seconds)
+$clip --format gif          Convert to GIF
+$clip --confirm             Process pending clips
+$clip --force               Skip preview, process now
 
 ## Search
 $wolfram -q <query>    Wolfram Alpha
@@ -52,7 +67,8 @@ $chat -p set <text>      Set custom prompt
 
 History & Modes:
 $chat -c                 Clear chat history (or --clear)
-$chat --listen           Toggle listen mode (auto-respond to all messages)
+$chat --listen on        Enable listen mode (auto-respond to all messages)
+$chat --listen off       Disable listen mode
 
 Command Chaining Examples:
 $chat -l gemini -m gemini-1.5-pro -s Hello
@@ -86,6 +102,21 @@ $music -n                Next song (or --next)
 $music --prev            Previous song (or --previous)
 $music --name            Show current song name
 
+YouTube Playback:
+$music -y <url>                Play YouTube video (or --youtube)
+$music -y "url1" "url2"        Add multiple, play first
+$music -y --queue "url1" "url2" Add multiple to queue
+
+Playlist Behavior:
+• YouTube URLs from -y command are added to runtime playlist only
+• Default: inserts after current song and skips to first one
+• With --queue: adds all to queue without interrupting current song
+• Multiple URLs are inserted in order after current position
+• Original musicList.txt is never modified by -y command
+• Add YouTube URLs directly to musicList.txt for permanent playlist
+• Mix local files and YouTube URLs in the same playlist
+• Navigate between local/YouTube tracks with --next/--prev
+
 Legacy Format:
 Old commands still work: $music initialize, $music play, etc.
 
@@ -103,6 +134,84 @@ $google <text>           Legacy format (no flag)
 Examples:
 $wolfram -q integrate x^2
 $google -s Python documentation
+
+=== BRIDGE ===
+# External App Bridge System
+
+The bridge system connects Discord to external applications (games, APIs, webhooks, etc.)
+
+Initialize & Connect:
+$bridge --init           Initialize the bridge connection
+
+Send Messages:
+$bridge --send "msg"     Send message to bridged app
+$bridge -s "msg"         Short form
+
+Auto-Forward Mode:
+$bridge --listen on      Enable auto-forward mode
+$bridge --listen off     Disable auto-forward mode
+                         When ON, all non-command messages are forwarded
+
+Status & Control:
+$bridge --status         Show connection status
+$bridge -st              Short form
+$bridge --disconnect     Close bridge connection
+
+Customization:
+This bot includes an example bridge. To create custom bridges (for games, Slack, etc.):
+1. Inherit from BridgedObject class (bridgeBase.py)
+2. Implement send_message(), initialize(), disconnect(), get_status()
+3. Update bridgeParser.py with your custom commands
+4. Replace ExampleBridge import in main.py
+
+Example: meiju_bridge.py shows game chat automation using pyautogui
+
+=== CLIP ===
+# Video Clip Extraction
+
+Extract clips from YouTube, Bilibili, and 1000+ other sites
+
+Basic Usage:
+$clip -u "url" -s <start> -e <end>    Preview clip
+$clip -u "url" -s 5 -e 15              Start at 5s, end at 15s
+$clip -u "url" -s 1:05 -e 1:15         Time format: MM:SS
+$clip -u "url" -s 5                    Start at 5s to end of video
+$clip -u "url" -e 30                   From beginning to 30s
+$clip -u "url"                         Entire video (if fits limit)
+
+Format Options:
+$clip -u "url" -s 0 -e 10 --format gif    Convert to GIF
+$clip -u "url" -s 0 -e 10 --format mp3    Extract audio only
+$clip -u "url" -s 0 -e 10 --format mp4    Video (default)
+
+Quality Control:
+$clip --resolution 720p       Set resolution (1080p/720p/480p/360p)
+$clip --fps 30                Set frame rate
+$clip --bitrate 1500k         Set video bitrate
+
+Multiple Clips:
+$clip -u "url1" -s 5 -e 15 -u "url2" -s 20 -e 30
+
+Workflow:
+1. Preview: Shows size estimate and quality options
+2. Adjust: Modify settings if over Discord limit
+3. Confirm: Process and upload
+
+Commands:
+$clip --confirm               Process pending clips
+$clip --confirm --skip 2      Skip clip 2
+$clip --clip 2 --resolution 720p   Adjust clip 2
+$clip --cancel                Cancel all pending
+$clip --force                 Skip preview, process immediately
+
+Size Limits:
+Auto-detected based on server boost:
+• No boost: 10MB
+• Level 2: 50MB
+• Level 3: 100MB
+
+Supported Sites:
+YouTube, Bilibili, Vimeo, Twitter/X, TikTok, Twitch, SoundCloud, and 1000+ more
 
 === TIME ===
 # Time & Reminders

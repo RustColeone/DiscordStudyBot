@@ -137,7 +137,7 @@ class ChatCommand:
         self.show_models: bool = False
         self.show_status: bool = False
         self.clear_history: bool = False
-        self.toggle_listen: bool = False
+        self.listen_mode: Optional[str] = None  # 'on', 'off', or None
         self.errors: List[str] = []
     
     def has_action(self) -> bool:
@@ -150,7 +150,7 @@ class ChatCommand:
             self.show_models or
             self.show_status or
             self.clear_history or
-            self.toggle_listen
+            self.listen_mode is not None
         )
 
 def parse_chat_command(command_text: str) -> ChatCommand:
@@ -165,7 +165,7 @@ def parse_chat_command(command_text: str) -> ChatCommand:
         --models                   Show all available LLMs and models
         --status, -st              Show current configuration
         --clear, -c                Clear chat history
-        --listen                   Toggle listen mode
+        --listen on/off            Enable or disable listen mode
     
     Examples:
         $chat --llm gemini --model gemini-1.5-pro --send Hello
@@ -268,8 +268,13 @@ def parse_chat_command(command_text: str) -> ChatCommand:
         
         # Listen flag
         elif token == '--listen':
-            cmd.toggle_listen = True
-            i += 1
+            value, consumed = _consume_value(tokens, i + 1)
+            if value and value.lower() in ['on', 'off']:
+                cmd.listen_mode = value.lower()
+                i += consumed
+            else:
+                cmd.errors.append("--listen requires 'on' or 'off'")
+                i += 1
         
         # Unknown flag
         else:
@@ -286,7 +291,9 @@ def parse_chat_command(command_text: str) -> ChatCommand:
 
 class MusicCommand:
     def __init__(self):
-        self.action: Optional[str] = None  # init, play, pause, stop, next, prev, name
+        self.action: Optional[str] = None  # init, play, pause, stop, next, prev, name, youtube
+        self.youtube_urls: List[str] = []  # YouTube URLs to play/queue
+        self.queue_only: bool = False  # If True, add to queue without playing
         self.errors: List[str] = []
     
     def has_action(self) -> bool:
@@ -304,11 +311,16 @@ def parse_music_command(command_text: str) -> MusicCommand:
         --next, -n                  Next song
         --prev, --previous          Previous song
         --name                      Show current song
+        --youtube, -y <url> [urls]  Play YouTube video(s) (default: skip to first)
+        --queue, --add-next         With -y: add to queue without playing
     
     Examples:
         $music --init
         $music -p
         $music --next
+        $music --youtube "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        $music -y "url1" "url2" "url3"           # Add multiple, play first
+        $music -y --queue "url1" "url2" "url3"  # Add multiple to queue
     """
     cmd = MusicCommand()
     
@@ -337,24 +349,48 @@ def parse_music_command(command_text: str) -> MusicCommand:
         return cmd
     
     tokens = _tokenize(text)
+    i = 0
     
-    for token in tokens:
+    while i < len(tokens):
+        token = tokens[i]
+        
         if token in ['--init', '--initialize', '-i']:
             cmd.action = 'init'
+            i += 1
         elif token in ['--play', '-p']:
             cmd.action = 'play'
+            i += 1
         elif token == '--pause':
             cmd.action = 'pause'
+            i += 1
         elif token in ['--stop', '-s']:
             cmd.action = 'stop'
+            i += 1
         elif token in ['--next', '-n']:
             cmd.action = 'next'
+            i += 1
         elif token in ['--prev', '--previous']:
             cmd.action = 'prev'
+            i += 1
         elif token == '--name':
             cmd.action = 'name'
+            i += 1
+        elif token in ['--youtube', '-y']:
+            cmd.action = 'youtube'
+            i += 1
+            # Consume all following tokens until we hit another flag
+            while i < len(tokens) and not (tokens[i].startswith('-') and len(tokens[i]) > 1 and not tokens[i][1].isdigit()):
+                cmd.youtube_urls.append(tokens[i])
+                i += 1
+            
+            if not cmd.youtube_urls:
+                cmd.errors.append("--youtube requires at least one URL")
+        elif token in ['--queue', '--add-next']:
+            cmd.queue_only = True
+            i += 1
         else:
             cmd.errors.append(f"Unknown flag: {token}")
+            i += 1
     
     return cmd
 
@@ -583,6 +619,170 @@ def parse_reminder_command(command_text: str) -> ReminderCommand:
             else:
                 cmd.errors.append("--message requires text")
                 i += 1
+        else:
+            cmd.errors.append(f"Unknown flag: {token}")
+            i += 1
+    
+    return cmd
+
+# ==================== Clip Commands ====================
+
+class ClipCommand:
+    def __init__(self):
+        self.urls: List[str] = []  # Can have multiple clips
+        self.starts: List[str] = []  # Corresponding start times
+        self.ends: List[str] = []    # Corresponding end times
+        self.resolution: Optional[str] = None
+        self.fps: Optional[int] = None
+        self.bitrate: Optional[str] = None
+        self.output_format: Optional[str] = None
+        self.force: bool = False  # Skip preview, process immediately
+        self.confirm: bool = False
+        self.cancel: bool = False
+        self.clip_index: Optional[int] = None  # For updating specific clip
+        self.skip_indices: List[int] = []  # Clips to skip when confirming
+        self.errors: List[str] = []
+
+def parse_clip_command(command_text: str) -> ClipCommand:
+    """
+    Parse $clip command
+    
+    Flags:
+        --url, -u <url>              Video URL (can specify multiple)
+        --start, -s <time>           Start time (seconds or MM:SS)
+        --end, -e <time>             End time (seconds or MM:SS)
+        --resolution, -r <res>       Resolution (1080p, 720p, 480p, 360p)
+        --fps <fps>                  Frames per second
+        --bitrate, -b <rate>         Video bitrate (e.g., 2500k, 1500k)
+        --format, -f <fmt>           Output format (mp4, gif, mp3, etc.)
+        --force                      Skip preview, process immediately
+        --confirm                    Confirm and process pending clips
+        --cancel                     Cancel pending clips
+        --clip <index>               Modify specific clip (1-based)
+        --skip <index>               Skip clip when confirming
+    
+    Examples:
+        $clip -u "url" -s 5 -e 15
+        $clip -u "url" -s 1:05 -e 1:15 --format gif
+        $clip -u "url1" -s 5 -e 15 -u "url2" -s 20 -e 30
+        $clip --resolution 720p --clip 2
+        $clip --confirm
+        $clip --confirm --skip 2
+        $clip -u "url" -s 5 -e 15 --force
+    """
+    cmd = ClipCommand()
+    
+    text = command_text.strip()
+    if text.startswith('$clip'):
+        text = text[5:].strip()
+    
+    if not text:
+        cmd.errors.append("No parameters provided")
+        return cmd
+    
+    tokens = _tokenize(text)
+    i = 0
+    
+    while i < len(tokens):
+        token = tokens[i]
+        
+        if token in ['--url', '-u']:
+            if i + 1 < len(tokens):
+                cmd.urls.append(tokens[i + 1])
+                # Check if we have start/end times following
+                i += 2
+            else:
+                cmd.errors.append("--url requires a URL")
+                i += 1
+        
+        elif token in ['--start', '-s']:
+            if i + 1 < len(tokens):
+                cmd.starts.append(tokens[i + 1])
+                i += 2
+            else:
+                cmd.errors.append("--start requires a time value")
+                i += 1
+        
+        elif token in ['--end', '-e']:
+            if i + 1 < len(tokens):
+                cmd.ends.append(tokens[i + 1])
+                i += 2
+            else:
+                cmd.errors.append("--end requires a time value")
+                i += 1
+        
+        elif token in ['--resolution', '-r']:
+            if i + 1 < len(tokens):
+                cmd.resolution = tokens[i + 1]
+                i += 2
+            else:
+                cmd.errors.append("--resolution requires a value")
+                i += 1
+        
+        elif token == '--fps':
+            if i + 1 < len(tokens):
+                try:
+                    cmd.fps = int(tokens[i + 1])
+                    i += 2
+                except ValueError:
+                    cmd.errors.append("--fps requires a number")
+                    i += 1
+            else:
+                cmd.errors.append("--fps requires a value")
+                i += 1
+        
+        elif token in ['--bitrate', '-b']:
+            if i + 1 < len(tokens):
+                cmd.bitrate = tokens[i + 1]
+                i += 2
+            else:
+                cmd.errors.append("--bitrate requires a value")
+                i += 1
+        
+        elif token in ['--format', '-f']:
+            if i + 1 < len(tokens):
+                cmd.output_format = tokens[i + 1]
+                i += 2
+            else:
+                cmd.errors.append("--format requires a value")
+                i += 1
+        
+        elif token == '--force':
+            cmd.force = True
+            i += 1
+        
+        elif token == '--confirm':
+            cmd.confirm = True
+            i += 1
+        
+        elif token == '--cancel':
+            cmd.cancel = True
+            i += 1
+        
+        elif token == '--clip':
+            if i + 1 < len(tokens):
+                try:
+                    cmd.clip_index = int(tokens[i + 1]) - 1  # Convert to 0-based
+                    i += 2
+                except ValueError:
+                    cmd.errors.append("--clip requires a number")
+                    i += 1
+            else:
+                cmd.errors.append("--clip requires an index")
+                i += 1
+        
+        elif token == '--skip':
+            if i + 1 < len(tokens):
+                try:
+                    cmd.skip_indices.append(int(tokens[i + 1]) - 1)  # Convert to 0-based
+                    i += 2
+                except ValueError:
+                    cmd.errors.append("--skip requires a number")
+                    i += 1
+            else:
+                cmd.errors.append("--skip requires an index")
+                i += 1
+        
         else:
             cmd.errors.append(f"Unknown flag: {token}")
             i += 1

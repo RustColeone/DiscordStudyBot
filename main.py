@@ -10,12 +10,22 @@ import ascii
 import wolframQuery
 import unifiedChat
 import googleQuery
+import clipQuery
 import pathlib
 import database as db
 from commandParsers import (
     parse_chat_command, parse_music_command, parse_wolfram_command, 
-    parse_google_command, parse_db_command, parse_reminder_command
+    parse_google_command, parse_db_command, parse_reminder_command, parse_clip_command
 )
+
+# Bridge system (optional - users can customize)
+try:
+    from bridgeParser import parse_bridge_command
+    from exampleBridge import ExampleBridge
+    BRIDGE_AVAILABLE = True
+except ImportError:
+    BRIDGE_AVAILABLE = False
+    print("Bridge system not configured. Create bridgeParser.py to enable $bridge commands.")
 
 from wolframclient.evaluation import WolframLanguageSession
 from wolframclient.language import wl, wlexpr
@@ -61,6 +71,12 @@ voice_channel = None
 voice_chat = None
 playNext = True
 
+# Runtime playlist (can include temporary YouTube URLs)
+runtime_playlist = playList.copy()  # Start with file-based playlist
+
+# Bridge instances (per channel)
+bridge_instances = {}  # channel_id -> BridgedObject
+
 @bot.event
 async def on_ready():
 	global voice_channel
@@ -87,12 +103,24 @@ async def on_message(message):
 	
 	# Check if listen mode is enabled and message is not a command
 	if not msgText.startswith('$'):
-		settings = db.get_channel_settings(str(message.channel.id))
+		channel_id = str(message.channel.id)
+		
+		# Check LLM listen mode
+		settings = db.get_channel_settings(channel_id)
 		if settings["listen_mode"]:
-			# Pass message to LLM
-			ans = unifiedChat.query_chat(msgText, message.channel.id, message.created_at)
+			# Pass message to LLM with username
+			ans = unifiedChat.query_chat(msgText, message.channel.id, message.created_at, message.author.display_name)
 			await message.channel.send(ans)
 			return
+		
+		# Check bridge listen mode
+		if BRIDGE_AVAILABLE and channel_id in bridge_instances:
+			bridge = bridge_instances[channel_id]
+			if bridge.is_listening():
+				reply = await bridge.send_message(msgText)
+				if reply:
+					await message.channel.send(reply)
+				return
 	
 	# Command handling
 	if msgText.startswith('$help'):
@@ -165,6 +193,285 @@ async def on_message(message):
 		except:
 			await message.channel.send('without messages')
 		bot.loop.create_task((remind_me_in(timerMinutes, message.author, msg)))
+	
+	elif msgText.startswith('$clip'):
+		cmd = parse_clip_command(msgText)
+		if cmd.errors:
+			await message.channel.send("❌ " + "\n".join(cmd.errors))
+			return
+		
+		channel_id = str(message.channel.id)
+		
+		# Cancel pending clips
+		if cmd.cancel:
+			clipQuery.clear_pending_clips(channel_id)
+			await message.channel.send("🗑️ Cancelled pending clips")
+			return
+		
+		# Confirm and process pending clips
+		if cmd.confirm:
+			pending = clipQuery.get_pending_clips(channel_id)
+			if not pending:
+				await message.channel.send("❌ No pending clips to process")
+				return
+			
+			# Filter out skipped clips
+			clips_to_process = [clip for i, clip in enumerate(pending) if i not in cmd.skip_indices]
+			
+			if not clips_to_process:
+				await message.channel.send("❌ All clips were skipped")
+				return
+			
+			await message.channel.send(f"🎬 Processing {len(clips_to_process)} clip(s)... (this may take some time)")
+			
+			import tempfile
+			for i, clip in enumerate(clips_to_process, 1):
+				try:
+					# Create temp file
+					ext = clip.output_format or 'mp4'
+					with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
+						temp_path = tmp.name
+					
+					# Process clip
+					success = await clipQuery.create_clip(clip, temp_path)
+					
+					if success and os.path.exists(temp_path):
+						# Check file size
+						file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+						
+						# Upload to Discord
+						with open(temp_path, 'rb') as f:
+							await message.channel.send(
+								f"📹 Clip {i}/{len(clips_to_process)}: {clip.video_title} ({file_size_mb:.2f}MB)",
+								file=discord.File(f, filename=f"clip_{i}.{ext}")
+							)
+					else:
+						await message.channel.send(f"❌ Failed to process clip {i}")
+					
+				except Exception as e:
+					await message.channel.send(f"❌ Error processing clip {i}: {str(e)}")
+					print(f"Clip error: {e}")
+				
+				finally:
+					# Clean up temp file
+					try:
+						if os.path.exists(temp_path):
+							os.remove(temp_path)
+					except:
+						pass
+			
+			# Clear pending clips
+			clipQuery.clear_pending_clips(channel_id)
+			await message.channel.send("✅ All clips processed")
+			return
+		
+		# Update existing clip settings
+		# If no clip index specified but quality settings provided, default to clip 1
+		has_quality_settings = any([cmd.resolution, cmd.fps, cmd.bitrate, cmd.output_format])
+		
+		if cmd.clip_index is not None or (has_quality_settings and not cmd.urls):
+			pending = clipQuery.get_pending_clips(channel_id)
+			if not pending:
+				await message.channel.send("❌ No pending clips to modify")
+				return
+			
+			# Default to first clip if not specified
+			clip_idx = cmd.clip_index if cmd.clip_index is not None else 0
+			
+			if clip_idx >= len(pending):
+				await message.channel.send(f"❌ Invalid clip index. You have {len(pending)} pending clip(s)")
+				return
+			
+			# Update settings
+			updates = {}
+			if cmd.resolution:
+				updates['resolution'] = cmd.resolution
+			if cmd.fps:
+				updates['fps'] = cmd.fps
+			if cmd.bitrate:
+				updates['bitrate'] = cmd.bitrate
+			if cmd.output_format:
+				updates['output_format'] = cmd.output_format
+			
+			clipQuery.update_clip_setting(channel_id, clip_idx, **updates)
+			
+			# Show updated preview with what changed
+			clip = pending[clip_idx]
+			duration = clip.end - clip.start
+			max_size = clipQuery.get_discord_size_limit(message.guild.premium_tier if message.guild else 0)
+			quality_opts = clipQuery.get_quality_options(duration, max_size, clip.output_format or 'mp4')
+			
+			status = "✅" if clip.estimated_size_mb <= max_size else "⚠️"
+			
+			# Build feedback message
+			changes = []
+			if cmd.resolution:
+				changes.append(f"resolution → {cmd.resolution}")
+			if cmd.fps:
+				changes.append(f"fps → {cmd.fps}")
+			if cmd.bitrate:
+				changes.append(f"bitrate → {cmd.bitrate}")
+			if cmd.output_format:
+				changes.append(f"format → {cmd.output_format}")
+			
+			msg = f"📊 Updated Clip {clip_idx + 1}:\n"
+			if changes:
+				msg += f"Changes: {', '.join(changes)}\n"
+			msg += f"Settings: {clip.resolution} @ {clip.bitrate} ({clip.fps}fps)\n"
+			msg += f"{status} **Estimated size: {clip.estimated_size_mb:.2f}MB** (limit: {max_size}MB)\n\n"
+			msg += "Quality options:\n"
+			for opt in quality_opts:
+				fit = "✅" if opt.estimated_size_mb <= max_size else "❌"
+				msg += f"{opt.label}) {opt.resolution} @ {opt.bitrate} ({opt.fps}fps) → ~{opt.estimated_size_mb:.2f}MB {fit}\n"
+			
+			await message.channel.send(msg)
+			return
+		
+		# Create new clip(s)
+		if cmd.urls:
+			# Validate we have at least one URL
+			if not cmd.urls:
+				await message.channel.send("❌ No URL provided")
+				return
+			
+			await message.channel.send("🔍 Fetching video information...")
+			
+			clips = []
+			max_size = clipQuery.get_discord_size_limit(message.guild.premium_tier if message.guild else 0)
+			
+			for idx, url in enumerate(cmd.urls):
+				try:
+					# Get video info first to get duration
+					title, site, full_duration = await clipQuery.get_video_info(url)
+					
+					# Parse times with defaults
+					# If no start specified for this clip, default to 0
+					# If no end specified for this clip, default to video end
+					if idx < len(cmd.starts):
+						start = clipQuery.parse_time(cmd.starts[idx])
+					else:
+						start = 0  # Default to beginning
+					
+					if idx < len(cmd.ends):
+						end = clipQuery.parse_time(cmd.ends[idx])
+					else:
+						end = full_duration  # Default to end of video
+					
+					if end <= start:
+						await message.channel.send(f"❌ End time must be after start time for URL: {url}")
+						continue
+					
+					# Clip end at video duration if exceeds
+					if end > full_duration:
+						end = full_duration
+					
+					# Create clip spec with default settings
+					duration = end - start
+					default_format = cmd.output_format or 'mp4'
+					quality_opts = clipQuery.get_quality_options(duration, max_size, default_format)
+					
+					# Use best quality that fits
+					best_opt = quality_opts[0] if quality_opts else clipQuery.QualityOption("720p", "1500k", 30, 0, "A")
+					
+					clip = clipQuery.ClipSpec(
+						url=url,
+						start=start,
+						end=end,
+						resolution=cmd.resolution or best_opt.resolution,
+						fps=cmd.fps or best_opt.fps,
+						bitrate=cmd.bitrate or best_opt.bitrate,
+						output_format=default_format,
+						video_title=title,
+						source_site=site
+					)
+					
+					# Calculate estimated size
+					is_audio = default_format.lower() in ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac']
+					clip.estimated_size_mb = clipQuery.estimate_clip_size(
+						duration,
+						clip.resolution,
+						clip.bitrate,
+						clip.fps,
+						not (default_format == 'gif' or is_audio)
+					)
+					
+					clips.append(clip)
+					
+				except Exception as e:
+					await message.channel.send(f"❌ Error processing URL {url}: {str(e)}")
+					continue
+			
+			if not clips:
+				await message.channel.send("❌ No valid clips to process")
+				return
+			
+			# Force mode: process immediately
+			if cmd.force:
+				await message.channel.send(f"🎬 Processing {len(clips)} clip(s) immediately...")
+				
+				import tempfile
+				for i, clip in enumerate(clips, 1):
+					try:
+						ext = clip.output_format or 'mp4'
+						with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
+							temp_path = tmp.name
+						
+						success = await clipQuery.create_clip(clip, temp_path)
+						
+						if success and os.path.exists(temp_path):
+							file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
+							with open(temp_path, 'rb') as f:
+								await message.channel.send(
+									f"📹 Clip {i}: {clip.video_title} ({file_size_mb:.2f}MB)",
+									file=discord.File(f, filename=f"clip_{i}.{ext}")
+								)
+						else:
+							await message.channel.send(f"❌ Failed to process clip {i}")
+					
+					except Exception as e:
+						await message.channel.send(f"❌ Error: {str(e)}")
+					
+					finally:
+						try:
+							if os.path.exists(temp_path):
+								os.remove(temp_path)
+						except:
+							pass
+				
+				return
+			
+			# Preview mode: show estimates and quality options
+			clipQuery.store_pending_clips(channel_id, clips)
+			
+			msg = f"📊 **Clip Preview** (Discord limit: {max_size}MB)\n\n"
+			
+			for i, clip in enumerate(clips, 1):
+				duration = clip.end - clip.start
+				status = "✅" if clip.estimated_size_mb <= max_size else "⚠️"
+				
+				msg += f"**Clip {i}:** {status}\n"
+				msg += f"Source: {clip.video_title} - {clip.source_site}\n"
+				msg += f"Duration: {duration:.1f}s ({clipQuery.format_time(clip.start)} → {clipQuery.format_time(clip.end)})\n"
+				msg += f"Selected: {clip.resolution} @ {clip.bitrate} ({clip.fps}fps)\n"
+				msg += f"Estimated: **{clip.estimated_size_mb:.2f}MB**\n"
+				
+				# Show quality options
+				quality_opts = clipQuery.get_quality_options(duration, max_size, clip.output_format)
+				msg += "Options:\n"
+				for opt in quality_opts:
+					fit = "✅" if opt.estimated_size_mb <= max_size else "❌"
+					msg += f"  {opt.label}) {opt.resolution} @ {opt.bitrate} ({opt.fps}fps) → ~{opt.estimated_size_mb:.2f}MB {fit}\n"
+				
+				msg += "\n"
+			
+			msg += "**Commands:**\n"
+			msg += "`$clip --confirm` - Process all clips\n"
+			msg += "`$clip --clip <N> --resolution 720p` - Adjust clip N\n"
+			msg += "`$clip --confirm --skip <N>` - Skip clip N\n"
+			msg += "`$clip --cancel` - Cancel all\n"
+			
+			await message.channel.send(msg)
+			return
 	elif msgText.startswith('$broadcast'):
 		await channel1.send(message.content.replace('/broadcast ',''))
 	elif msgText.startswith('$music'):
@@ -178,6 +485,90 @@ async def on_message(message):
 		if action == "playTest":
 			await playMusicTest(voice_channel)
 			await message.channel.send('Music Started testing')
+		elif action == "youtube":
+			# Play/queue YouTube URL(s)
+			if not cmd.youtube_urls:
+				await message.channel.send('❌ No YouTube URL provided')
+				return
+			
+			global runtime_playlist, song_index
+			
+			if voice_chat is None or not voice_chat.is_connected():
+				# Check if user is in a voice channel
+				if message.author.voice is None:
+					await message.channel.send('You need to be in a voice channel first!')
+					return
+				
+				user_voice_channel = message.author.voice.channel
+				voice_chat = await user_voice_channel.connect()
+			
+			try:
+				import yt_dlp
+				
+				url_count = len(cmd.youtube_urls)
+				if url_count > 1:
+					await message.channel.send(f'🔍 Fetching {url_count} YouTube videos...')
+				else:
+					await message.channel.send('🔍 Fetching YouTube video...')
+				
+				# Quick validation
+				YTDL_OPTIONS = {
+					'format': 'bestaudio/best',
+					'postprocessors': [{
+						'key': 'FFmpegExtractAudio',
+						'preferredcodec': 'opus',
+					}],
+					'noplaylist': True,
+					'quiet': True,
+					'no_warnings': True,
+				}
+				
+				added_titles = []
+				insert_position = song_index + 1
+				
+				with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+					for idx, url in enumerate(cmd.youtube_urls):
+						try:
+							info = ydl.extract_info(url, download=False)
+							title = info.get('title', 'Unknown')
+							added_titles.append(title)
+							
+							# Insert into runtime playlist
+							if insert_position <= len(runtime_playlist):
+								runtime_playlist.insert(insert_position + idx, url)
+							else:
+								runtime_playlist.append(url)
+								
+						except Exception as e:
+							await message.channel.send(f'⚠️ Failed to add URL {idx+1}: {str(e)}')
+							continue
+				
+				if not added_titles:
+					await message.channel.send('❌ All URLs failed to load')
+					return
+				
+				if cmd.queue_only:
+					# Just add to queue, don't play
+					if len(added_titles) == 1:
+						await message.channel.send(f'➕ Added to queue: **{added_titles[0]}**')
+					else:
+						await message.channel.send(f'➕ Added {len(added_titles)} videos to queue:\n' + '\n'.join([f'{i+1}. {t}' for i, t in enumerate(added_titles)]))
+				else:
+					# Skip to the first newly added song
+					if voice_chat.is_playing():
+						voice_chat.stop()
+					
+					song_index = insert_position
+					selectMusic(song_index)
+					
+					if len(added_titles) == 1:
+						await message.channel.send(f'🎵 Now playing: **{added_titles[0]}**')
+					else:
+						await message.channel.send(f'🎵 Now playing: **{added_titles[0]}**\n➕ Added {len(added_titles)-1} more to queue')
+					
+			except Exception as e:
+				await message.channel.send(f'❌ Error processing YouTube videos: {str(e)}')
+				print(f"YouTube playback error: {e}")
 		elif action == "init":
 			# Check if user is in a voice channel
 			if message.author.voice is None:
@@ -243,6 +634,75 @@ async def on_message(message):
 			await playMusic(False)
 			previous()
 			await playMusic(True)
+	
+	elif msgText.startswith('$bridge') and BRIDGE_AVAILABLE:
+		cmd = parse_bridge_command(msgText)
+		if cmd.errors:
+			await message.channel.send("❌ " + "\n".join(cmd.errors))
+			return
+		
+		channel_id = str(message.channel.id)
+		
+		# Get or create bridge instance for this channel
+		if channel_id not in bridge_instances:
+			bridge_instances[channel_id] = ExampleBridge(channel_id)
+		bridge = bridge_instances[channel_id]
+		
+		# Handle listen mode setting
+		if cmd.toggle_listen:
+			# toggle_listen is actually listen_mode in bridge command
+			# This needs to be updated in bridgeParser.py if it exists
+			if hasattr(cmd, 'listen_mode'):
+				if cmd.listen_mode == 'on':
+					bridge.set_listen_mode(True)
+					status = "🟢 ON"
+					await message.channel.send(f"Bridge listen mode: {status}")
+					await message.channel.send("💡 Non-command messages will be forwarded to the bridge")
+				elif cmd.listen_mode == 'off':
+					bridge.set_listen_mode(False)
+					status = "🔴 OFF"
+					await message.channel.send(f"Bridge listen mode: {status}")
+			else:
+				# Fallback to toggle if listen_mode not available
+				bridge.set_listen_mode(not bridge.is_listening())
+				status = "🟢 ON" if bridge.is_listening() else "🔴 OFF"
+				await message.channel.send(f"Bridge listen mode: {status}")
+				if bridge.is_listening():
+					await message.channel.send("💡 Non-command messages will be forwarded to the bridge")
+			return
+		
+		# Handle show status
+		if cmd.show_status:
+			status_msg = bridge.get_status()
+			await message.channel.send(status_msg)
+			return
+		
+		# Handle actions
+		if cmd.action == "init":
+			success = await bridge.initialize()
+			if success:
+				await message.channel.send("✅ Bridge initialized successfully")
+			else:
+				await message.channel.send("❌ Failed to initialize bridge")
+		
+		elif cmd.action == "send":
+			if not cmd.message:
+				await message.channel.send("❌ No message provided. Use --send \"your message\"")
+				return
+			reply = await bridge.send_message(cmd.message)
+			if reply:
+				await message.channel.send(f"📨 Reply: {reply}")
+			else:
+				await message.channel.send("✅ Message sent")
+		
+		elif cmd.action == "disconnect":
+			success = await bridge.disconnect()
+			if success:
+				# Remove bridge instance
+				del bridge_instances[channel_id]
+				await message.channel.send("✅ Bridge disconnected")
+			else:
+				await message.channel.send("❌ Failed to disconnect bridge")
 	
 	elif msgText.startswith('$wolfram'):
 		cmd = parse_wolfram_command(msgText)
@@ -325,12 +785,13 @@ async def on_message(message):
 			unifiedChat.clear_history(message.channel.id)
 			responses.append("✅ Chat history cleared")
 		
-		# 5. Toggle listen mode
-		if cmd.toggle_listen:
-			new_state = db.toggle_listen_mode(str(message.channel.id))
-			if new_state:
+		# 5. Set listen mode
+		if cmd.listen_mode:
+			if cmd.listen_mode == 'on':
+				db.set_listen_mode(str(message.channel.id), True)
 				responses.append("🟢 **Listen mode enabled**\nI'll respond to all your messages (except $ commands)")
-			else:
+			elif cmd.listen_mode == 'off':
+				db.set_listen_mode(str(message.channel.id), False)
 				responses.append("🔴 **Listen mode disabled**\nUse `$chat --send <message>` to chat")
 		
 		# 6. Send message
@@ -443,11 +904,38 @@ def selectMusic(index):
 	global song_index
 	global discord_music
 	global voice_chat
+	global runtime_playlist
 
 	song_index = index
-	song_current = playList[song_index]
-	#print(song_index)
-	discord_music = discord.FFmpegPCMAudio(source = "music\\" + song_current)
+	song_current = runtime_playlist[song_index]
+	
+	# Check if it's a YouTube URL
+	if song_current.startswith('http://') or song_current.startswith('https://'):
+		# YouTube URL - use yt-dlp
+		YTDL_OPTIONS = {
+			'format': 'bestaudio/best',
+			'postprocessors': [{
+				'key': 'FFmpegExtractAudio',
+				'preferredcodec': 'opus',
+			}],
+			'noplaylist': True,
+			'quiet': True,
+			'no_warnings': True,
+		}
+		FFMPEG_OPTIONS = {
+			'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+			'options': '-vn'
+		}
+		
+		import yt_dlp
+		with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
+			info = ydl.extract_info(song_current, download=False)
+			url = info['url']
+			discord_music = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
+	else:
+		# Local file
+		discord_music = discord.FFmpegPCMAudio(source = "music\\" + song_current)
+	
 	if voice_chat and voice_chat.is_connected():
 		voice_chat.play(discord_music, after=lambda e: next())
 	else:
@@ -476,10 +964,11 @@ def previous():
 	selectMusic(clamp(song_index))
 
 def clamp(number):
-	length = len(playList)
+	global runtime_playlist
+	length = len(runtime_playlist)
 	if (number < 1):
 		number = number + length - 1
-	if (number >= len(playList)):
+	if (number >= len(runtime_playlist)):
 		number = number - length + 1
 	return number
 

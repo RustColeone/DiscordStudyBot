@@ -23,9 +23,27 @@ A powerful multi-functional Discord bot with unified AI chat interface (ChatGPT,
 
 ### 🎵 Music Player
 - Play local music files with professional CLI commands
+- **YouTube playback**: Stream audio from YouTube videos
+- **Mixed playlists**: Combine local files and YouTube URLs
 - Queue management with navigation
 - Playback controls (play, pause, stop, next, previous)
 - Persistent state across bot restarts
+
+### 🌉 Bridge System (External App Integration)
+- **Extensible plugin architecture** for connecting Discord to external apps
+- **Listen mode**: Auto-forward messages to bridged applications
+- **Built-in examples**: Game chat automation, API webhooks
+- **Easy customization**: Inherit base class and define your commands
+- **Per-channel bridges**: Each channel can have its own bridge instance
+
+### 🎬 Video Clip Extraction
+- **Extract clips from 1000+ sites**: YouTube, Bilibili, Vimeo, TikTok, Twitter, Twitch, etc.
+- **Smart size management**: Auto-detects Discord limits (10/50/100MB based on boost level)
+- **Quality options**: Automatically suggests optimal settings to fit size limits
+- **Multiple formats**: MP4, GIF, MP3, and more with format inference
+- **Batch processing**: Queue multiple clips in one command
+- **Two-phase workflow**: Preview size estimates before processing
+- **No local storage**: Clips processed in temp files and auto-deleted
 
 ### ⏰ Time & Reminders
 - M📋 Requirements
@@ -33,8 +51,9 @@ A powerful multi-functional Discord bot with unified AI chat interface (ChatGPT,
 - Discord.py 2.x
 - OpenAI Python SDK 1.x (for ChatGPT)
 - Google Generative AI SDK (for Gemini)
+- yt-dlp (for YouTube playback)
 - WolframLanguage installed (optional, for math queries)
-- FFmpeg (optional, for music playback)
+- FFmpeg (required for music playback)
 
 ## 🚀 Setup
 
@@ -208,7 +227,7 @@ $chat --models                    # 查看所有可用模型
 $chat -p 2                        # 切换到 Misaka Minoto
 $chat -p 3                        # 切换到 Saber
 $chat -c                          # 清除聊天历史
-$chat --listen                    # 切换监听模式（自动回复）
+$chat --listen on                 # 开启监听模式（自动回复）
 ```
 
 ### 其他命令
@@ -309,11 +328,11 @@ $chat -l chatgpt -m gpt-4 -p 3 -s "Are you my master?"
 When enabled, the bot auto-responds to ALL messages (no `$` needed):
 
 ```bash
-$chat --listen                     # Toggle ON/OFF
+$chat --listen on                  # Enable listen mode
 # Now just type normally:
 Hello bot!                         # Bot will respond
 How's the weather?                 # Bot will respond
-$chat --listen                     # Turn OFF
+$chat --listen off                 # Disable listen mode
 ```
 
 **Note**: Each channel has its own LLM settings and chat history!
@@ -343,9 +362,318 @@ $music --prev                      # Previous song
 $music --previous                  # Long form
 
 $music --name                      # Show current song name
+
+# YouTube Playback
+$music -y "https://youtube.com/watch?v=xxx"           # Play immediately (default)
+$music --youtube "video_url"                          # Long form
+$music -y "url1" "url2" "url3"                       # Add multiple, play first
+$music -y --queue "url1" "url2"                      # Add multiple to queue
+$music -y "url" --add-next                            # Alternative flag
 ```
 
+**YouTube Support**:
+- **Instant playback**: `-y "url"` inserts after current song and skips to it immediately
+- **Multiple URLs**: `-y "url1" "url2" "url3"` adds all URLs, plays the first one
+- **Queue mode**: `-y --queue "url1" "url2"` adds all to queue without interrupting current song
+- **Runtime playlist**: YouTube URLs from `-y` command are temporary (not saved to file)
+- **Persistent playlist**: Add YouTube URLs to `musicList.txt` for permanent storage
+- Mix local files and YouTube URLs in the same playlist
+- Example `musicList.txt`:
+  ```
+  Soft Piano Music.mp3
+  https://www.youtube.com/watch?v=dQw4w9WgXcQ
+  Another Song.mp3
+  https://youtu.be/jNQXAC9IVRw
+  ```
+
+**Behavior Examples**:
+```bash
+# Currently playing song #2
+$music -y "url"                  # Inserts as #3, skips to it immediately
+$music -y "url1" "url2" "url3"  # Inserts as #3,#4,#5, plays #3
+$music -y --queue "url"          # Inserts as #3, continues playing #2
+$music -y --queue "url1" "url2" # Inserts as #3,#4, continues playing #2
+
 **Legacy format still supported**: `$music initialize`, `$music play`, etc.
+
+---
+
+## 🌉 Bridge System (External App Integration)
+
+The bridge system allows you to connect Discord to external applications like games, APIs, webhooks, or any other service.
+
+### Basic Usage
+
+```bash
+$bridge --init                     # Initialize bridge connection
+$bridge --send "Hello game!"       # Send message to bridged app
+$bridge -s "Quick message"         # Short form
+
+$bridge --listen on/off            # Enable/disable auto-forward mode
+                                   # When ON: all non-command messages forwarded
+
+$bridge --status                   # Show connection status
+$bridge -st                        # Short form
+
+$bridge --disconnect               # Close bridge connection
+```
+
+### Listen Mode
+
+When listen mode is enabled, all messages in the channel (except commands starting with `$`) are automatically forwarded to the bridged application:
+
+```
+[Discord] User: "attack goblin"
+          → Forwarded to game via bridge
+[Game]    → "You attacked goblin for 50 damage"
+          → Sent back to Discord
+```
+
+### Creating Custom Bridges
+
+The bot includes an **extensible plugin architecture** for custom bridges:
+
+#### 1. Inherit from `BridgedObject`
+
+```python
+# myGameBridge.py
+from bridgeBase import BridgedObject
+
+class GameBridge(BridgedObject):
+    async def initialize(self):
+        """Connect to game API/window"""
+        # Your connection logic
+        return True
+    
+    async def send_message(self, message):
+        """Send message to game and return response"""
+        # Your send logic
+        return "Game response"
+    
+    async def disconnect(self):
+        """Cleanup and disconnect"""
+        # Your cleanup logic
+        return True
+    
+    def get_status(self):
+        """Return status string"""
+        return "🟢 Connected to Game"
+```
+
+#### 2. Define Commands in `bridgeParser.py`
+
+```python
+# bridgeParser.py
+from dataclasses import dataclass
+from commandParsers import _tokenize
+
+@dataclass
+class BridgeCommand:
+    action: str = None          # "init", "send", "disconnect"
+    message: str = None         # Message to send
+    listen_mode: Optional[str] = None  # 'on', 'off', or None
+    show_status: bool = False   # Show status
+    errors: list = None         # Parse errors
+
+def parse_bridge_command(text):
+    # Your command parsing logic
+    # See bridgeParser.py.example for template
+    pass
+```
+
+#### 3. Update `main.py` Import
+
+```python
+# main.py (top of file)
+try:
+    from bridgeParser import parse_bridge_command
+    from myGameBridge import GameBridge as ExampleBridge  # Replace this
+    BRIDGE_AVAILABLE = True
+except ImportError:
+    BRIDGE_AVAILABLE = False
+```
+
+### Example: Game Chat Bridge
+
+The bot includes `meiju_bridge.py` as a reference implementation showing:
+- Window activation (bring game to foreground)
+- Clipboard automation (paste text into game chat)
+- Keyboard simulation (send Enter key)
+- Response polling (read game chat output)
+
+This demonstrates how to integrate with any desktop application using pyautogui.
+
+### File Structure
+
+```
+bridgeBase.py              # Abstract base class (DO NOT EDIT)
+bridgeParser.py.example    # Template for command parser
+exampleBridge.py           # Reference implementation
+meiju_bridge.py            # Example: game chat automation (gitignored)
+myCustomBridge.py          # Your custom bridges (gitignored)
+```
+
+**Note**: Custom bridge implementations (except `exampleBridge.py`) are automatically gitignored for privacy.
+
+---
+
+## 🎬 Video Clip Extraction Commands
+
+Extract and share video clips from YouTube, Bilibili, and 1000+ other sites supported by yt-dlp.
+
+### Basic Usage
+
+```bash
+# Preview clip (recommended workflow)
+$clip -u "video_url" -s 5 -e 15
+→ Shows size estimate and quality options
+
+# Start/end times are optional
+$clip -u "url" -s 5          # From 5s to end of video
+$clip -u "url" -e 30         # From beginning to 30s
+$clip -u "url"               # Entire video (if fits limit)
+
+# Confirm and process
+$clip --confirm
+
+# One-line force (skip preview)
+$clip -u "url" -s 5 -e 15 --force
+```
+
+### Time Formats
+
+Both formats supported:
+```bash
+$clip -u "url" -s 65 -e 80        # Seconds
+$clip -u "url" -s 1:05 -e 1:20    # MM:SS format
+$clip -u "url" -s 0:01:05 -e 0:01:20  # HH:MM:SS format
+```
+
+### Output Formats
+
+Format inference based on extension:
+```bash
+$clip -u "url" -s 0 -e 10 --format mp4   # Video with audio (default)
+$clip -u "url" -s 0 -e 10 --format gif   # Animated GIF (no audio)
+$clip -u "url" -s 0 -e 10 --format mp3   # Audio only
+$clip -u "url" -s 0 -e 10 --format webm  # WebM video
+```
+
+### Quality Control
+
+Adjust settings to fit Discord size limits:
+```bash
+$clip --resolution 720p              # 1080p/720p/480p/360p
+$clip --fps 30                       # Frame rate
+$clip --bitrate 1500k                # Video bitrate
+$clip --clip 2 --resolution 480p     # Adjust specific clip
+```
+
+### Multiple Clips
+
+Process multiple clips in one command:
+```bash
+# Queue multiple clips
+$clip -u "url1" -s 5 -e 15 -u "url2" -s 20 -e 30
+
+# Preview shows all clips with size estimates
+# Adjust individual clips:
+$clip --clip 2 --resolution 720p
+
+# Process all or skip specific ones:
+$clip --confirm                 # Process all
+$clip --confirm --skip 2        # Skip clip 2
+```
+
+### Two-Phase Workflow
+
+**Phase 1: Preview**
+```
+$clip -u "bilibili_url" -s 10 -e 25
+
+Bot shows:
+📊 Clip Preview (Discord limit: 10MB)
+
+Clip 1: ✅
+Source: [Video Title] - Bilibili
+Duration: 15.0s (0:10 → 0:25)
+Selected: 720p @ 1500k (30fps)
+Estimated: 8.2MB
+
+Options:
+  A) 1080p @ 2500k (30fps) → ~12.5MB ❌
+  B) 720p @ 1500k (30fps) → ~8.2MB ✅
+  C) 480p @ 1000k (30fps) → ~5.1MB ✅
+  D) 360p @ 600k (30fps) → ~3.2MB ✅
+
+Commands:
+$clip --confirm - Process
+$clip --clip 1 --resolution 480p - Adjust
+$clip --cancel - Cancel
+```
+
+**Phase 2: Adjust & Confirm**
+```bash
+# If over limit, adjust quality
+$clip --resolution 720p
+→ Recalculates and shows new estimate
+
+# Confirm when ready
+$clip --confirm
+→ Processes and uploads clip to Discord
+```
+
+### Size Limit Detection
+
+Bot automatically detects server boost level:
+- **No boost**: 10MB limit
+- **Level 2 boost**: 50MB limit
+- **Level 3 boost**: 100MB limit
+
+Quality options are tailored to fit the detected limit.
+
+### Supported Sites
+
+Works with 1000+ sites including:
+- YouTube
+- Bilibili (哔哩哔哩)
+- Vimeo
+- Twitter/X
+- TikTok
+- Twitch
+- SoundCloud
+- Facebook
+- Instagram
+- Reddit
+- And many more...
+
+### Command Reference
+
+```bash
+# Clip specification
+--url, -u <url>              Video URL (can specify multiple)
+--start, -s <time>           Start time (seconds or MM:SS)
+--end, -e <time>             End time (seconds or MM:SS)
+
+# Quality settings
+--resolution, -r <res>       Resolution (1080p/720p/480p/360p)
+--fps <fps>                  Frames per second
+--bitrate, -b <rate>         Video bitrate (e.g., 2500k, 1500k)
+--format, -f <fmt>           Output format (mp4/gif/mp3/webm/etc.)
+
+# Workflow control
+--force                      Skip preview, process immediately
+--confirm                    Process pending clips
+--cancel                     Cancel pending clips
+--clip <N>                   Modify specific clip (1-based index)
+--skip <N>                   Skip clip N when confirming
+```
+
+### No Local Storage
+
+- Clips are processed in temporary files
+- Auto-deleted immediately after upload
+- No permanent storage on bot server
 
 ---
 
@@ -421,8 +749,8 @@ $chat -s "It's working!"
 $chat -s "He said \"hello\""
 $chat -s 'It\'s working'
 
-# No flags needed in listen mode
-$chat --listen
+# Enable listen mode
+$chat --listen on
 He said "hello" and I said "hi"    # Just type naturally!
 ```
 

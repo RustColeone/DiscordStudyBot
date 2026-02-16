@@ -1,0 +1,96 @@
+"""
+Bridge Command Parser - Template File
+Customize this file for your bridge implementation.
+
+This file defines custom commands for your bridge.
+The built-in --listen flag is handled automatically.
+"""
+from typing import List
+
+class BridgeCommand:
+    """Parsed bridge command with flags and values"""
+    def __init__(self):
+        self.action = None          # Custom action (e.g., "init", "status", "send")
+        self.message = None         # Message to send
+        self.toggle_listen = False  # Toggle listen mode (built-in)
+        self.errors = []           # Parsing errors
+        self.show_status = False   # Show bridge status
+
+def parse_bridge_command(command_text: str) -> BridgeCommand:
+    """
+    Parse $bridge commands.
+    
+    Built-in flags (handled automatically):
+        --listen / -l     : Toggle listen mode (auto-forward messages)
+        --status / -st    : Show bridge status
+    
+    Custom flags (examples - customize as needed):
+        --send / -s <msg> : Send message to bridge
+        --init / -i       : Initialize bridge
+        --disconnect / -d : Disconnect bridge
+    
+    Args:
+        command_text: The full command text (e.g., "$bridge -s hello")
+    
+    Returns:
+        BridgeCommand object with parsed values
+    """
+    cmd = BridgeCommand()
+    
+    # Remove "$bridge" prefix
+    text = command_text.strip()
+    if text.startswith('$bridge'):
+        text = text[7:].strip()
+    
+    # Empty command shows status
+    if not text:
+        cmd.show_status = True
+        return cmd
+    
+    # Simple tokenization (you can enhance this)
+    tokens = text.split()
+    i = 0
+    
+    while i < len(tokens):
+        token = tokens[i]
+        
+        # Built-in: Listen mode toggle
+        if token in ['--listen', '-l']:
+            cmd.toggle_listen = True
+            i += 1
+        
+        # Built-in: Status
+        elif token in ['--status', '-st']:
+            cmd.show_status = True
+            i += 1
+        
+        # CUSTOM COMMAND EXAMPLES (modify these for your needs):
+        
+        # Example: Send message
+        elif token in ['--send', '-s']:
+            if i + 1 < len(tokens):
+                # Simple: take next token as message
+                # For multi-word messages, use quotes or join remaining tokens
+                cmd.action = "send"
+                cmd.message = ' '.join(tokens[i+1:])
+                break  # Consume rest as message
+            else:
+                cmd.errors.append("--send requires a message")
+                i += 1
+        
+        # Example: Initialize bridge
+        elif token in ['--init', '-i']:
+            cmd.action = "init"
+            i += 1
+        
+        # Example: Disconnect bridge
+        elif token in ['--disconnect', '-d']:
+            cmd.action = "disconnect"
+            i += 1
+        
+        # Unknown flag
+        else:
+            cmd.errors.append(f"Unknown flag: {token}")
+            i += 1
+    
+    return cmd

@@ -324,8 +324,20 @@ def set_channel_model(channel_id: str, model_name: str):
                 last_updated = CURRENT_TIMESTAMP
         ''', (str(channel_id), model_name))
 
+def set_listen_mode(channel_id: str, enabled: bool) -> None:
+    """Set listen mode for a channel to specific state"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO channel_settings (channel_id, listen_mode, last_updated)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                listen_mode = excluded.listen_mode,
+                last_updated = CURRENT_TIMESTAMP
+        ''', (str(channel_id), int(enabled)))
+
 def toggle_listen_mode(channel_id: str) -> bool:
-    """Toggle listen mode for a channel, returns new state"""
+    """Toggle listen mode for a channel, returns new state (deprecated: use set_listen_mode)"""
     with get_db() as conn:
         cursor = conn.cursor()
         current = get_channel_settings(str(channel_id))

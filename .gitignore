@@ -1,6 +1,12 @@
 # Configuration file with sensitive data
 config.yml
 
+# Bridge implementations (user-specific)
+bridgeParser.py
+meiju_bridge.py
+*Bridge.py
+!exampleBridge.py  # Keep example for reference
+
 # Database files
 bot_data.db
 bot_data.db-journal

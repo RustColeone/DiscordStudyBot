@@ -234,7 +234,7 @@ def get_prompt_list() -> str:
     
     return msg
 
-def query_chat(user_input: str, channel_id: int, time) -> str:
+def query_chat(user_input: str, channel_id: int, time, username: str = None) -> str:
     """Route chat query to the appropriate LLM based on channel settings"""
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
@@ -242,11 +242,11 @@ def query_chat(user_input: str, channel_id: int, time) -> str:
     
     # Route to the appropriate query function
     if llm == "chatgpt":
-        return chatGPTQuery.queryChatGPT(user_input, channel_id, time, model)
+        return chatGPTQuery.queryChatGPT(user_input, channel_id, time, model, username)
     elif llm == "gemini":
-        return geminiQuery.queryGemini(user_input, channel_id, time, model)
+        return geminiQuery.queryGemini(user_input, channel_id, time, model, username)
     elif llm == "deepseek":
-        return deepseekQuery.queryDeepSeek(user_input, channel_id, time, model)
+        return deepseekQuery.queryDeepSeek(user_input, channel_id, time, model, username)
     else:
         return f"Unknown LLM: {llm}"
 
