@@ -3,11 +3,11 @@ Video clip extraction and processing using yt-dlp and FFmpeg
 Supports YouTube, Bilibili, and 1000+ other sites
 """
 import os
-import tempfile
 import asyncio
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import re
+from pathlib import Path
 
 @dataclass
 class ClipSpec:
@@ -22,6 +22,7 @@ class ClipSpec:
     estimated_size_mb: float = 0.0
     video_title: str = ""
     source_site: str = ""
+    keep_file: bool = False
 
 @dataclass
 class QualityOption:
@@ -34,6 +35,30 @@ class QualityOption:
 
 # Per-channel clip job storage
 pending_clips: Dict[str, List[ClipSpec]] = {}
+CLIP_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "temp" / "clips"
+
+
+def ensure_clip_output_dir() -> Path:
+    CLIP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return CLIP_OUTPUT_DIR
+
+
+def sanitize_filename(value: str) -> str:
+    sanitized = re.sub(r'[\\/:*?"<>|]+', '_', value or 'clip')
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip().strip('.')
+    return sanitized[:80] or 'clip'
+
+
+def allocate_clip_output_path(clip: ClipSpec, index: int) -> str:
+    output_dir = ensure_clip_output_dir()
+    extension = clip.output_format or 'mp4'
+    base_name = sanitize_filename(clip.video_title or f'clip_{index}')
+    candidate = output_dir / f"{base_name}_{index}.{extension}"
+    counter = 1
+    while candidate.exists():
+        candidate = output_dir / f"{base_name}_{index}_{counter}.{extension}"
+        counter += 1
+    return str(candidate)
 
 def parse_time(time_str: str) -> float:
     """

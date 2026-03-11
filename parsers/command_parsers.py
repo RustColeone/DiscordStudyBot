@@ -639,6 +639,7 @@ class ClipCommand:
         self.force: bool = False  # Skip preview, process immediately
         self.confirm: bool = False
         self.cancel: bool = False
+        self.keep_file: Optional[bool] = None
         self.clip_index: Optional[int] = None  # For updating specific clip
         self.skip_indices: List[int] = []  # Clips to skip when confirming
         self.errors: List[str] = []
@@ -658,6 +659,8 @@ def parse_clip_command(command_text: str) -> ClipCommand:
         --force                      Skip preview, process immediately
         --confirm                    Confirm and process pending clips
         --cancel                     Cancel pending clips
+        --keep-file                  Keep generated clip files after sending
+        --delete-file                Delete generated clip files after sending
         --clip <index>               Modify specific clip (1-based)
         --skip <index>               Skip clip when confirming
     
@@ -757,6 +760,14 @@ def parse_clip_command(command_text: str) -> ClipCommand:
         
         elif token == '--cancel':
             cmd.cancel = True
+            i += 1
+
+        elif token == '--keep-file':
+            cmd.keep_file = True
+            i += 1
+
+        elif token == '--delete-file':
+            cmd.keep_file = False
             i += 1
         
         elif token == '--clip':

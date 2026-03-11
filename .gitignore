@@ -1,11 +1,14 @@
 # Configuration file with sensitive data
 config.yml
 
+# Local third-party experiments / clones
+pywechat/
+
 # Bridge implementations (user-specific)
-bridgeParser.py
-meiju_bridge.py
-*Bridge.py
-!exampleBridge.py  # Keep example for reference
+bridges/bridge_parser.py
+bridges/meiju_bridge.py
+bridges/*_bridge.py
+!bridges/example_bridge.py  # Keep example for reference
 
 # Database files
 bot_data.db
@@ -45,3 +48,6 @@ desktop.ini
 
 # Logs
 *.log
+
+# Generated clip outputs
+temp/

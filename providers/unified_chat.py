@@ -1,10 +1,10 @@
 """
 Unified chat interface that routes to different LLM providers
 """
-import chatGPTQuery
-import geminiQuery
-import deepseekQuery
-import database as db
+from providers import chatgpt_query
+from providers import deepseek_query
+from providers import gemini_query
+from services import database as db
 import json
 from openai import OpenAI
 import google.generativeai as genai
@@ -242,11 +242,11 @@ def query_chat(user_input: str, channel_id: int, time, username: str = None) -> 
     
     # Route to the appropriate query function
     if llm == "chatgpt":
-        return chatGPTQuery.queryChatGPT(user_input, channel_id, time, model, username)
+        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username)
     elif llm == "gemini":
-        return geminiQuery.queryGemini(user_input, channel_id, time, model, username)
+        return gemini_query.queryGemini(user_input, channel_id, time, model, username)
     elif llm == "deepseek":
-        return deepseekQuery.queryDeepSeek(user_input, channel_id, time, model, username)
+        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username)
     else:
         return f"Unknown LLM: {llm}"
 
@@ -256,11 +256,11 @@ def clear_history(channel_id: int):
     llm = settings["llm"]
     
     if llm == "chatgpt":
-        chatGPTQuery.clearHistory(channel_id)
+        chatgpt_query.clearHistory(channel_id)
     elif llm == "gemini":
-        geminiQuery.clearHistory(channel_id)
+        gemini_query.clearHistory(channel_id)
     elif llm == "deepseek":
-        deepseekQuery.clearHistory(channel_id)
+        deepseek_query.clearHistory(channel_id)
 
 def change_prompt(channel_id: int, index: int, time) -> str:
     """Change prompt for the active LLM"""
@@ -268,11 +268,11 @@ def change_prompt(channel_id: int, index: int, time) -> str:
     llm = settings["llm"]
     
     if llm == "chatgpt":
-        return chatGPTQuery.changePrompt(channel_id, index, time)
+        return chatgpt_query.changePrompt(channel_id, index, time)
     elif llm == "gemini":
-        return geminiQuery.changePrompt(channel_id, index, time)
+        return gemini_query.changePrompt(channel_id, index, time)
     elif llm == "deepseek":
-        return deepseekQuery.changePrompt(channel_id, index, time)
+        return deepseek_query.changePrompt(channel_id, index, time)
     else:
         return "Unknown LLM"
 
@@ -297,9 +297,8 @@ def set_custom_prompt(channel_id: int, custom_prompt: str):
     
     # Clear cached session for Gemini
     if llm == "gemini":
-        import geminiQuery
-        if str(channel_id) in geminiQuery.chat_sessions:
-            del geminiQuery.chat_sessions[str(channel_id)]
+        if str(channel_id) in gemini_query.chat_sessions:
+            del gemini_query.chat_sessions[str(channel_id)]
 
 def set_llm(channel_id: int, llm_name: str) -> str:
     """Set the active LLM for a channel"""

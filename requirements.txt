@@ -15,6 +15,16 @@ PyYAML>=6.0
 pytz>=2023.3
 requests>=2.31.0
 
+# WeChat adapter support (Windows)
+emoji>=2.14.1
+PyAutoGUI>=0.9.54
+pycaw>=20240210
+pywin32>=308
+pywin32-ctypes>=0.2.2
+pywinauto>=0.6.8
+psutil>=5.9.5
+pillow>=10.4.0
+
 # AI APIs
 openai>=1.0.0
 google-generativeai>=0.3.0

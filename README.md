@@ -4,6 +4,67 @@ A powerful multi-functional Discord bot with unified AI chat interface (ChatGPT,
 
 这个Discord bot能够访问多个AI模型（ChatGPT、Gemini、DeepSeek）通过统一接口、支持Wolfram Alpha、Google搜索，并且包含音乐+计时器+提醒功能。
 
+## 🧱 Project Architecture
+
+The project is now organized around a small app core plus adapter-driven feature modules.
+
+- `main.py` - bootstrap only
+- `app/` - application core and shared contracts
+- `adapters/` - platform-specific adapters
+- `features/` - command and passive behavior modules
+- `services/` - shared infrastructure services
+- `providers/` - external AI/search/media integrations
+- `parsers/` - command parsing helpers
+- `bridges/` - bridge base classes, examples, and bridge parser
+- `assets/` - text and ASCII assets
+- `docs/` - supplementary documentation
+
+### Folder Layout
+
+- `app/bot_app.py` - central application composition and dispatch
+- `app/bot_types.py` - shared message/response contracts
+- `adapters/discord_adapter.py` - Discord-specific message/event adapter
+- `adapters/wechat_adapter.py` - Windows WeChat automation adapter via local pywechat
+- `services/config_service.py` - config and environment loading
+- `services/database.py` - persistent storage and channel state
+- `providers/unified_chat.py` - shared LLM routing and model management
+- `parsers/command_parsers.py` - CLI-style command parsing helpers
+- `bridges/bridge_base.py` - abstract bridge contract
+- `assets/help.txt` - help text content
+- `features/feature_help.py` - help command handling
+- `features/feature_chat.py` - unified AI chat handling
+- `features/feature_search.py` - Google and Wolfram handlers
+- `features/feature_database.py` - database command handling
+- `features/feature_time.py` - time, clock, and reminder handling
+- `features/feature_clip.py` - clip extraction handling
+- `features/feature_music.py` - music and voice handling
+- `features/feature_bridge.py` - bridge lifecycle and listen-mode handling
+- `features/feature_broadcast.py` - broadcast command handling
+
+### Design Goals
+
+- Discord is treated as an interface layer rather than the bot itself.
+- Features are isolated so they can be moved, replaced, or reused independently.
+- The command router no longer depends on a monolithic `main.py` event body.
+- Future forks can add another adapter without rewriting the whole bot.
+
+### WeChat Adapter Notes
+
+- Run with `--mode wechat` to use the WeChat adapter.
+- Run with `--mode discord` or no mode flag to use Discord.
+- The WeChat adapter uses a local `pywechat/` clone and only works on Windows.
+- `WECHAT_CHAT` is optional. If set, the adapter monitors that chat directly.
+- If `WECHAT_CHAT` is empty, the adapter scans unread chats globally.
+- `WECHAT_IDLE_CHAT` sets a known parking chat (default `File Transfer`) that the adapter returns to after scans and sends.
+- `WECHAT_WHITELIST` is optional. If not empty, the bot only responds to those chat names.
+- When `WECHAT_WHITELIST` is non-empty and `WECHAT_CHAT` is empty, the adapter polls each whitelisted chat directly and then returns to `WECHAT_IDLE_CHAT` instead of scanning every chat.
+- WeChat requests are processed concurrently per chat, while outbound UI sends stay serialized for safety.
+- `WECHAT_BROADCAST_CHAT` or `ID_CHANNEL1` can be used as the `$broadcast` target.
+- Unsupported or limited on WeChat:
+    - `$music` / voice playback
+    - live clock message editing (`$start` / `$stop`)
+    - Discord-style markdown/code-block rendering
+
 ## ✨ Features
 
 ### 🤖 Unified AI Chat System
@@ -76,7 +137,7 @@ You'll need API keys for the features you want to use:
 ### 3. Configure the Bot
 
 #### Using config.yml (Recommended for Local Development)
-1. Copy `config.yml.example` to `config.yml`
+1. Copy `config.example.yml` to `config.yml`
 2. Fill in your API keys and Discord IDs
 3. **⚠️ Never commit config.yml to git!** (Already protected by .gitignore)
 
@@ -134,7 +195,11 @@ The bot will prioritize environment variables over config.yml values.
 ### Running the Bot
 ```bash
 python main.py
+python main.py --mode discord
+python main.py --mode wechat
 ```
+
+`main.py` now wires the application container to the adapter selected by `--mode`.
 
 ### Quick Start Commands
 
@@ -294,7 +359,7 @@ $db -i                            # 导入数据库
 - 🔐 **SECURITY**: Environment variable support for API keys
 - 🔐 **SECURITY**: config.yml protection (.gitignore)
 - 📝 **DOCS**: Comprehensive README with examples
-- 📝 **DOCS**: Command examples file (COMMAND_EXAMPLES.md)
+- 📝 **DOCS**: Command examples file (`docs/COMMAND_EXAMPLES.md`)
 
 ### Previous Updates (2024-2026)
 - Added Google Gemini support
@@ -436,8 +501,8 @@ The bot includes an **extensible plugin architecture** for custom bridges:
 #### 1. Inherit from `BridgedObject`
 
 ```python
-# myGameBridge.py
-from bridgeBase import BridgedObject
+# bridges/my_game_bridge.py
+from bridges.bridge_base import BridgedObject
 
 class GameBridge(BridgedObject):
     async def initialize(self):
@@ -460,12 +525,12 @@ class GameBridge(BridgedObject):
         return "🟢 Connected to Game"
 ```
 
-#### 2. Define Commands in `bridgeParser.py`
+#### 2. Define Commands in `bridges/bridge_parser.py`
 
 ```python
-# bridgeParser.py
+# bridges/bridge_parser.py
 from dataclasses import dataclass
-from commandParsers import _tokenize
+from typing import Optional
 
 @dataclass
 class BridgeCommand:
@@ -477,17 +542,17 @@ class BridgeCommand:
 
 def parse_bridge_command(text):
     # Your command parsing logic
-    # See bridgeParser.py.example for template
+    # See bridges/bridge_parser.py.example for template
     pass
 ```
 
-#### 3. Update `main.py` Import
+#### 3. Update `features/feature_bridge.py`
 
 ```python
-# main.py (top of file)
+# features/feature_bridge.py
 try:
-    from bridgeParser import parse_bridge_command
-    from myGameBridge import GameBridge as ExampleBridge  # Replace this
+    from bridges.bridge_parser import parse_bridge_command
+    from bridges.my_game_bridge import GameBridge as ExampleBridge  # Replace this
     BRIDGE_AVAILABLE = True
 except ImportError:
     BRIDGE_AVAILABLE = False
@@ -495,7 +560,7 @@ except ImportError:
 
 ### Example: Game Chat Bridge
 
-The bot includes `meiju_bridge.py` as a reference implementation showing:
+The bot includes `bridges/meiju_bridge.py` as a reference implementation showing:
 - Window activation (bring game to foreground)
 - Clipboard automation (paste text into game chat)
 - Keyboard simulation (send Enter key)
@@ -506,14 +571,14 @@ This demonstrates how to integrate with any desktop application using pyautogui.
 ### File Structure
 
 ```
-bridgeBase.py              # Abstract base class (DO NOT EDIT)
-bridgeParser.py.example    # Template for command parser
-exampleBridge.py           # Reference implementation
-meiju_bridge.py            # Example: game chat automation (gitignored)
-myCustomBridge.py          # Your custom bridges (gitignored)
+bridges/bridge_base.py            # Abstract base class (DO NOT EDIT)
+bridges/bridge_parser.py.example  # Template for command parser
+bridges/example_bridge.py         # Reference implementation
+bridges/meiju_bridge.py           # Example: game chat automation (gitignored)
+bridges/my_custom_bridge.py       # Your custom bridges (gitignored)
 ```
 
-**Note**: Custom bridge implementations (except `exampleBridge.py`) are automatically gitignored for privacy.
+**Note**: Custom bridge implementations (except `bridges/example_bridge.py`) are automatically gitignored for privacy.
 
 ---
 
@@ -583,6 +648,8 @@ $clip --clip 2 --resolution 720p
 # Process all or skip specific ones:
 $clip --confirm                 # Process all
 $clip --confirm --skip 2        # Skip clip 2
+$clip --keep-file              # Keep generated clip files after sending
+$clip --delete-file            # Delete generated clip files after sending
 ```
 
 ### Two-Phase Workflow
@@ -609,7 +676,12 @@ Options:
 Commands:
 $clip --confirm - Process
 $clip --clip 1 --resolution 480p - Adjust
+$clip --keep-file - Keep generated file after send
 $clip --cancel - Cancel
+
+Generated clip files that are kept are stored under temp/clips/. You can clean up files older than one hour with:
+
+python cleanup_old_clip_files.py --max-age-minutes 60
 ```
 
 **Phase 2: Adjust & Confirm**
@@ -836,19 +908,22 @@ DeepSeek => $deepseek <query>
 
 ```
 DiscordStudyBot/
-├── main.py                 # Main bot logic
-├── chatGPTQuery.py         # OpenAI ChatGPT integration
-├── geminiQuery.py          # Google Gemini integration
-├── deepseekQuery.py        # DeepSeek integration
-├── googleQuery.py          # Google search (SerpAPI)
-├── wolframQuery.py         # Wolfram Alpha queries
-├── ascii.py                # ASCII art for timer
+├── main.py                 # Bootstrap entrypoint
+├── app/                    # Application core
+├── adapters/               # Discord and WeChat adapters
+├── features/               # Feature modules
+├── services/               # Config and database services
+├── providers/              # AI/search/media integrations
+├── parsers/                # Command parsing helpers
+├── bridges/                # Bridge contracts and examples
+├── assets/                 # Help text and ASCII assets
+├── docs/                   # Extra documentation
 ├── config.yml              # Your config (DO NOT COMMIT)
 ├── config.example.yml      # Config template
 ├── requirements.txt        # Python dependencies
-├── .gitignore             # Git ignore rules
-├── musicList.txt          # Auto-generated music queue
-└── music/                 # Your music files
+├── .gitignore              # Git ignore rules
+├── musicList.txt           # Auto-generated music queue
+└── music/                  # Your music files
 ```
 
 ## Updates (2026)

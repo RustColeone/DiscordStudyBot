@@ -159,12 +159,12 @@ $bridge --disconnect     Close bridge connection
 
 Customization:
 This bot includes an example bridge. To create custom bridges (for games, Slack, etc.):
-1. Inherit from BridgedObject class (bridgeBase.py)
+1. Inherit from BridgedObject class (bridges/bridge_base.py)
 2. Implement send_message(), initialize(), disconnect(), get_status()
-3. Update bridgeParser.py with your custom commands
-4. Replace ExampleBridge import in main.py
+3. Update bridges/bridge_parser.py with your custom commands
+4. Replace the example bridge import in features/feature_bridge.py
 
-Example: meiju_bridge.py shows game chat automation using pyautogui
+Example: bridges/meiju_bridge.py shows game chat automation using pyautogui
 
 === CLIP ===
 # Video Clip Extraction
@@ -201,8 +201,13 @@ Commands:
 $clip --confirm               Process pending clips
 $clip --confirm --skip 2      Skip clip 2
 $clip --clip 2 --resolution 720p   Adjust clip 2
+$clip --keep-file            Keep generated clip file after sending
+$clip --delete-file          Delete generated clip file after sending
 $clip --cancel                Cancel all pending
 $clip --force                 Skip preview, process immediately
+
+Cleanup helper:
+python cleanup_old_clip_files.py --max-age-minutes 60
 
 Size Limits:
 Auto-detected based on server boost:

@@ -20,3 +20,19 @@ WOLFRAM_APPID: your_wolfram_app_id_here
 
 # Local Paths
 WOLFRAM_PATH: C:/Program Files/Wolfram Research/Wolfram Engine/13.2/WolframKernel.exe
+
+# WeChat Adapter Settings (Windows + local pywechat clone)
+# WECHAT_CHAT is optional. If set, the adapter monitors that one chat directly.
+# If omitted, the adapter scans unread chats globally.
+# WECHAT_IDLE_CHAT is the known parking chat used after scans/sends so new messages in other chats stay unread.
+# If WECHAT_WHITELIST is not empty and WECHAT_CHAT is empty, the adapter polls those chats directly instead of scanning all chats.
+# WECHAT_BROADCAST_CHAT can be used as the target for $broadcast.
+# WECHAT_MONITOR_SECONDS controls how often the adapter polls for new messages.
+# WECHAT_WHITELIST is optional. If not empty, the bot only responds to those chat names.
+WECHAT_CHAT: your_wechat_chat_name_here
+WECHAT_IDLE_CHAT: File Transfer
+WECHAT_BROADCAST_CHAT: your_wechat_broadcast_chat_name_here
+WECHAT_MONITOR_SECONDS: 3
+WECHAT_WHITELIST:
+  - File Transfer
+  - your_wechat_group_name_here

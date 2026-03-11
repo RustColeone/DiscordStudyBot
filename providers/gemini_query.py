@@ -5,7 +5,7 @@ import json
 import datetime
 import pytz
 import copy
-import database as db
+from services import database as db
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
