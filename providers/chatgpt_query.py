@@ -15,8 +15,8 @@ with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
 
 # Use environment variable if available, otherwise use config
-api_key = os.getenv('OPENAI_API_KEY') or botConfig['OPENAI_API_KEY']
-client = OpenAI(api_key=api_key)
+api_key = os.getenv('OPENAI_API_KEY') or botConfig.get('OPENAI_API_KEY')
+client = OpenAI(api_key=api_key) if api_key else None
 
 AI_MODEL_NAME = "chatgpt"
 
@@ -33,6 +33,9 @@ def _load_history_from_db(channelID):
     return history
 
 def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=None):
+    if client is None:
+        return "ChatGPT is not configured."
+
     # Load history from database
     history = _load_history_from_db(channelID)
     

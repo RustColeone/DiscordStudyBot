@@ -65,7 +65,7 @@ def _fetch_openai_models():
     """Fetch available models from OpenAI API"""
     try:
         api_key = os.getenv('OPENAI_API_KEY') or botConfig.get('OPENAI_API_KEY', '')
-        if not api_key:
+        if not api_key or api_key == "disabled":
             return None
         
         client = OpenAI(api_key=api_key)
@@ -87,7 +87,7 @@ def _fetch_gemini_models():
     """Fetch available models from Google Gemini API"""
     try:
         api_key = os.getenv('GEMINI_API_KEY') or botConfig.get('GEMINI_API_KEY', '')
-        if not api_key:
+        if not api_key or api_key == "disabled":
             return None
         
         genai.configure(api_key=api_key)
@@ -109,7 +109,7 @@ def _fetch_deepseek_models():
     """Fetch available models from DeepSeek API"""
     try:
         api_key = os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', '')
-        if not api_key:
+        if not api_key or api_key == "disabled":
             return None
         
         client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")

@@ -17,9 +17,10 @@ with open("config.yml", "r") as ymlfile:
 # Use environment variable if available, otherwise use config
 # DeepSeek uses OpenAI-compatible API
 api_key = os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', '')
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://api.deepseek.com"
+client = (
+    OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    if api_key
+    else None
 )
 
 AI_MODEL_NAME = "deepseek"
@@ -37,6 +38,9 @@ def _load_history_from_db(channelID):
     return history
 
 def queryDeepSeek(user_input, channelID, time, model="deepseek-chat", username=None):
+    if client is None:
+        return "DeepSeek is not configured."
+
     # Load history from database
     history = _load_history_from_db(channelID)
     

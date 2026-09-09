@@ -1,6 +1,9 @@
 # Discord Study Bot - Quick Reference
 Use: $help <topic> for detailed info (chat, music, clip, search, bridge, time, db)
 
+## System
+$system / $status   Show server time, temperature, CPU, memory, and storage
+
 ## Time & Reminders
 $time              Show current time
 $start             Start live clock

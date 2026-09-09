@@ -10,7 +10,9 @@ class DiscordAdapter:
     def __init__(self, app, config):
         self.app = app
         self.config = config
-        self.client = discord.Client(intents=discord.Intents.all())
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self.client = discord.Client(intents=intents)
         self.app.attach_platform(self)
         self._register_events()
 

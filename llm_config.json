@@ -22,7 +22,7 @@
     }
   ],
   "fallback_models": {
-    "last_update": 1773215757.6557095,
+    "last_update": 1788932380.9285748,
     "models": {
       "chatgpt": {
         "name": "ChatGPT (OpenAI)",
@@ -39,6 +39,15 @@
           "gpt-3.5-turbo-instruct-0914"
         ],
         "default_model": "gpt-4o"
+      },
+      "deepseek": {
+        "name": "DeepSeek",
+        "models": [
+          "deepseek-v4-flash",
+          "deepseek-v4-pro",
+          "deepseek-v4-flash-vision-exp"
+        ],
+        "default_model": "deepseek-v4-flash"
       },
       "gemini": {
         "name": "Gemini (Google)",
@@ -76,14 +85,6 @@
           "deep-research-pro-preview-12-2025"
         ],
         "default_model": "gemini-2.5-flash"
-      },
-      "deepseek": {
-        "name": "DeepSeek",
-        "models": [
-          "deepseek-chat",
-          "deepseek-reasoner"
-        ],
-        "default_model": "deepseek-chat"
       }
     }
   }

@@ -8,8 +8,11 @@ with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
 
 # Use environment variable if available, otherwise use config
-appid = os.getenv('WOLFRAM_APPID') or botConfig['WOLFRAM_APPID']
+appid = os.getenv('WOLFRAM_APPID') or botConfig.get('WOLFRAM_APPID')
 def queryWolfram(input):
+    if not appid:
+        return "Wolfram Alpha is not configured."
+
     if input == None:
         input = "lifespan of a mosquito"
     query = urllib.parse.quote_plus(input)

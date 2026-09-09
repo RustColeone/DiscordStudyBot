@@ -6,6 +6,7 @@ from features.feature_database import DatabaseFeature
 from features.feature_help import HelpFeature
 from features.feature_music import MusicFeature
 from features.feature_search import SearchFeature
+from features.feature_system import SystemFeature
 from features.feature_time import TimeFeature
 
 
@@ -17,6 +18,7 @@ class BotApplication:
         self.help_feature = HelpFeature()
         self.chat_feature = ChatFeature()
         self.time_feature = TimeFeature()
+        self.system_feature = SystemFeature()
         self.clip_feature = ClipFeature()
         self.broadcast_feature = BroadcastFeature()
         self.music_feature = MusicFeature()
@@ -27,6 +29,7 @@ class BotApplication:
         self.command_features = [
             self.help_feature,
             self.time_feature,
+            self.system_feature,
             self.clip_feature,
             self.broadcast_feature,
             self.music_feature,

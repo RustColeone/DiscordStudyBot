@@ -1,5 +1,6 @@
 # Configuration file with sensitive data
 config.yml
+.env
 
 # Local third-party experiments / clones
 pywechat/
