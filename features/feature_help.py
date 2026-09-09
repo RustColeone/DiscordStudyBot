@@ -16,6 +16,10 @@ class HelpFeature:
 
         if len(parts) == 2:
             topic = parts[1].lower().strip()
+            if topic == "secret":
+                if not message.metadata.get("is_creator"):
+                    return [BotResponse(text="Topic 'secret' not found.")]
+                return [BotResponse(text=self._creator_help())]
             detailed_text = self._get_topic_section(help_content, topic)
             if detailed_text is not None:
                 return [BotResponse(text=f"```md\n{detailed_text}\n```")]
@@ -25,6 +29,20 @@ class HelpFeature:
             help_content = help_content.split("---DETAILED-HELP---", maxsplit=1)[0].strip()
 
         return [BotResponse(text=f"```md\n{help_content}\n```")]
+
+    @staticmethod
+    def _creator_help() -> str:
+        return (
+            "```md\n"
+            "# Creator Commands\n"
+            "$admin status              Show private creator and queue settings\n"
+            "$admin queue               Show command queue usage\n"
+            "$admin queue clear         Clear waiting commands; keep the active command running\n"
+            "$admin creator-only on     Restrict the bot to the creator for debugging\n"
+            "$admin creator-only off    Restore access for other users\n"
+            "\nCreator commands jump ahead of waiting user commands. The active command is not interrupted.\n"
+            "```"
+        )
 
     def _get_topic_section(self, help_content: str, topic: str):
         if "---DETAILED-HELP---" not in help_content:

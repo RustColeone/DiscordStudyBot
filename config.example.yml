@@ -8,6 +8,16 @@ ID_CHANNEL: your_channel_id_here
 ID_CHANNEL1: your_channel1_id_here
 ID_MESSAGE: your_message_id_here
 ID_VOICECHANNEL: your_voice_channel_id_here
+# Optional comma-separated command channel IDs. Empty allows every accessible channel.
+DISCORD_ALLOWED_CHANNELS:
+# Set true to require a bot mention. Defaults to false for normal replies in allowed channels.
+DISCORD_REQUIRE_MENTION: false
+# Optional creator lock. Use the immutable numeric Discord user ID, not a username.
+CREATOR_USER_ID:
+CREATOR_ONLY_MODE: false
+# Private context injected only for authenticated creator chat requests.
+CREATOR_PROMPT:
+TIMEZONE: America/Los_Angeles
 
 # AI API Keys
 OPENAI_API_KEY: your_openai_api_key_here

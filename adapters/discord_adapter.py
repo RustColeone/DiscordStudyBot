@@ -1,15 +1,23 @@
 import asyncio
 import os
+import re
 
 import discord
 
 from app.bot_types import IncomingMessage
+from services.command_queue import CommandQueue, QueuedCommand
 
 
 class DiscordAdapter:
     def __init__(self, app, config):
         self.app = app
         self.config = config
+        self.allowed_channel_ids = self._parse_allowed_channel_ids(config)
+        self.require_mention = self._parse_bool(config.get("DISCORD_REQUIRE_MENTION", False))
+        self.creator_user_id = str(config.get("CREATOR_USER_ID", "")).strip()
+        self.creator_only_mode = self._parse_bool(config.get("CREATOR_ONLY_MODE", False))
+        self.command_queue = CommandQueue(max_waiting=5)
+        self.command_worker_task = None
         intents = discord.Intents.default()
         intents.message_content = True
         self.client = discord.Client(intents=intents)
@@ -20,12 +28,72 @@ class DiscordAdapter:
         @self.client.event
         async def on_ready():
             print(f"We have logged in as {self.client.user}")
+            self.app.start_background_tasks()
+            self._start_command_worker()
 
         @self.client.event
         async def on_message(native_message):
+            if not self._is_allowed_message(native_message):
+                return
             incoming_message = self._to_incoming_message(native_message)
+            if incoming_message.content == "$admin" or incoming_message.content.startswith("$admin "):
+                responses = await self.app.handle_message(incoming_message)
+                await self._send_responses(native_message.channel, responses)
+                return
+            if incoming_message.content.startswith("$"):
+                await self._enqueue_command(native_message.channel, incoming_message)
+                return
             responses = await self.app.handle_message(incoming_message)
             await self._send_responses(native_message.channel, responses)
+
+    def _start_command_worker(self) -> None:
+        if self.command_worker_task is None or self.command_worker_task.done():
+            self.command_worker_task = self.client.loop.create_task(self._run_command_worker())
+
+    async def _enqueue_command(self, channel, message: IncomingMessage) -> None:
+        command = QueuedCommand(message, channel, bool(message.metadata.get("is_creator")))
+        accepted, _ = self.command_queue.submit(command)
+        if not accepted:
+            await channel.send("Command queue is full (5 waiting); your command was dropped.")
+
+    async def _run_command_worker(self) -> None:
+        while True:
+            command = await self.command_queue.get()
+            self.command_queue.active = True
+            try:
+                responses = await self.app.handle_message(command.message)
+                await self._send_responses(command.channel, responses)
+            except Exception as error:
+                print(f"Queued command failed: {error}")
+                await command.channel.send("Command failed. Check the bot logs for details.")
+            finally:
+                self.command_queue.active = False
+
+    @staticmethod
+    def _parse_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _parse_allowed_channel_ids(config) -> set[str]:
+        raw_value = config.get("DISCORD_ALLOWED_CHANNELS", "")
+        if isinstance(raw_value, (list, tuple, set)):
+            values = raw_value
+        else:
+            values = str(raw_value).split(",")
+        return {str(value).strip() for value in values if str(value).strip()}
+
+    def _is_allowed_message(self, native_message) -> bool:
+        if bool(getattr(native_message.author, "bot", False)):
+            return False
+        if self.creator_only_mode and str(native_message.author.id) != self.creator_user_id:
+            return False
+        if self.allowed_channel_ids and str(native_message.channel.id) not in self.allowed_channel_ids:
+            return False
+        if self.require_mention and self.client.user not in getattr(native_message, "mentions", []):
+            return False
+        return True
 
     def _to_incoming_message(self, native_message) -> IncomingMessage:
         guild = native_message.guild
@@ -33,8 +101,16 @@ class DiscordAdapter:
         author = native_message.author
         is_dm = isinstance(channel, discord.DMChannel)
 
+        content = native_message.content
+        was_mentioned = self.client.user in getattr(native_message, "mentions", [])
+        is_creator = bool(self.creator_user_id) and str(author.id) == self.creator_user_id
+        if was_mentioned and self.client.user is not None:
+            content = re.sub(rf"<@!?{self.client.user.id}>\s*", "", content).strip()
+            if content and not content.startswith("$"):
+                content = f"$agent {content}"
+
         return IncomingMessage(
-            content=native_message.content,
+            content=content,
             channel_id=str(channel.id),
             author_id=str(author.id),
             author_name=author.name,
@@ -51,6 +127,8 @@ class DiscordAdapter:
                 "author_ref": author,
                 "guild_ref": guild,
                 "guild_premium_tier": getattr(guild, "premium_tier", 0) if guild else 0,
+                "was_mentioned": was_mentioned,
+                "is_creator": is_creator,
             },
         )
 

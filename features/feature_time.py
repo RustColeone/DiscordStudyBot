@@ -1,10 +1,12 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from assets import ascii
 import pytz
 from app.bot_types import BotResponse, HandlerResult, IncomingMessage
 from parsers.command_parsers import parse_reminder_command
+from services import database as db
+from services.reminder_service import parse_natural_reminder, resolve_timezone_name
 
 
 timeZoneUTC = pytz.utc
@@ -16,12 +18,15 @@ TimeZoneUKLD = pytz.timezone("Europe/London")
 class TimeFeature:
     def __init__(self):
         self.clock_tasks = {}
+        self.reminder_scheduler_task = None
 
     def can_handle(self, message: IncomingMessage) -> bool:
         return (
             message.content.startswith("$time")
             or message.content.startswith("$start")
             or message.content.startswith("$stop")
+            or message.content.startswith("$remind ")
+            or message.content == "$remind"
             or message.content.startswith("$remindMeIn")
         )
 
@@ -52,15 +57,73 @@ class TimeFeature:
             task.cancel()
             return [BotResponse(text="Stopping Timer")]
 
+        if message.content == "$remind" or message.content.startswith("$remind "):
+            return self.create_natural_reminder(app, message, message.content)
+
         reminder_command = parse_reminder_command(message.content)
         if reminder_command.errors:
             return [BotResponse(text="❌ " + "\n".join(reminder_command.errors))]
 
-        author_reference = message.metadata.get("author_ref")
-        app.platform.create_background_task(
-            self._send_reminder(app, author_reference, reminder_command.minutes, reminder_command.message or "")
+        remind_at = message.created_at + timedelta(minutes=reminder_command.minutes)
+        reminder_id = self._save_reminder(
+            message,
+            remind_at,
+            reminder_command.message or "Reminder",
         )
-        return [BotResponse(text="Timer Set")]
+        return [BotResponse(text=self._confirmation(reminder_id, remind_at))]
+
+    def create_natural_reminder(self, app, message: IncomingMessage, text: str) -> HandlerResult:
+        timezone_name = resolve_timezone_name(app.config.get("TIMEZONE"))
+        parsed = parse_natural_reminder(text, message.created_at, timezone_name)
+        if parsed is None:
+            return [
+                BotResponse(
+                    text=(
+                        "I couldn't determine the reminder time. Try: "
+                        "`$remind tomorrow at this time to submit the report`"
+                    )
+                )
+            ]
+
+        reminder_id = self._save_reminder(message, parsed.remind_at, parsed.message)
+        return [BotResponse(text=self._confirmation(reminder_id, parsed.remind_at))]
+
+    def _save_reminder(self, message: IncomingMessage, remind_at: datetime, reminder_text: str) -> int:
+        platform = "wechat" if message.guild_name == "WeChat" else "discord"
+        return db.create_reminder(
+            message.channel_id,
+            message.author_id,
+            message.author_display_name,
+            platform,
+            remind_at,
+            reminder_text,
+        )
+
+    @staticmethod
+    def _confirmation(reminder_id: int, remind_at: datetime) -> str:
+        return f"Reminder #{reminder_id} set for `{remind_at:%Y-%m-%d %H:%M:%S %Z}`."
+
+    def start_scheduler(self, app) -> None:
+        if self.reminder_scheduler_task is None or self.reminder_scheduler_task.done():
+            self.reminder_scheduler_task = app.platform.create_background_task(self._run_reminder_scheduler(app))
+
+    async def _run_reminder_scheduler(self, app) -> None:
+        while True:
+            for reminder in db.get_due_reminders(datetime.now(timezone.utc)):
+                try:
+                    recipient = (
+                        f"<@{reminder['author_id']}>"
+                        if reminder["platform"] == "discord"
+                        else reminder["author_name"]
+                    )
+                    await app.platform.send_channel_message(
+                        reminder["channel_id"],
+                        f"{recipient} Reminder: {reminder['message']}",
+                    )
+                    db.mark_reminder_sent(reminder["id"])
+                except Exception as error:
+                    print(f"Reminder {reminder['id']} delivery failed: {error}")
+            await asyncio.sleep(15)
 
     async def _run_clock(self, app, channel_id: str) -> None:
         native_message = await app.platform.send_channel_message(channel_id, "Starting Clock")
@@ -72,15 +135,6 @@ class TimeFeature:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             raise
-
-    async def _send_reminder(self, app, author_reference, minutes: float, reminder_text: str) -> None:
-        reminder_suffix = f"to [ {reminder_text}] " if reminder_text else ""
-        await asyncio.sleep(minutes * 60)
-        await app.platform.send_direct_message(
-            author_reference,
-            f"boop, you told me to remind you {reminder_suffix}{minutes} minutes ago",
-        )
-
 
 def get_time_zone_info():
     time_cnbj = datetime.now(TimeZoneCNBJ).strftime("CN-BJ> %y/%m/%d %H:%M:%S\n")

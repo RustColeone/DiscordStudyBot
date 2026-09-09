@@ -6,6 +6,7 @@ import datetime
 import pytz
 import copy
 from services import database as db
+from services.config_service import optional_secret
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -16,7 +17,7 @@ with open("config.yml", "r") as ymlfile:
 
 # Use environment variable if available, otherwise use config
 # DeepSeek uses OpenAI-compatible API
-api_key = os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', '')
+api_key = optional_secret(os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', ''))
 client = (
     OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     if api_key
@@ -37,7 +38,7 @@ def _load_history_from_db(channelID):
     
     return history
 
-def queryDeepSeek(user_input, channelID, time, model="deepseek-chat", username=None):
+def queryDeepSeek(user_input, channelID, time, model="deepseek-chat", username=None, system_context=None):
     if client is None:
         return "DeepSeek is not configured."
 
@@ -51,10 +52,14 @@ def queryDeepSeek(user_input, channelID, time, model="deepseek-chat", username=N
     prompt = {"role": "user", "content": message_content}
     history.append(prompt)
     db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+
+    request_history = list(history)
+    if system_context:
+        request_history.insert(1, {"role": "system", "content": system_context})
     
     # Query DeepSeek
     params = {
-        "messages": history,
+        "messages": request_history,
         "model": model,
         "temperature": 0.5,
         "max_tokens": 500

@@ -5,6 +5,7 @@ from providers import chatgpt_query
 from providers import deepseek_query
 from providers import gemini_query
 from services import database as db
+from services.config_service import optional_secret
 import json
 from openai import OpenAI
 import google.generativeai as genai
@@ -64,8 +65,8 @@ FALLBACK_MODELS = _load_fallback_models()["models"]
 def _fetch_openai_models():
     """Fetch available models from OpenAI API"""
     try:
-        api_key = os.getenv('OPENAI_API_KEY') or botConfig.get('OPENAI_API_KEY', '')
-        if not api_key or api_key == "disabled":
+        api_key = optional_secret(os.getenv('OPENAI_API_KEY') or botConfig.get('OPENAI_API_KEY', ''))
+        if not api_key:
             return None
         
         client = OpenAI(api_key=api_key)
@@ -86,8 +87,8 @@ def _fetch_openai_models():
 def _fetch_gemini_models():
     """Fetch available models from Google Gemini API"""
     try:
-        api_key = os.getenv('GEMINI_API_KEY') or botConfig.get('GEMINI_API_KEY', '')
-        if not api_key or api_key == "disabled":
+        api_key = optional_secret(os.getenv('GEMINI_API_KEY') or botConfig.get('GEMINI_API_KEY', ''))
+        if not api_key:
             return None
         
         genai.configure(api_key=api_key)
@@ -108,8 +109,8 @@ def _fetch_gemini_models():
 def _fetch_deepseek_models():
     """Fetch available models from DeepSeek API"""
     try:
-        api_key = os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', '')
-        if not api_key or api_key == "disabled":
+        api_key = optional_secret(os.getenv('DEEPSEEK_API_KEY') or botConfig.get('DEEPSEEK_API_KEY', ''))
+        if not api_key:
             return None
         
         client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
@@ -184,8 +185,8 @@ def _get_available_llms():
         "default_model": deepseek_models[0] if deepseek_models else fallback_data["models"]["deepseek"]["default_model"]
     }
     
-    # Update fallback models if we fetched new data or they're stale
-    if updated_fallbacks or needs_fallback_update:
+    # Refresh the tracked fallback cache at most once every seven days.
+    if needs_fallback_update and updated_fallbacks:
         # Merge with existing fallbacks for any providers that failed to fetch
         for provider in ["chatgpt", "gemini", "deepseek"]:
             if provider not in updated_fallbacks:
@@ -234,7 +235,7 @@ def get_prompt_list() -> str:
     
     return msg
 
-def query_chat(user_input: str, channel_id: int, time, username: str = None) -> str:
+def query_chat(user_input: str, channel_id: int, time, username: str = None, system_context: str = None) -> str:
     """Route chat query to the appropriate LLM based on channel settings"""
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
@@ -242,13 +243,28 @@ def query_chat(user_input: str, channel_id: int, time, username: str = None) -> 
     
     # Route to the appropriate query function
     if llm == "chatgpt":
-        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username)
+        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username, system_context)
     elif llm == "gemini":
-        return gemini_query.queryGemini(user_input, channel_id, time, model, username)
+        return gemini_query.queryGemini(user_input, channel_id, time, model, username, system_context)
     elif llm == "deepseek":
-        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username)
+        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username, system_context)
     else:
         return f"Unknown LLM: {llm}"
+
+def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> list:
+    tool_json = json.dumps(tools, ensure_ascii=False)
+    prompt = (
+        "You are a command planner. Return only a JSON array with at most five actions. "
+        "Each action must have exactly: {\"tool\": <registered name>, \"arguments\": <object>}. "
+        "Use only the registered tools and preserve the user's requested order. "
+        f"Registered tools: {tool_json}\nUser request: {user_input}"
+    )
+    response = query_chat(prompt, channel_id, time)
+    start = response.find("[")
+    end = response.rfind("]")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("the language model did not return a JSON action list")
+    return json.loads(response[start:end + 1])
 
 def clear_history(channel_id: int):
     """Clear chat history for the active LLM"""

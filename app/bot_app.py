@@ -1,4 +1,6 @@
 from features.feature_bridge import BridgeFeature
+from features.feature_agent import AgentFeature
+from features.feature_admin import AdminFeature
 from features.feature_broadcast import BroadcastFeature
 from features.feature_chat import ChatFeature
 from features.feature_clip import ClipFeature
@@ -16,6 +18,7 @@ class BotApplication:
         self.platform = None
 
         self.help_feature = HelpFeature()
+        self.admin_feature = AdminFeature()
         self.chat_feature = ChatFeature()
         self.time_feature = TimeFeature()
         self.system_feature = SystemFeature()
@@ -25,9 +28,17 @@ class BotApplication:
         self.bridge_feature = BridgeFeature()
         self.search_feature = SearchFeature()
         self.database_feature = DatabaseFeature()
+        self.agent_feature = AgentFeature(
+            self.time_feature,
+            self.system_feature,
+            self.search_feature,
+            self.help_feature,
+        )
 
         self.command_features = [
             self.help_feature,
+            self.admin_feature,
+            self.agent_feature,
             self.time_feature,
             self.system_feature,
             self.clip_feature,
@@ -41,6 +52,9 @@ class BotApplication:
 
     def attach_platform(self, platform) -> None:
         self.platform = platform
+
+    def start_background_tasks(self) -> None:
+        self.time_feature.start_scheduler(self)
 
     async def handle_message(self, message):
         self._log_message(message)

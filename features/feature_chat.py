@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 from providers import unified_chat
 from services import database as db
@@ -13,6 +14,20 @@ class ChatFeature:
     def _channel_key(self, message: IncomingMessage):
         return message.channel_id
 
+    @staticmethod
+    def _is_agent_intent(text: str) -> bool:
+        normalized = text.strip().lower()
+        if normalized.startswith(("remind me ", "set a reminder ", "schedule a reminder ")):
+            return True
+        action_terms = ("remind", "system status", "current time", "search", "help")
+        return " then " in normalized and any(term in normalized for term in action_terms)
+
+    @staticmethod
+    def _creator_context(app, message: IncomingMessage):
+        if not message.metadata.get("is_creator"):
+            return None
+        return app.config.get("CREATOR_PROMPT") or None
+
     async def handle_passive(self, app, message: IncomingMessage) -> HandlerResult:
         if message.content.startswith("$"):
             return []
@@ -24,6 +39,7 @@ class ChatFeature:
                 self._channel_key(message),
                 message.created_at,
                 message.author_display_name,
+                self._creator_context(app, message),
             )
             return [BotResponse(text=answer)]
 
@@ -77,7 +93,20 @@ class ChatFeature:
                 responses.append("🔴 **Listen mode disabled**\nUse `$chat --send <message>` to chat")
 
         if cmd.message:
-            responses.append(unified_chat.query_chat(cmd.message, self._channel_key(message), message.created_at))
+            if self._is_agent_intent(cmd.message):
+                agent_message = replace(message, content=f"$agent {cmd.message}")
+                agent_responses = await app.agent_feature.handle(app, agent_message)
+                responses.extend(response.text for response in agent_responses if response.text)
+            else:
+                responses.append(
+                    unified_chat.query_chat(
+                        cmd.message,
+                        self._channel_key(message),
+                        message.created_at,
+                        message.author_display_name,
+                        self._creator_context(app, message),
+                    )
+                )
 
         if cmd.show_models:
             responses.append(unified_chat.get_models_list())

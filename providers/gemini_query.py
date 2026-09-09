@@ -6,6 +6,7 @@ import datetime
 import pytz
 import copy
 from services import database as db
+from services.config_service import optional_secret
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -15,13 +16,15 @@ with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
 
 # Use environment variable if available, otherwise use config
-api_key = os.getenv('GEMINI_API_KEY') or botConfig.get('GEMINI_API_KEY', '')
-genai.configure(api_key=api_key)
+api_key = optional_secret(os.getenv('GEMINI_API_KEY') or botConfig.get('GEMINI_API_KEY', ''))
+if api_key:
+    genai.configure(api_key=api_key)
 
 AI_MODEL_NAME = "gemini"
 
 # Cache for active chat sessions (not persisted)
 chat_sessions = {}
+chat_session_contexts = {}
 
 def _get_current_prompt_index(channelID):
     """Get current system prompt index from first message in history"""
@@ -33,7 +36,7 @@ def _get_current_prompt_index(channelID):
                 return i
     return 0
 
-def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash"):
+def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash", system_context=None):
     """Create a new Gemini chat session with history from database"""
     history = db.load_chat_history(str(channelID), AI_MODEL_NAME)
     
@@ -41,9 +44,12 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
     if not history:
         db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", system_prompt[prompt_index]["content"])
     
+    system_instruction = system_prompt[prompt_index]["content"]
+    if system_context:
+        system_instruction += f"\n\n{system_context}"
     model = genai.GenerativeModel(
         model_name,
-        system_instruction=system_prompt[prompt_index]["content"]
+        system_instruction=system_instruction,
     )
     
     # Convert database history to Gemini format (skip system message)
@@ -58,13 +64,17 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
     
     chat = model.start_chat(history=gemini_history)
     chat_sessions[str(channelID)] = chat
+    chat_session_contexts[str(channelID)] = system_context
     return chat
 
-def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None):
+def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None):
+    if not api_key:
+        return "Gemini is not configured."
+
     # Get or create chat session
-    if str(channelID) not in chat_sessions:
+    if str(channelID) not in chat_sessions or chat_session_contexts.get(str(channelID)) != system_context:
         prompt_idx = _get_current_prompt_index(channelID)
-        _create_chat_session(channelID, prompt_idx, model)
+        _create_chat_session(channelID, prompt_idx, model, system_context)
     
     chat = chat_sessions[str(channelID)]
     
@@ -97,6 +107,7 @@ def clearHistory(channelID):
     db.clear_chat_history(str(channelID), AI_MODEL_NAME)
     if str(channelID) in chat_sessions:
         del chat_sessions[str(channelID)]
+        chat_session_contexts.pop(str(channelID), None)
 
 def changePrompt(channelID, index, time):
     """Change system prompt for a channel"""
@@ -109,6 +120,7 @@ def changePrompt(channelID, index, time):
     # Remove cached session
     if str(channelID) in chat_sessions:
         del chat_sessions[str(channelID)]
+        chat_session_contexts.pop(str(channelID), None)
     
     # Create new session with new prompt
     _create_chat_session(channelID, index)

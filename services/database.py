@@ -65,6 +65,25 @@ def init_database():
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                author_name TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                remind_at TEXT NOT NULL,
+                message TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_reminders_due
+            ON reminders(status, remind_at)
+        ''')
         
         print("Database initialized successfully")
 
@@ -176,6 +195,40 @@ def clear_music_state(text_channel_id: str):
             DELETE FROM music_state
             WHERE text_channel_id = ?
         ''', (str(text_channel_id),))
+
+# ==================== Reminder Functions ====================
+
+def create_reminder(channel_id: str, author_id: str, author_name: str, platform: str,
+                    remind_at: datetime.datetime, message: str) -> int:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO reminders (channel_id, author_id, author_name, platform, remind_at, message)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (
+            str(channel_id),
+            str(author_id),
+            author_name,
+            platform,
+            remind_at.astimezone(datetime.timezone.utc).isoformat(),
+            message,
+        ))
+        return int(cursor.lastrowid)
+
+def get_due_reminders(now: datetime.datetime) -> List[Dict]:
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, channel_id, author_id, author_name, platform, remind_at, message
+            FROM reminders
+            WHERE status = 'pending' AND remind_at <= ?
+            ORDER BY remind_at ASC
+        ''', (now.astimezone(datetime.timezone.utc).isoformat(),))
+        return [dict(row) for row in cursor.fetchall()]
+
+def mark_reminder_sent(reminder_id: int) -> None:
+    with get_db() as conn:
+        conn.execute("UPDATE reminders SET status = 'sent' WHERE id = ?", (reminder_id,))
 
 # ==================== Export/Import Functions ====================
 

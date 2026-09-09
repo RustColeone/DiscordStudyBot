@@ -570,6 +570,7 @@ class WeChatAdapter:
                 await worker
 
     async def _run_loop(self) -> None:
+        self.app.start_background_tasks()
         try:
             if self.primary_chat:
                 await self._run_single_chat_loop()

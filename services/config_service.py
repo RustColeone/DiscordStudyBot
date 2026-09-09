@@ -16,6 +16,12 @@ ENV_OVERRIDE_KEYS = [
     "ID_CHANNEL1",
     "ID_MESSAGE",
     "ID_VOICECHANNEL",
+    "DISCORD_ALLOWED_CHANNELS",
+    "DISCORD_REQUIRE_MENTION",
+    "CREATOR_USER_ID",
+    "CREATOR_ONLY_MODE",
+    "CREATOR_PROMPT",
+    "TIMEZONE",
     "WECHAT_CHAT",
     "WECHAT_IDLE_CHAT",
     "WECHAT_BROADCAST_CHAT",
@@ -34,3 +40,10 @@ def load_config(config_path: str = "config.yml") -> Dict:
             config[key] = env_value
 
     return config
+
+
+def optional_secret(value) -> str:
+    normalized = str(value or "").strip().strip("\"'")
+    if normalized.lower() in {"", "disabled", "enabled", "none", "null"}:
+        return ""
+    return normalized

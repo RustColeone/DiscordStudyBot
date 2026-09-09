@@ -4,11 +4,18 @@ Use: $help <topic> for detailed info (chat, music, clip, search, bridge, time, d
 ## System
 $system / $status   Show server time, temperature, CPU, memory, and storage
 
+## Agent
+Mention the bot with a request, or use $agent <request>
+$agent tools        List actions available to the agent
+$agent confirm      Confirm a plan containing state-changing actions
+$agent cancel       Cancel the pending plan
+
 ## Time & Reminders
 $time              Show current time
 $start             Start live clock
 $stop              Stop clock/timer
 $remindMeIn -t <min> -m <msg>   Set reminder
+$remind tomorrow at 8 PM to <msg>   Set a persistent reminder
 
 ## Music Player
 $music -i          Connect to voice
@@ -20,6 +27,7 @@ $music -y "url" --queue   Queue without playing
 
 ## AI Chat
 $chat -s <msg>     Send to active LLM
+$chat -s "remind me tomorrow at 1900 to ..."   Create a persistent reminder
 $chat -l <llm>     Set LLM (chatgpt/gemini/deepseek)
 $chat -m <model>   Set model
 $chat -p <0-3>     Set prompt preset
