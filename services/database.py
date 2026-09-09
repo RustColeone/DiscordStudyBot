@@ -284,6 +284,39 @@ def get_due_reminders(now: datetime.datetime) -> List[Dict]:
         ''', (now.astimezone(datetime.timezone.utc).isoformat(),))
         return [dict(row) for row in cursor.fetchall()]
 
+def get_pending_reminders(channel_id: str, author_id: Optional[str] = None) -> List[Dict]:
+    with get_db() as conn:
+        if author_id is None:
+            rows = conn.execute('''
+                SELECT id, channel_id, author_id, author_name, platform, remind_at, message
+                FROM reminders
+                WHERE channel_id = ? AND status = 'pending'
+                ORDER BY remind_at ASC
+            ''', (str(channel_id),)).fetchall()
+        else:
+            rows = conn.execute('''
+                SELECT id, channel_id, author_id, author_name, platform, remind_at, message
+                FROM reminders
+                WHERE channel_id = ? AND author_id = ? AND status = 'pending'
+                ORDER BY remind_at ASC
+            ''', (str(channel_id), str(author_id))).fetchall()
+        return [dict(row) for row in rows]
+
+def delete_pending_reminder(reminder_id: int, channel_id: str, author_id: str,
+                            allow_any_author: bool = False) -> bool:
+    with get_db() as conn:
+        if allow_any_author:
+            cursor = conn.execute('''
+                DELETE FROM reminders
+                WHERE id = ? AND channel_id = ? AND status = 'pending'
+            ''', (reminder_id, str(channel_id)))
+        else:
+            cursor = conn.execute('''
+                DELETE FROM reminders
+                WHERE id = ? AND channel_id = ? AND author_id = ? AND status = 'pending'
+            ''', (reminder_id, str(channel_id), str(author_id)))
+        return cursor.rowcount > 0
+
 def mark_reminder_sent(reminder_id: int) -> None:
     with get_db() as conn:
         conn.execute("UPDATE reminders SET status = 'sent' WHERE id = ?", (reminder_id,))

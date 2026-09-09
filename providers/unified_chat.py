@@ -236,7 +236,8 @@ def get_prompt_list() -> str:
     
     return msg
 
-def query_chat(user_input: str, channel_id: int, time, username: str = None, system_context: str = None) -> str:
+def query_chat(user_input: str, channel_id: int, time, username: str = None, system_context: str = None,
+               persist: bool = True) -> str:
     """Route chat query to the appropriate LLM based on channel settings"""
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
@@ -247,11 +248,17 @@ def query_chat(user_input: str, channel_id: int, time, username: str = None, sys
     
     # Route to the appropriate query function
     if llm == "chatgpt":
-        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username, combined_context, effort)
+        return chatgpt_query.queryChatGPT(
+            user_input, channel_id, time, model, username, combined_context, effort, persist
+        )
     elif llm == "gemini":
-        return gemini_query.queryGemini(user_input, channel_id, time, model, username, combined_context, effort)
+        return gemini_query.queryGemini(
+            user_input, channel_id, time, model, username, combined_context, effort, persist
+        )
     elif llm == "deepseek":
-        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username, combined_context, effort)
+        return deepseek_query.queryDeepSeek(
+            user_input, channel_id, time, model, username, combined_context, effort, persist
+        )
     else:
         return f"Unknown LLM: {llm}"
 
@@ -266,10 +273,12 @@ def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> l
             "Return only a JSON array with at most five actions. Each action must have exactly: "
             "{\"tool\": <registered name>, \"arguments\": <object>}. Use only registered tools, "
             "preserve requested order, and translate intent into tool arguments when needed. "
+            "Use ask_clarification when an action is clear but required information is missing. "
+            "Return [] when the user is only conversing or asking for information that no registered tool handles. "
             f"Registered tools: {tool_json}\nUser request: {user_input}"
             f"{previous_error}"
         )
-        response = query_chat(prompt, channel_id, time)
+        response = query_chat(prompt, channel_id, time, persist=False)
         try:
             start = response.find("[")
             end = response.rfind("]")
@@ -277,8 +286,8 @@ def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> l
                 raise ValueError("missing JSON array")
             plan = json.loads(response[start:end + 1])
             allowed_tools = {tool["name"] for tool in tools}
-            if not isinstance(plan, list) or not plan or len(plan) > 5:
-                raise ValueError("plan must contain one to five actions")
+            if not isinstance(plan, list) or len(plan) > 5:
+                raise ValueError("plan must contain zero to five actions")
             if any(step.get("tool") not in allowed_tools or not isinstance(step.get("arguments"), dict) for step in plan):
                 raise ValueError("plan used an invalid tool or arguments")
             return plan

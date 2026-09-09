@@ -83,8 +83,27 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
     chat_session_contexts[str(channelID)] = system_context
     return chat
 
+def _create_transient_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash", system_context=None):
+    history = db.load_chat_history(str(channelID), AI_MODEL_NAME)
+    system_instruction = system_prompt[prompt_index]["content"]
+    compressed_context = [msg["content"] for msg in history[1:] if msg["role"] == "system"]
+    if compressed_context:
+        system_instruction += "\n\n" + "\n\n".join(compressed_context)
+    if system_context:
+        system_instruction += f"\n\n{system_context}"
+    model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+    gemini_history = [
+        {
+            "role": "user" if msg["role"] == "user" else "model",
+            "parts": [msg["content"]],
+        }
+        for msg in history
+        if msg["role"] != "system"
+    ]
+    return model.start_chat(history=gemini_history)
+
 def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None,
-                effort="high"):
+                effort="high", persist=True):
     if not api_key:
         return "Gemini is not configured."
 
@@ -99,19 +118,19 @@ def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=
         chat_sessions.pop(str(channelID), None)
         chat_session_contexts.pop(str(channelID), None)
 
-    # Get or create chat session
-    if str(channelID) not in chat_sessions or chat_session_contexts.get(str(channelID)) != system_context:
+    if not persist:
         prompt_idx = _get_current_prompt_index(channelID)
-        _create_chat_session(channelID, prompt_idx, model, system_context)
-    
-    chat = chat_sessions[str(channelID)]
-    
-    # Prepend username to message if provided
+        chat = _create_transient_chat_session(channelID, prompt_idx, model, system_context)
+    else:
+        if str(channelID) not in chat_sessions or chat_session_contexts.get(str(channelID)) != system_context:
+            prompt_idx = _get_current_prompt_index(channelID)
+            _create_chat_session(channelID, prompt_idx, model, system_context)
+        chat = chat_sessions[str(channelID)]
+
     message_content = f"[{username}]: {user_input}" if username else user_input
-    
-    # Save user message to database
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
-    
+    if persist:
+        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+
     try:
         response = chat.send_message(
             message_content,
@@ -121,14 +140,11 @@ def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=
             )
         )
         replied = response.text
-        
-        # Save assistant response to database
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
-        
+        if persist:
+            db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
         return replied
     except Exception as e:
         return f"Gemini error: {str(e)}"
-
 
 def clearHistory(channelID):
     """Clear chat history from database and reset session"""

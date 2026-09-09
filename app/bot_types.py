@@ -39,6 +39,9 @@ class PlatformAdapter(Protocol):
     async def edit_message(self, native_message: Any, content: str) -> None:
         ...
 
+    async def delete_message(self, native_message: Any) -> None:
+        ...
+
     async def send_direct_message(self, user_reference: Any, content: str) -> None:
         ...
 

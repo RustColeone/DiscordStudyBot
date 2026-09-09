@@ -52,7 +52,7 @@ def _load_history_from_db(channelID, model="gpt-3.5-turbo", effort="high"):
     return history
 
 def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=None, system_context=None,
-                 effort="high"):
+                 effort="high", persist=True):
     if client is None:
         return "ChatGPT is not configured."
 
@@ -65,7 +65,8 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=No
     # Add user message to history
     prompt = {"role": "user", "content": message_content}
     history.append(prompt)
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+    if persist:
+        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
 
     request_history = list(history)
     if system_context:
@@ -83,7 +84,8 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=No
         replied = response.choices[0].message.content
         
         # Save assistant response to database
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
+        if persist:
+            db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
         
         return replied
     except Exception as e:

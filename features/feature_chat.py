@@ -15,33 +15,6 @@ class ChatFeature:
         return message.channel_id
 
     @staticmethod
-    def _is_agent_intent(text: str) -> bool:
-        normalized = text.strip().lower()
-        reminder_terms = (
-            "remind me ", "set a reminder ", "schedule a reminder ",
-            "提醒", "リマインド", "напомни", "recuérdame", "recordarme",
-            "rappelle-moi", "erinnere mich", "تذكير", "याद दिला",
-        )
-        if any(term in normalized for term in reminder_terms):
-            return True
-        multilingual_action_terms = (
-            "系统状态", "系統狀態", "服务器状态", "伺服器狀態",
-            "现在几点", "現在幾點", "当前时间", "當前時間",
-            "搜索", "搜尋", "查找", "帮助", "幫助",
-            "システム状態", "検索", "покажи статус", "найди",
-            "buscar", "rechercher", "suchen",
-        )
-        if any(term in normalized for term in multilingual_action_terms):
-            return True
-        action_terms = (
-            "remind", "system status", "current time", "search", "help",
-        )
-        sequence_terms = (" then ", "然后", "然後", "接着", "接著")
-        return any(term in normalized for term in sequence_terms) and any(
-            term in normalized for term in action_terms
-        )
-
-    @staticmethod
     def _creator_context(app, message: IncomingMessage):
         if not message.metadata.get("is_creator"):
             return None
@@ -115,20 +88,9 @@ class ChatFeature:
                 responses.append("🔴 **Listen mode disabled**\nUse `$chat --send <message>` to chat")
 
         if cmd.message:
-            if self._is_agent_intent(cmd.message):
-                agent_message = replace(message, content=f"$agent {cmd.message}")
-                agent_responses = await app.agent_feature.handle(app, agent_message)
-                responses.extend(response.text for response in agent_responses if response.text)
-            else:
-                responses.append(
-                    unified_chat.query_chat(
-                        cmd.message,
-                        self._channel_key(message),
-                        message.created_at,
-                        message.author_display_name,
-                        self._creator_context(app, message),
-                    )
-                )
+            agent_message = replace(message, content=f"$agent {cmd.message}")
+            agent_responses = await app.agent_feature.handle(app, agent_message)
+            responses.extend(response.text for response in agent_responses if response.text)
 
         if cmd.show_models:
             responses.append(unified_chat.get_models_list())

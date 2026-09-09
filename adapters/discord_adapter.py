@@ -9,6 +9,10 @@ from services.command_queue import CommandQueue, QueuedCommand
 
 
 class DiscordAdapter:
+    supports_progress = True
+    supports_message_edit = True
+    supports_voice = True
+
     def __init__(self, app, config):
         self.app = app
         self.config = config
@@ -43,8 +47,9 @@ class DiscordAdapter:
             if incoming_message.content.startswith("$"):
                 await self._enqueue_command(native_message.channel, incoming_message)
                 return
-            responses = await self.app.handle_message(incoming_message)
-            await self._send_responses(native_message.channel, responses)
+            async with native_message.channel.typing():
+                responses = await self.app.handle_message(incoming_message)
+                await self._send_responses(native_message.channel, responses)
 
     def _start_command_worker(self) -> None:
         if self.command_worker_task is None or self.command_worker_task.done():
@@ -61,8 +66,9 @@ class DiscordAdapter:
             command = await self.command_queue.get()
             self.command_queue.active = True
             try:
-                responses = await self.app.handle_message(command.message)
-                await self._send_responses(command.channel, responses)
+                async with command.channel.typing():
+                    responses = await self.app.handle_message(command.message)
+                    await self._send_responses(command.channel, responses)
             except Exception as error:
                 print(f"Queued command failed: {error}")
                 await command.channel.send("Command failed. Check the bot logs for details.")
@@ -104,6 +110,17 @@ class DiscordAdapter:
         content = native_message.content
         was_mentioned = self.client.user in getattr(native_message, "mentions", [])
         is_creator = bool(self.creator_user_id) and str(author.id) == self.creator_user_id
+        reference = getattr(native_message, "reference", None)
+        referenced_message = getattr(reference, "resolved", None)
+        referenced_content = getattr(referenced_message, "content", "") or ""
+        referenced_attachment_urls = [
+            attachment.url for attachment in getattr(referenced_message, "attachments", [])
+            if getattr(attachment, "url", None)
+        ]
+        attachment_urls = [
+            attachment.url for attachment in getattr(native_message, "attachments", [])
+            if getattr(attachment, "url", None)
+        ]
         if was_mentioned and self.client.user is not None:
             content = re.sub(rf"<@!?{self.client.user.id}>\s*", "", content).strip()
             if content and not content.startswith("$"):
@@ -129,6 +146,9 @@ class DiscordAdapter:
                 "guild_premium_tier": getattr(guild, "premium_tier", 0) if guild else 0,
                 "was_mentioned": was_mentioned,
                 "is_creator": is_creator,
+                "referenced_content": referenced_content,
+                "referenced_attachment_urls": referenced_attachment_urls,
+                "attachment_urls": attachment_urls,
             },
         )
 
@@ -178,6 +198,9 @@ class DiscordAdapter:
 
     async def edit_message(self, native_message, content: str) -> None:
         await native_message.edit(content=content)
+
+    async def delete_message(self, native_message) -> None:
+        await native_message.delete()
 
     async def send_direct_message(self, user_reference, content: str) -> None:
         await user_reference.send(content)

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List
 
 
-ToolHandler = Callable[[Any, Any, Dict[str, Any]], Awaitable[str]]
+ToolHandler = Callable[[Any, Any, Dict[str, Any]], Awaitable[Any]]
 
 
 @dataclass(frozen=True)
@@ -54,11 +54,15 @@ class CommandRegistry:
         missing = [name for name in tool.required if not arguments.get(name)]
         if missing:
             raise ValueError(f"Missing arguments for {tool.name}: {', '.join(missing)}")
-        expected_types = {"string": str, "number": (int, float), "boolean": bool}
+        expected_types = {"string": str, "number": (int, float), "integer": int, "boolean": bool}
         for name, value in arguments.items():
-            expected = expected_types.get(tool.parameters[name].get("type"))
+            parameter = tool.parameters[name]
+            expected = expected_types.get(parameter.get("type"))
             if expected is not None and not isinstance(value, expected):
                 raise ValueError(f"Argument {name} for {tool.name} has the wrong type")
+            if "enum" in parameter and value not in parameter["enum"]:
+                allowed = ", ".join(str(option) for option in parameter["enum"])
+                raise ValueError(f"Argument {name} for {tool.name} must be one of: {allowed}")
 
     async def execute(self, name: str, app, message, arguments: Dict[str, Any]) -> str:
         tool = self.get(name)

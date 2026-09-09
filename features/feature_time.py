@@ -99,6 +99,31 @@ class TimeFeature:
             reminder_text,
         )
 
+    def list_reminders(self, message: IncomingMessage, include_all: bool = False) -> str:
+        author_id = None if include_all and message.metadata.get("is_creator") else message.author_id
+        reminders = db.get_pending_reminders(message.channel_id, author_id)
+        if not reminders:
+            return "You have no pending reminders in this channel."
+        lines = []
+        for reminder in reminders:
+            remind_at = datetime.fromisoformat(reminder["remind_at"])
+            owner = f" for {reminder['author_name']}" if author_id is None else ""
+            lines.append(
+                f"- **#{reminder['id']}** `{remind_at:%Y-%m-%d %H:%M %Z}`{owner}: {reminder['message']}"
+            )
+        return "**Pending reminders**\n" + "\n".join(lines)
+
+    def delete_reminder(self, message: IncomingMessage, reminder_id: int) -> str:
+        deleted = db.delete_pending_reminder(
+            reminder_id,
+            message.channel_id,
+            message.author_id,
+            allow_any_author=bool(message.metadata.get("is_creator")),
+        )
+        if deleted:
+            return f"Deleted reminder #{reminder_id}."
+        return f"Reminder #{reminder_id} was not found, is no longer pending, or belongs to another user."
+
     @staticmethod
     def _confirmation(reminder_id: int, remind_at: datetime) -> str:
         return f"Reminder #{reminder_id} set for `{remind_at:%Y-%m-%d %H:%M:%S %Z}`."

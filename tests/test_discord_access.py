@@ -79,6 +79,30 @@ class DiscordAccessTests(unittest.TestCase):
         self.assertEqual(incoming.content, "$agent remind me tomorrow at this time to test")
         self.assertTrue(incoming.metadata["was_mentioned"])
 
+    def test_captures_replied_message_and_attachment_context(self):
+        referenced = SimpleNamespace(
+            content="https://youtu.be/music",
+            attachments=[SimpleNamespace(url="https://cdn.example/video.mp4")],
+        )
+        native_message = SimpleNamespace(
+            content="add that music",
+            guild=None,
+            channel=SimpleNamespace(id="100", name="general"),
+            author=SimpleNamespace(id=7, name="User", display_name="User", bot=False),
+            created_at=None,
+            mentions=[],
+            attachments=[],
+            reference=SimpleNamespace(resolved=referenced),
+        )
+
+        incoming = self.adapter._to_incoming_message(native_message)
+
+        self.assertEqual(incoming.metadata["referenced_content"], "https://youtu.be/music")
+        self.assertEqual(
+            incoming.metadata["referenced_attachment_urls"],
+            ["https://cdn.example/video.mp4"],
+        )
+
     def test_splits_long_responses_at_discord_limit(self):
         content = "x" * 4500
 

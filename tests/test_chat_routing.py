@@ -71,21 +71,23 @@ class ChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         set_effort.assert_called_once_with("channel", "high")
         self.assertIn("Effort set to **high**", responses[0].text)
 
-    async def test_creator_chat_receives_private_context(self):
+    async def test_ordinary_creator_chat_is_routed_to_agent(self):
         message = self.message("$chat -s hello")
 
-        with patch("features.feature_chat.unified_chat.query_chat", return_value="hello") as query_chat:
-            await self.feature.handle(self.app, message)
+        await self.feature.handle(self.app, message)
 
-        self.assertEqual(query_chat.call_args.args[4], "private creator context")
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent hello")
+        self.assertTrue(routed_message.metadata["is_creator"])
 
-    async def test_other_users_do_not_receive_private_context(self):
+    async def test_ordinary_user_chat_is_routed_to_agent(self):
         message = self.message("$chat -s hello", is_creator=False)
 
-        with patch("features.feature_chat.unified_chat.query_chat", return_value="hello") as query_chat:
-            await self.feature.handle(self.app, message)
+        await self.feature.handle(self.app, message)
 
-        self.assertIsNone(query_chat.call_args.args[4])
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent hello")
+        self.assertFalse(routed_message.metadata["is_creator"])
 
 
 if __name__ == "__main__":

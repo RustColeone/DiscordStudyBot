@@ -33,6 +33,11 @@ class BotApplication:
             self.system_feature,
             self.search_feature,
             self.help_feature,
+            self.music_feature,
+            self.clip_feature,
+            self.database_feature,
+            self.bridge_feature,
+            self.broadcast_feature,
         )
 
         self.command_features = [

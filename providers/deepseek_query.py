@@ -79,7 +79,7 @@ def _load_history_from_db(channelID, model="deepseek-v4-flash", effort="high"):
     return history
 
 def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", username=None, system_context=None,
-                  effort="high"):
+                  effort="high", persist=True):
     if client is None:
         return "DeepSeek is not configured."
 
@@ -92,7 +92,8 @@ def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", userna
     # Add user message to history
     prompt = {"role": "user", "content": message_content}
     history.append(prompt)
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+    if persist:
+        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
 
     request_history = list(history)
     if system_context:
@@ -136,7 +137,8 @@ def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", userna
             )
         
         # Save assistant response to database
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
+        if persist:
+            db.save_chat_message(str(channelID), AI_MODEL_NAME, "assistant", replied)
         
         return replied
     except Exception as e:
