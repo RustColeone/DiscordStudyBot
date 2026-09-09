@@ -79,6 +79,14 @@ class DiscordAccessTests(unittest.TestCase):
         self.assertEqual(incoming.content, "$agent remind me tomorrow at this time to test")
         self.assertTrue(incoming.metadata["was_mentioned"])
 
+    def test_splits_long_responses_at_discord_limit(self):
+        content = "x" * 4500
+
+        chunks = self.adapter._split_message(content)
+
+        self.assertEqual([len(chunk) for chunk in chunks], [2000, 2000, 500])
+        self.assertEqual("".join(chunks), content)
+
 
 if __name__ == "__main__":
     unittest.main()

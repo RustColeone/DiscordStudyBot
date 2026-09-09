@@ -46,6 +46,15 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         planner.assert_not_called()
         self.assertIn("scheduled", response[0].text)
 
+    async def test_chinese_reminder_bypasses_llm(self):
+        message = self._message("$agent 明天19点提醒我们看射雕英雄传")
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions") as planner:
+            response = await self.agent.handle(self.app, message)
+
+        planner.assert_not_called()
+        self.assertIn("scheduled", response[0].text)
+
     async def test_executes_read_only_plan_immediately(self):
         plan = [{"tool": "system_status", "arguments": {}}]
 

@@ -5,7 +5,9 @@ from typing import List, Dict, Optional, Tuple
 from contextlib import contextmanager
 
 DATABASE_PATH = 'bot_data.db'
-MAX_HISTORY_PER_CHANNEL = 50  # Maximum messages to keep per channel per AI
+DEFAULT_LLM = "deepseek"
+DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_EFFORT = "high"
 
 @contextmanager
 def get_db():
@@ -43,6 +45,16 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_chat_history 
             ON chat_history(channel_id, ai_model, timestamp)
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_context_summaries (
+                channel_id TEXT NOT NULL,
+                ai_model TEXT NOT NULL,
+                content TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (channel_id, ai_model)
+            )
+        ''')
         
         # Music state table
         cursor.execute('''
@@ -59,12 +71,23 @@ def init_database():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS channel_settings (
                 channel_id TEXT PRIMARY KEY,
-                active_llm TEXT DEFAULT 'chatgpt',
-                active_model TEXT DEFAULT 'gpt-3.5-turbo',
+                active_llm TEXT DEFAULT 'deepseek',
+                active_model TEXT DEFAULT 'deepseek-v4-flash',
                 listen_mode INTEGER DEFAULT 0,
+                effort_level TEXT DEFAULT 'high',
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        cursor.execute("PRAGMA table_info(channel_settings)")
+        channel_setting_columns = {row[1] for row in cursor.fetchall()}
+        if "effort_level" not in channel_setting_columns:
+            cursor.execute("ALTER TABLE channel_settings ADD COLUMN effort_level TEXT DEFAULT 'high'")
+            cursor.execute('''
+                UPDATE channel_settings
+                SET active_llm = ?, active_model = ?, effort_level = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE active_llm = 'chatgpt' AND active_model = 'gpt-3.5-turbo'
+            ''', (DEFAULT_LLM, DEFAULT_MODEL, DEFAULT_EFFORT))
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS reminders (
@@ -97,36 +120,67 @@ def save_chat_message(channel_id: str, ai_model: str, role: str, content: str):
             INSERT INTO chat_history (channel_id, ai_model, role, content)
             VALUES (?, ?, ?, ?)
         ''', (str(channel_id), ai_model, role, content))
-        
-        # Enforce message limit
-        _trim_chat_history(cursor, str(channel_id), ai_model)
-
-def _trim_chat_history(cursor, channel_id: str, ai_model: str):
-    """Keep only the most recent MAX_HISTORY_PER_CHANNEL messages"""
-    cursor.execute('''
-        DELETE FROM chat_history
-        WHERE id IN (
-            SELECT id FROM chat_history
-            WHERE channel_id = ? AND ai_model = ?
-            ORDER BY timestamp DESC
-            LIMIT -1 OFFSET ?
-        )
-    ''', (channel_id, ai_model, MAX_HISTORY_PER_CHANNEL))
 
 def load_chat_history(channel_id: str, ai_model: str) -> List[Dict[str, str]]:
-    """Load chat history for a specific channel and AI model"""
+    """Load raw history with any compressed context after the main system prompt."""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT role, content, timestamp
+            SELECT role, content
             FROM chat_history
             WHERE channel_id = ? AND ai_model = ?
-            ORDER BY timestamp ASC
-            LIMIT ?
-        ''', (str(channel_id), ai_model, MAX_HISTORY_PER_CHANNEL))
-        
+            ORDER BY id ASC
+        ''', (str(channel_id), ai_model))
         rows = cursor.fetchall()
-        return [{"role": row["role"], "content": row["content"]} for row in rows]
+        history = [{"role": row["role"], "content": row["content"]} for row in rows]
+        summary = _get_chat_context_summary(cursor, str(channel_id), ai_model)
+        if summary:
+            summary_message = {
+                "role": "system",
+                "content": "Compressed conversation context:\n" + summary,
+            }
+            insert_at = 1 if history and history[0]["role"] == "system" else 0
+            history.insert(insert_at, summary_message)
+        return history
+
+def load_chat_history_records(channel_id: str, ai_model: str) -> List[Dict]:
+    with get_db() as conn:
+        rows = conn.execute('''
+            SELECT id, role, content
+            FROM chat_history
+            WHERE channel_id = ? AND ai_model = ?
+            ORDER BY id ASC
+        ''', (str(channel_id), ai_model)).fetchall()
+        return [dict(row) for row in rows]
+
+def _get_chat_context_summary(cursor, channel_id: str, ai_model: str) -> Optional[str]:
+    row = cursor.execute('''
+        SELECT content FROM chat_context_summaries
+        WHERE channel_id = ? AND ai_model = ?
+    ''', (str(channel_id), ai_model)).fetchone()
+    return row["content"] if row else None
+
+def get_chat_context_summary(channel_id: str, ai_model: str) -> Optional[str]:
+    with get_db() as conn:
+        return _get_chat_context_summary(conn.cursor(), str(channel_id), ai_model)
+
+def replace_chat_history_with_summary(channel_id: str, ai_model: str, summary: str,
+                                      message_ids: List[int]) -> None:
+    if not message_ids:
+        return
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO chat_context_summaries (channel_id, ai_model, content, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(channel_id, ai_model) DO UPDATE SET
+                content = excluded.content,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (str(channel_id), ai_model, summary))
+        placeholders = ",".join("?" for _ in message_ids)
+        conn.execute(
+            f"DELETE FROM chat_history WHERE channel_id = ? AND ai_model = ? AND id IN ({placeholders})",
+            (str(channel_id), ai_model, *message_ids),
+        )
 
 def clear_chat_history(channel_id: str, ai_model: str):
     """Clear all chat history for a specific channel and AI model"""
@@ -134,6 +188,10 @@ def clear_chat_history(channel_id: str, ai_model: str):
         cursor = conn.cursor()
         cursor.execute('''
             DELETE FROM chat_history
+            WHERE channel_id = ? AND ai_model = ?
+        ''', (str(channel_id), ai_model))
+        cursor.execute('''
+            DELETE FROM chat_context_summaries
             WHERE channel_id = ? AND ai_model = ?
         ''', (str(channel_id), ai_model))
         print(f"Cleared chat history for channel {channel_id}, AI {ai_model}")
@@ -244,11 +302,15 @@ def export_to_json(filepath: str = "bot_data_export.json"):
         # Export music state
         cursor.execute('SELECT * FROM music_state')
         music_state = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT * FROM chat_context_summaries')
+        context_summaries = [dict(row) for row in cursor.fetchall()]
         
         export_data = {
             "export_timestamp": datetime.datetime.now().isoformat(),
             "chat_history": chat_history,
-            "music_state": music_state
+            "music_state": music_state,
+            "context_summaries": context_summaries,
         }
         
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -267,6 +329,7 @@ def import_from_json(filepath: str = "bot_data_export.json", clear_existing: boo
         
         if clear_existing:
             cursor.execute('DELETE FROM chat_history')
+            cursor.execute('DELETE FROM chat_context_summaries')
             cursor.execute('DELETE FROM music_state')
             print("Cleared existing data")
         
@@ -287,6 +350,17 @@ def import_from_json(filepath: str = "bot_data_export.json", clear_existing: boo
             ''', (state["text_channel_id"], state["voice_channel_id"],
                   state["current_song_index"], state["is_playing"], 
                   state.get("last_updated")))
+
+        for summary in import_data.get("context_summaries", []):
+            cursor.execute('''
+                INSERT INTO chat_context_summaries (channel_id, ai_model, content, updated_at)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                summary["channel_id"],
+                summary["ai_model"],
+                summary["content"],
+                summary.get("updated_at"),
+            ))
         
         print(f"Database imported from {filepath}")
 
@@ -323,7 +397,7 @@ def get_channel_settings(channel_id: str) -> Dict:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT active_llm, active_model, listen_mode
+            SELECT active_llm, active_model, listen_mode, effort_level
             FROM channel_settings
             WHERE channel_id = ?
         ''', (str(channel_id),))
@@ -333,14 +407,16 @@ def get_channel_settings(channel_id: str) -> Dict:
             return {
                 "llm": row["active_llm"],
                 "model": row["active_model"],
-                "listen_mode": bool(row["listen_mode"])
+                "listen_mode": bool(row["listen_mode"]),
+                "effort": row["effort_level"] or DEFAULT_EFFORT,
             }
         else:
             # Return defaults if not set
             return {
-                "llm": "chatgpt",
-                "model": "gpt-3.5-turbo",
-                "listen_mode": False
+                "llm": DEFAULT_LLM,
+                "model": DEFAULT_MODEL,
+                "listen_mode": False,
+                "effort": DEFAULT_EFFORT,
             }
 
 def set_channel_llm(channel_id: str, llm_name: str, model_name: str = None):
@@ -370,24 +446,40 @@ def set_channel_model(channel_id: str, model_name: str):
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO channel_settings (channel_id, active_model, last_updated)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO channel_settings (channel_id, active_llm, active_model, effort_level, last_updated)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(channel_id) DO UPDATE SET
                 active_model = excluded.active_model,
                 last_updated = CURRENT_TIMESTAMP
-        ''', (str(channel_id), model_name))
+        ''', (str(channel_id), DEFAULT_LLM, model_name, DEFAULT_EFFORT))
+
+def set_effort_level(channel_id: str, effort: str) -> None:
+    if effort not in {"low", "medium", "high"}:
+        raise ValueError(f"Invalid effort level: {effort}")
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO channel_settings (
+                channel_id, active_llm, active_model, effort_level, last_updated
+            )
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                effort_level = excluded.effort_level,
+                last_updated = CURRENT_TIMESTAMP
+        ''', (str(channel_id), DEFAULT_LLM, DEFAULT_MODEL, effort))
 
 def set_listen_mode(channel_id: str, enabled: bool) -> None:
     """Set listen mode for a channel to specific state"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO channel_settings (channel_id, listen_mode, last_updated)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO channel_settings (
+                channel_id, active_llm, active_model, listen_mode, effort_level, last_updated
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(channel_id) DO UPDATE SET
                 listen_mode = excluded.listen_mode,
                 last_updated = CURRENT_TIMESTAMP
-        ''', (str(channel_id), int(enabled)))
+        ''', (str(channel_id), DEFAULT_LLM, DEFAULT_MODEL, int(enabled), DEFAULT_EFFORT))
 
 def toggle_listen_mode(channel_id: str) -> bool:
     """Toggle listen mode for a channel, returns new state (deprecated: use set_listen_mode)"""
@@ -397,12 +489,14 @@ def toggle_listen_mode(channel_id: str) -> bool:
         new_state = not current["listen_mode"]
         
         cursor.execute('''
-            INSERT INTO channel_settings (channel_id, listen_mode, last_updated)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO channel_settings (
+                channel_id, active_llm, active_model, listen_mode, effort_level, last_updated
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(channel_id) DO UPDATE SET
                 listen_mode = excluded.listen_mode,
                 last_updated = CURRENT_TIMESTAMP
-        ''', (str(channel_id), int(new_state)))
+        ''', (str(channel_id), DEFAULT_LLM, DEFAULT_MODEL, int(new_state), DEFAULT_EFFORT))
         
         return new_state
 

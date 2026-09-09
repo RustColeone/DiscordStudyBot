@@ -138,6 +138,7 @@ class ChatCommand:
         self.show_status: bool = False
         self.clear_history: bool = False
         self.listen_mode: Optional[str] = None  # 'on', 'off', or None
+        self.effort: Optional[str] = None
         self.errors: List[str] = []
     
     def has_action(self) -> bool:
@@ -150,7 +151,8 @@ class ChatCommand:
             self.show_models or
             self.show_status or
             self.clear_history or
-            self.listen_mode is not None
+            self.listen_mode is not None or
+            self.effort is not None
         )
 
 def parse_chat_command(command_text: str) -> ChatCommand:
@@ -166,6 +168,7 @@ def parse_chat_command(command_text: str) -> ChatCommand:
         --status, -st              Show current configuration
         --clear, -c                Clear chat history
         --listen on/off            Enable or disable listen mode
+        --effort, -e <level>       Set effort (low/medium/high)
     
     Examples:
         $chat --llm gemini --model gemini-1.5-pro --send Hello
@@ -274,6 +277,15 @@ def parse_chat_command(command_text: str) -> ChatCommand:
                 i += consumed
             else:
                 cmd.errors.append("--listen requires 'on' or 'off'")
+                i += 1
+
+        elif token in ['--effort', '-e']:
+            value, consumed = _consume_value(tokens, i + 1)
+            if value and value.lower() in ['low', 'medium', 'high']:
+                cmd.effort = value.lower()
+                i += consumed
+            else:
+                cmd.errors.append("--effort requires 'low', 'medium', or 'high'")
                 i += 1
         
         # Unknown flag

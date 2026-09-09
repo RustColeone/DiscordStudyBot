@@ -38,6 +38,39 @@ class ChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(routed_message.content, "$agent remind me tomorrow at 1900 to watch tv together")
         self.assertEqual(responses[0].text, "reminder scheduled")
 
+    async def test_chinese_chat_reminder_is_routed_to_agent(self):
+        message = self.message("$chat -s 明天19点提醒我们看射雕英雄传")
+
+        with patch("features.feature_chat.unified_chat.query_chat") as query_chat:
+            responses = await self.feature.handle(self.app, message)
+
+        query_chat.assert_not_called()
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent 明天19点提醒我们看射雕英雄传")
+        self.assertEqual(responses[0].text, "reminder scheduled")
+
+    async def test_chinese_status_request_is_routed_to_agent(self):
+        message = self.message("$chat -s 显示服务器状态")
+
+        with patch("features.feature_chat.unified_chat.query_chat") as query_chat:
+            await self.feature.handle(self.app, message)
+
+        query_chat.assert_not_called()
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent 显示服务器状态")
+
+    async def test_effort_setting_is_persisted(self):
+        message = self.message("$chat --effort high")
+
+        with patch(
+            "features.feature_chat.unified_chat.set_effort",
+            return_value="Effort set to **high** for this channel",
+        ) as set_effort:
+            responses = await self.feature.handle(self.app, message)
+
+        set_effort.assert_called_once_with("channel", "high")
+        self.assertIn("Effort set to **high**", responses[0].text)
+
     async def test_creator_chat_receives_private_context(self):
         message = self.message("$chat -s hello")
 

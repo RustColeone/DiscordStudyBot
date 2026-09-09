@@ -452,6 +452,11 @@ $chat --listen off                 # Disable listen mode
 
 **Note**: Each channel has its own LLM settings and chat history!
 
+Chat history uses rolling context compression instead of a fixed message-count cutoff. When a
+provider approaches 80% of its usable context window, older turns are summarized into durable
+memory while recent turns remain verbatim. `$chat --clear` removes both raw history and the
+compressed summary for the active provider.
+
 ---
 
 ## 🎵 Music Player Commands

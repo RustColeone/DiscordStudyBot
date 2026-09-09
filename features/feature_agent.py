@@ -81,7 +81,7 @@ class AgentFeature:
         if not request:
             return [BotResponse(text="Use `$agent tools` or mention me with an action request.")]
 
-        if request.lower().startswith("remind me "):
+        if request.lower().startswith("remind me ") or "提醒" in request:
             return self.time_feature.create_natural_reminder(app, message, request)
 
         loop = asyncio.get_running_loop()

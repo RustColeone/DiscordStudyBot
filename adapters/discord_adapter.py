@@ -135,11 +135,16 @@ class DiscordAdapter:
     async def _send_responses(self, channel, responses):
         for response in responses:
             if response.text is not None and response.attachment is None:
-                await channel.send(response.text)
+                for chunk in self._split_message(response.text):
+                    await channel.send(chunk)
                 continue
 
             if response.attachment is not None:
                 await self._send_attachment_response(channel, response)
+
+    @staticmethod
+    def _split_message(content: str, limit: int = 2000) -> list[str]:
+        return [content[index:index + limit] for index in range(0, len(content), limit)] or [""]
 
     async def _send_attachment_response(self, channel, response) -> None:
         attachment = response.attachment

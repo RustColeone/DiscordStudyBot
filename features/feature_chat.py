@@ -17,10 +17,29 @@ class ChatFeature:
     @staticmethod
     def _is_agent_intent(text: str) -> bool:
         normalized = text.strip().lower()
-        if normalized.startswith(("remind me ", "set a reminder ", "schedule a reminder ")):
+        reminder_terms = (
+            "remind me ", "set a reminder ", "schedule a reminder ",
+            "提醒", "リマインド", "напомни", "recuérdame", "recordarme",
+            "rappelle-moi", "erinnere mich", "تذكير", "याद दिला",
+        )
+        if any(term in normalized for term in reminder_terms):
             return True
-        action_terms = ("remind", "system status", "current time", "search", "help")
-        return " then " in normalized and any(term in normalized for term in action_terms)
+        multilingual_action_terms = (
+            "系统状态", "系統狀態", "服务器状态", "伺服器狀態",
+            "现在几点", "現在幾點", "当前时间", "當前時間",
+            "搜索", "搜尋", "查找", "帮助", "幫助",
+            "システム状態", "検索", "покажи статус", "найди",
+            "buscar", "rechercher", "suchen",
+        )
+        if any(term in normalized for term in multilingual_action_terms):
+            return True
+        action_terms = (
+            "remind", "system status", "current time", "search", "help",
+        )
+        sequence_terms = (" then ", "然后", "然後", "接着", "接著")
+        return any(term in normalized for term in sequence_terms) and any(
+            term in normalized for term in action_terms
+        )
 
     @staticmethod
     def _creator_context(app, message: IncomingMessage):
@@ -58,6 +77,9 @@ class ChatFeature:
 
         if cmd.model:
             responses.append(unified_chat.set_model(self._channel_key(message), cmd.model))
+
+        if cmd.effort:
+            responses.append(unified_chat.set_effort(self._channel_key(message), cmd.effort))
 
         if cmd.prompt_action:
             if cmd.prompt_action == "list":

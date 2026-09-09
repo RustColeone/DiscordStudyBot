@@ -41,6 +41,18 @@ class ReminderParserTests(unittest.TestCase):
         self.assertEqual(parsed.remind_at.hour, 19)
         self.assertEqual(parsed.remind_at.minute, 0)
 
+    def test_parses_chinese_reminder(self):
+        parsed = parse_natural_reminder(
+            "明天19点提醒我们看射雕英雄传",
+            self.now,
+            "America/Los_Angeles",
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.remind_at.hour, 19)
+        self.assertEqual(parsed.remind_at.minute, 0)
+        self.assertEqual(parsed.message, "看射雕英雄传")
+
     def test_rejects_missing_action(self):
         self.assertIsNone(parse_natural_reminder("remind me tomorrow", self.now, "UTC"))
 

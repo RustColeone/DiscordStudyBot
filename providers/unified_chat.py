@@ -6,6 +6,7 @@ from providers import deepseek_query
 from providers import gemini_query
 from services import database as db
 from services.config_service import optional_secret
+from services.effort import instruction_for_effort, normalize_effort, planning_attempts_for_effort
 import json
 from openai import OpenAI
 import google.generativeai as genai
@@ -240,31 +241,50 @@ def query_chat(user_input: str, channel_id: int, time, username: str = None, sys
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
     model = settings["model"]
+    effort = normalize_effort(settings["effort"])
+    effort_context = instruction_for_effort(effort)
+    combined_context = "\n\n".join(value for value in (system_context, effort_context) if value)
     
     # Route to the appropriate query function
     if llm == "chatgpt":
-        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username, system_context)
+        return chatgpt_query.queryChatGPT(user_input, channel_id, time, model, username, combined_context, effort)
     elif llm == "gemini":
-        return gemini_query.queryGemini(user_input, channel_id, time, model, username, system_context)
+        return gemini_query.queryGemini(user_input, channel_id, time, model, username, combined_context, effort)
     elif llm == "deepseek":
-        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username, system_context)
+        return deepseek_query.queryDeepSeek(user_input, channel_id, time, model, username, combined_context, effort)
     else:
         return f"Unknown LLM: {llm}"
 
 def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> list:
     tool_json = json.dumps(tools, ensure_ascii=False)
-    prompt = (
-        "You are a command planner. Return only a JSON array with at most five actions. "
-        "Each action must have exactly: {\"tool\": <registered name>, \"arguments\": <object>}. "
-        "Use only the registered tools and preserve the user's requested order. "
-        f"Registered tools: {tool_json}\nUser request: {user_input}"
-    )
-    response = query_chat(prompt, channel_id, time)
-    start = response.find("[")
-    end = response.rfind("]")
-    if start == -1 or end == -1 or end < start:
-        raise ValueError("the language model did not return a JSON action list")
-    return json.loads(response[start:end + 1])
+    settings = db.get_channel_settings(str(channel_id))
+    attempts = planning_attempts_for_effort(settings["effort"])
+    previous_error = ""
+    for _ in range(attempts):
+        prompt = (
+            "You are a language-independent command planner. Understand the user's language and intent. "
+            "Return only a JSON array with at most five actions. Each action must have exactly: "
+            "{\"tool\": <registered name>, \"arguments\": <object>}. Use only registered tools, "
+            "preserve requested order, and translate intent into tool arguments when needed. "
+            f"Registered tools: {tool_json}\nUser request: {user_input}"
+            f"{previous_error}"
+        )
+        response = query_chat(prompt, channel_id, time)
+        try:
+            start = response.find("[")
+            end = response.rfind("]")
+            if start == -1 or end == -1 or end < start:
+                raise ValueError("missing JSON array")
+            plan = json.loads(response[start:end + 1])
+            allowed_tools = {tool["name"] for tool in tools}
+            if not isinstance(plan, list) or not plan or len(plan) > 5:
+                raise ValueError("plan must contain one to five actions")
+            if any(step.get("tool") not in allowed_tools or not isinstance(step.get("arguments"), dict) for step in plan):
+                raise ValueError("plan used an invalid tool or arguments")
+            return plan
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
+            previous_error = f"\nThe previous response was invalid ({error}). Re-check the schema and try again."
+    raise ValueError(f"the language model did not return a valid action plan after {attempts} attempt(s)")
 
 def clear_history(channel_id: int):
     """Clear chat history for the active LLM"""
@@ -363,16 +383,23 @@ def set_model(channel_id: int, model_name: str) -> str:
     db.set_channel_model(str(channel_id), model_name)
     return f"Model set to `{model_name}` for {AVAILABLE_LLMS[llm]['name']}"
 
+def set_effort(channel_id: int, effort: str) -> str:
+    effort = normalize_effort(effort)
+    db.set_effort_level(str(channel_id), effort)
+    return f"Effort set to **{effort}** for this channel"
+
 def get_status(channel_id: int) -> str:
     """Get current LLM and model status"""
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
     model = settings["model"]
     listen = settings["listen_mode"]
+    effort = settings["effort"]
     
     status = f"**Current Configuration:**\n"
     status += f"LLM: **{AVAILABLE_LLMS[llm]['name']}** (`{llm}`)\n"
     status += f"Model: `{model}`\n"
+    status += f"Effort: **{effort}**\n"
     status += f"Listen Mode: {'🟢 ON' if listen else '🔴 OFF'}"
     
     return status

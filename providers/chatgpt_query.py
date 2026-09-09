@@ -7,6 +7,8 @@ import pytz
 import copy
 from services import database as db
 from services.config_service import optional_secret
+from services.context_compression import compact_history_if_needed, context_limit_for_model
+from services.effort import max_tokens_for_effort
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -21,8 +23,24 @@ client = OpenAI(api_key=api_key) if api_key else None
 
 AI_MODEL_NAME = "chatgpt"
 
-def _load_history_from_db(channelID):
+def _summarize_context(source, model):
+    response = client.chat.completions.create(
+        messages=[{"role": "user", "content": source}],
+        model=model,
+        temperature=0.1,
+        max_tokens=4096,
+    )
+    return response.choices[0].message.content or ""
+
+def _load_history_from_db(channelID, model="gpt-3.5-turbo", effort="high"):
     """Load chat history from database"""
+    compact_history_if_needed(
+        str(channelID),
+        AI_MODEL_NAME,
+        lambda source: _summarize_context(source, model),
+        max_tokens_for_effort(effort),
+        context_limit_for_model(AI_MODEL_NAME, model),
+    )
     history = db.load_chat_history(str(channelID), AI_MODEL_NAME)
     
     # If no history, initialize with system prompt
@@ -33,12 +51,13 @@ def _load_history_from_db(channelID):
     
     return history
 
-def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=None, system_context=None):
+def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=None, system_context=None,
+                 effort="high"):
     if client is None:
         return "ChatGPT is not configured."
 
     # Load history from database
-    history = _load_history_from_db(channelID)
+    history = _load_history_from_db(channelID, model, effort)
     
     # Prepend username to message if provided
     message_content = f"[{username}]: {user_input}" if username else user_input
@@ -57,7 +76,7 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=No
         "messages": request_history,
         "model": model,
         "temperature": 0.5,
-        "max_tokens": 500
+        "max_tokens": max_tokens_for_effort(effort)
     }
     try:
         response = client.chat.completions.create(**params)

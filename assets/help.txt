@@ -32,6 +32,7 @@ $chat -l <llm>     Set LLM (chatgpt/gemini/deepseek)
 $chat -m <model>   Set model
 $chat -p <0-3>     Set prompt preset
 $chat --listen on/off   Enable/disable auto-respond mode
+$chat --effort LEVEL    Set reasoning effort: low, medium, or high
 $chat --models     List LLMs & models
 
 ## Bridge (External Apps)
@@ -80,6 +81,9 @@ History & Modes:
 $chat -c                 Clear chat history (or --clear)
 $chat --listen on        Enable listen mode (auto-respond to all messages)
 $chat --listen off       Disable listen mode
+
+Older chat turns are automatically compressed into a durable summary near the model's context limit.
+$chat -c removes both recent turns and compressed context for the active LLM.
 
 Command Chaining Examples:
 $chat -l gemini -m gemini-1.5-pro -s Hello

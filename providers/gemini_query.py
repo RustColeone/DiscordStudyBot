@@ -7,6 +7,8 @@ import pytz
 import copy
 from services import database as db
 from services.config_service import optional_secret
+from services.context_compression import compact_history_if_needed, context_limit_for_model
+from services.effort import max_tokens_for_effort
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -25,6 +27,17 @@ AI_MODEL_NAME = "gemini"
 # Cache for active chat sessions (not persisted)
 chat_sessions = {}
 chat_session_contexts = {}
+
+def _summarize_context(source, model_name):
+    model = genai.GenerativeModel(model_name)
+    response = model.generate_content(
+        source,
+        generation_config=genai.types.GenerationConfig(
+            max_output_tokens=8192,
+            temperature=0.1,
+        ),
+    )
+    return response.text
 
 def _get_current_prompt_index(channelID):
     """Get current system prompt index from first message in history"""
@@ -45,6 +58,9 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
         db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", system_prompt[prompt_index]["content"])
     
     system_instruction = system_prompt[prompt_index]["content"]
+    compressed_context = [msg["content"] for msg in history[1:] if msg["role"] == "system"]
+    if compressed_context:
+        system_instruction += "\n\n" + "\n\n".join(compressed_context)
     if system_context:
         system_instruction += f"\n\n{system_context}"
     model = genai.GenerativeModel(
@@ -67,9 +83,21 @@ def _create_chat_session(channelID, prompt_index=0, model_name="gemini-2.5-flash
     chat_session_contexts[str(channelID)] = system_context
     return chat
 
-def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None):
+def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None,
+                effort="high"):
     if not api_key:
         return "Gemini is not configured."
+
+    compression = compact_history_if_needed(
+        str(channelID),
+        AI_MODEL_NAME,
+        lambda source: _summarize_context(source, model),
+        max_tokens_for_effort(effort),
+        context_limit_for_model(AI_MODEL_NAME, model),
+    )
+    if compression.compressed:
+        chat_sessions.pop(str(channelID), None)
+        chat_session_contexts.pop(str(channelID), None)
 
     # Get or create chat session
     if str(channelID) not in chat_sessions or chat_session_contexts.get(str(channelID)) != system_context:
@@ -88,7 +116,7 @@ def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=
         response = chat.send_message(
             message_content,
             generation_config=genai.types.GenerationConfig(
-                max_output_tokens=500,
+                max_output_tokens=max_tokens_for_effort(effort),
                 temperature=0.5,
             )
         )

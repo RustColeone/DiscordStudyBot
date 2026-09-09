@@ -1,0 +1,67 @@
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+from providers import deepseek_query
+
+
+class DeepSeekLimitTests(unittest.TestCase):
+    def test_high_effort_uses_supported_maximum_output(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="done"),
+            )]
+        )
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message"):
+            result = deepseek_query.queryDeepSeek("hello", "channel", None, effort="high")
+
+        self.assertEqual(result, "done")
+        self.assertEqual(client.chat.completions.create.call_args.kwargs["max_tokens"], 384000)
+
+    def test_output_limit_is_reported(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="length",
+                message=SimpleNamespace(content="partial"),
+            )]
+        )
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message"):
+            result = deepseek_query.queryDeepSeek("hello", "channel", None, effort="high")
+
+        self.assertIn("partial", result)
+        self.assertIn("Ask me to continue", result)
+
+    def test_context_overflow_forces_compression_and_retries(self):
+        client = Mock()
+        client.chat.completions.create.side_effect = [
+            Exception("maximum context length exceeded"),
+            SimpleNamespace(choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="recovered"),
+            )]),
+        ]
+        compression = SimpleNamespace(compressed=True)
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query, "compact_history_if_needed", return_value=compression) as compact, \
+                patch.object(deepseek_query.db, "load_chat_history", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message"):
+            result = deepseek_query.queryDeepSeek("hello", "channel", None, effort="high")
+
+        self.assertEqual(result, "recovered")
+        self.assertTrue(compact.call_args.kwargs["force"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
