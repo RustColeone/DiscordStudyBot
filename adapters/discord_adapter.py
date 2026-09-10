@@ -6,6 +6,7 @@ import discord
 
 from app.bot_types import IncomingMessage
 from services.command_queue import CommandQueue, QueuedCommand
+from services.vision import image_metadata
 
 
 class DiscordAdapter:
@@ -47,9 +48,8 @@ class DiscordAdapter:
             if incoming_message.content.startswith("$"):
                 await self._enqueue_command(native_message.channel, incoming_message)
                 return
-            async with native_message.channel.typing():
-                responses = await self.app.handle_message(incoming_message)
-                await self._send_responses(native_message.channel, responses)
+            responses = await self.app.handle_message(incoming_message)
+            await self._send_responses(native_message.channel, responses)
 
     def _start_command_worker(self) -> None:
         if self.command_worker_task is None or self.command_worker_task.done():
@@ -66,9 +66,8 @@ class DiscordAdapter:
             command = await self.command_queue.get()
             self.command_queue.active = True
             try:
-                async with command.channel.typing():
-                    responses = await self.app.handle_message(command.message)
-                    await self._send_responses(command.channel, responses)
+                responses = await self.app.handle_message(command.message)
+                await self._send_responses(command.channel, responses)
             except Exception as error:
                 print(f"Queued command failed: {error}")
                 await command.channel.send("Command failed. Check the bot logs for details.")
@@ -117,9 +116,17 @@ class DiscordAdapter:
             attachment.url for attachment in getattr(referenced_message, "attachments", [])
             if getattr(attachment, "url", None)
         ]
+        referenced_image_attachments = [
+            image for attachment in getattr(referenced_message, "attachments", [])
+            if (image := image_metadata(attachment)) is not None
+        ]
         attachment_urls = [
             attachment.url for attachment in getattr(native_message, "attachments", [])
             if getattr(attachment, "url", None)
+        ]
+        image_attachments = [
+            image for attachment in getattr(native_message, "attachments", [])
+            if (image := image_metadata(attachment)) is not None
         ]
         if was_mentioned and self.client.user is not None:
             content = re.sub(rf"<@!?{self.client.user.id}>\s*", "", content).strip()
@@ -148,7 +155,9 @@ class DiscordAdapter:
                 "is_creator": is_creator,
                 "referenced_content": referenced_content,
                 "referenced_attachment_urls": referenced_attachment_urls,
+                "referenced_image_attachments": referenced_image_attachments,
                 "attachment_urls": attachment_urls,
+                "image_attachments": image_attachments,
             },
         )
 

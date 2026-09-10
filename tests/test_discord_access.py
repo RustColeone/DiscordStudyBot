@@ -103,6 +103,43 @@ class DiscordAccessTests(unittest.TestCase):
             ["https://cdn.example/video.mp4"],
         )
 
+    def test_captures_only_supported_image_attachments_for_vision(self):
+        native_message = SimpleNamespace(
+            content="what is this?",
+            guild=None,
+            channel=SimpleNamespace(id="100", name="general"),
+            author=SimpleNamespace(id=7, name="User", display_name="User", bot=False),
+            created_at=None,
+            mentions=[],
+            attachments=[
+                SimpleNamespace(
+                    url="https://cdn.discordapp.com/photo.png",
+                    filename="photo.png",
+                    content_type="image/png",
+                    size=1024,
+                ),
+                SimpleNamespace(
+                    url="https://cdn.discordapp.com/notes.txt",
+                    filename="notes.txt",
+                    content_type="text/plain",
+                    size=100,
+                ),
+            ],
+            reference=None,
+        )
+
+        incoming = self.adapter._to_incoming_message(native_message)
+
+        self.assertEqual(
+            incoming.metadata["image_attachments"],
+            [{
+                "url": "https://cdn.discordapp.com/photo.png",
+                "filename": "photo.png",
+                "content_type": "image/png",
+                "size": 1024,
+            }],
+        )
+
     def test_splits_long_responses_at_discord_limit(self):
         content = "x" * 4500
 

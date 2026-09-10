@@ -104,9 +104,10 @@ class TimeFeature:
         reminders = db.get_pending_reminders(message.channel_id, author_id)
         if not reminders:
             return "You have no pending reminders in this channel."
+        local_timezone = pytz.timezone(resolve_timezone_name(None))
         lines = []
         for reminder in reminders:
-            remind_at = datetime.fromisoformat(reminder["remind_at"])
+            remind_at = datetime.fromisoformat(reminder["remind_at"]).astimezone(local_timezone)
             owner = f" for {reminder['author_name']}" if author_id is None else ""
             lines.append(
                 f"- **#{reminder['id']}** `{remind_at:%Y-%m-%d %H:%M %Z}`{owner}: {reminder['message']}"
@@ -130,25 +131,44 @@ class TimeFeature:
 
     def start_scheduler(self, app) -> None:
         if self.reminder_scheduler_task is None or self.reminder_scheduler_task.done():
+            print("Reminder scheduler started (15-second polling interval)", flush=True)
             self.reminder_scheduler_task = app.platform.create_background_task(self._run_reminder_scheduler(app))
 
     async def _run_reminder_scheduler(self, app) -> None:
         while True:
-            for reminder in db.get_due_reminders(datetime.now(timezone.utc)):
-                try:
-                    recipient = (
-                        f"<@{reminder['author_id']}>"
-                        if reminder["platform"] == "discord"
-                        else reminder["author_name"]
-                    )
-                    await app.platform.send_channel_message(
-                        reminder["channel_id"],
-                        f"{recipient} Reminder: {reminder['message']}",
-                    )
-                    db.mark_reminder_sent(reminder["id"])
-                except Exception as error:
-                    print(f"Reminder {reminder['id']} delivery failed: {error}")
+            try:
+                await self._deliver_due_reminders(app)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                print(f"Reminder scheduler cycle failed; polling will continue: {error}", flush=True)
             await asyncio.sleep(15)
+
+    async def _deliver_due_reminders(self, app, now: datetime = None) -> None:
+        due_reminders = db.get_due_reminders(now or datetime.now(timezone.utc))
+        for reminder in due_reminders:
+            reminder_id = reminder["id"]
+            channel_id = reminder["channel_id"]
+            print(f"Delivering reminder {reminder_id} to channel {channel_id}", flush=True)
+            try:
+                db.record_reminder_attempt(reminder_id)
+                recipient = (
+                    f"<@{reminder['author_id']}>"
+                    if reminder["platform"] == "discord"
+                    else reminder["author_name"]
+                )
+                await app.platform.send_channel_message(
+                    channel_id,
+                    f"{recipient} Reminder: {reminder['message']}",
+                )
+                db.mark_reminder_sent(reminder_id)
+                print(f"Reminder {reminder_id} delivered successfully", flush=True)
+            except Exception as error:
+                try:
+                    db.record_reminder_failure(reminder_id, str(error))
+                except Exception as logging_error:
+                    print(f"Could not persist failure for reminder {reminder_id}: {logging_error}", flush=True)
+                print(f"Reminder {reminder_id} delivery failed; it will be retried: {error}", flush=True)
 
     async def _run_clock(self, app, channel_id: str) -> None:
         native_message = await app.platform.send_channel_message(channel_id, "Starting Clock")

@@ -9,6 +9,7 @@ from services import database as db
 from services.config_service import optional_secret
 from services.context_compression import compact_history_if_needed, context_limit_for_model
 from services.effort import deepseek_max_tokens_for_effort, normalize_effort
+from services.vision import openai_image_content, persistent_image_text
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -59,7 +60,7 @@ def _is_context_error(error):
     message = str(error).lower()
     return "context" in message and ("length" in message or "token" in message)
 
-def _load_history_from_db(channelID, model="deepseek-v4-flash", effort="high"):
+def _load_history_from_db(channelID, model="deepseek-flash", effort="high"):
     """Load chat history from database"""
     compact_history_if_needed(
         str(channelID),
@@ -78,8 +79,8 @@ def _load_history_from_db(channelID, model="deepseek-v4-flash", effort="high"):
     
     return history
 
-def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", username=None, system_context=None,
-                  effort="high", persist=True):
+def queryDeepSeek(user_input, channelID, time, model="deepseek-flash", username=None, system_context=None,
+                  effort="high", persist=True, images=None):
     if client is None:
         return "DeepSeek is not configured."
 
@@ -88,12 +89,15 @@ def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", userna
     
     # Prepend username to message if provided
     message_content = f"[{username}]: {user_input}" if username else user_input
+    images = images or []
     
     # Add user message to history
-    prompt = {"role": "user", "content": message_content}
+    prompt = {"role": "user", "content": openai_image_content(message_content, images)}
     history.append(prompt)
     if persist:
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+        db.save_chat_message(
+            str(channelID), AI_MODEL_NAME, "user", persistent_image_text(message_content, images)
+        )
 
     request_history = list(history)
     if system_context:
@@ -124,6 +128,8 @@ def queryDeepSeek(user_input, channelID, time, model="deepseek-v4-flash", userna
             if not compression.compressed:
                 raise
             request_history = db.load_chat_history(str(channelID), AI_MODEL_NAME)
+            if images and request_history and request_history[-1]["role"] == "user":
+                request_history[-1] = prompt
             if system_context:
                 request_history.insert(1, {"role": "system", "content": system_context})
             params["messages"] = request_history

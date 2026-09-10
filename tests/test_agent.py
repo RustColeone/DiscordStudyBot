@@ -110,6 +110,23 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response[0].text, "doing well")
         self.assertEqual(query_chat.call_args.args[4], "private context")
 
+    async def test_conversational_image_is_forwarded_to_model(self):
+        message = self._message("$agent what is this?")
+        image = {
+            "url": "https://cdn.discordapp.com/photo.png",
+            "filename": "photo.png",
+            "content_type": "image/png",
+            "size": 1024,
+        }
+        message.metadata["image_attachments"] = [image]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
+                patch("features.feature_agent.unified_chat.query_chat", return_value="a cat") as query_chat:
+            response = await self.agent.handle(self.app, message)
+
+        self.assertEqual(response[0].text, "a cat")
+        self.assertEqual(query_chat.call_args.args[6], [image])
+
     async def test_missing_action_context_can_request_clarification(self):
         plan = [{
             "tool": "ask_clarification",

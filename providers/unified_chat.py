@@ -7,6 +7,7 @@ from providers import gemini_query
 from services import database as db
 from services.config_service import optional_secret
 from services.effort import instruction_for_effort, normalize_effort, planning_attempts_for_effort
+from services.vision import supports_image_input
 import json
 from openai import OpenAI
 import google.generativeai as genai
@@ -117,8 +118,11 @@ def _fetch_deepseek_models():
         client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         models = client.models.list()
         
-        # Get all DeepSeek models
+        # Keep the current V4.1 Flash alias as the default when it is available.
         deepseek_models = [m.id for m in models.data]
+        if "deepseek-flash" in deepseek_models:
+            deepseek_models.remove("deepseek-flash")
+            deepseek_models.insert(0, "deepseek-flash")
         
         return deepseek_models if deepseek_models else None
     except Exception as e:
@@ -237,7 +241,7 @@ def get_prompt_list() -> str:
     return msg
 
 def query_chat(user_input: str, channel_id: int, time, username: str = None, system_context: str = None,
-               persist: bool = True) -> str:
+               persist: bool = True, images: list = None) -> str:
     """Route chat query to the appropriate LLM based on channel settings"""
     settings = db.get_channel_settings(str(channel_id))
     llm = settings["llm"]
@@ -245,19 +249,22 @@ def query_chat(user_input: str, channel_id: int, time, username: str = None, sys
     effort = normalize_effort(settings["effort"])
     effort_context = instruction_for_effort(effort)
     combined_context = "\n\n".join(value for value in (system_context, effort_context) if value)
+    images = images or []
+    if images and not supports_image_input(llm, model):
+        return f"The selected model `{model}` does not support image input. Switch to `deepseek-flash` and retry."
     
     # Route to the appropriate query function
     if llm == "chatgpt":
         return chatgpt_query.queryChatGPT(
-            user_input, channel_id, time, model, username, combined_context, effort, persist
+            user_input, channel_id, time, model, username, combined_context, effort, persist, images
         )
     elif llm == "gemini":
         return gemini_query.queryGemini(
-            user_input, channel_id, time, model, username, combined_context, effort, persist
+            user_input, channel_id, time, model, username, combined_context, effort, persist, images
         )
     elif llm == "deepseek":
         return deepseek_query.queryDeepSeek(
-            user_input, channel_id, time, model, username, combined_context, effort, persist
+            user_input, channel_id, time, model, username, combined_context, effort, persist, images
         )
     else:
         return f"Unknown LLM: {llm}"

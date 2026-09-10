@@ -5,10 +5,12 @@ import json
 import datetime
 import pytz
 import copy
+import requests
 from services import database as db
 from services.config_service import optional_secret
 from services.context_compression import compact_history_if_needed, context_limit_for_model
 from services.effort import max_tokens_for_effort
+from services.vision import MAX_IMAGE_BYTES, persistent_image_text
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -103,7 +105,7 @@ def _create_transient_chat_session(channelID, prompt_index=0, model_name="gemini
     return model.start_chat(history=gemini_history)
 
 def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None,
-                effort="high", persist=True):
+                effort="high", persist=True, images=None):
     if not api_key:
         return "Gemini is not configured."
 
@@ -128,12 +130,25 @@ def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=
         chat = chat_sessions[str(channelID)]
 
     message_content = f"[{username}]: {user_input}" if username else user_input
+    images = images or []
     if persist:
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+        db.save_chat_message(
+            str(channelID), AI_MODEL_NAME, "user", persistent_image_text(message_content, images)
+        )
 
     try:
+        message_parts = [message_content]
+        for image in images:
+            response = requests.get(image["url"], timeout=30)
+            response.raise_for_status()
+            if len(response.content) > MAX_IMAGE_BYTES:
+                raise ValueError("Image exceeds the 32 MiB vision limit")
+            message_parts.append(genai.protos.Part(inline_data=genai.protos.Blob(
+                mime_type=image["content_type"],
+                data=response.content,
+            )))
         response = chat.send_message(
-            message_content,
+            message_parts if images else message_content,
             generation_config=genai.types.GenerationConfig(
                 max_output_tokens=max_tokens_for_effort(effort),
                 temperature=0.5,

@@ -9,6 +9,7 @@ from services import database as db
 from services.config_service import optional_secret
 from services.context_compression import compact_history_if_needed, context_limit_for_model
 from services.effort import max_tokens_for_effort
+from services.vision import openai_image_content, persistent_image_text
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -52,7 +53,7 @@ def _load_history_from_db(channelID, model="gpt-3.5-turbo", effort="high"):
     return history
 
 def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=None, system_context=None,
-                 effort="high", persist=True):
+                 effort="high", persist=True, images=None):
     if client is None:
         return "ChatGPT is not configured."
 
@@ -61,12 +62,15 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=No
     
     # Prepend username to message if provided
     message_content = f"[{username}]: {user_input}" if username else user_input
+    images = images or []
     
     # Add user message to history
-    prompt = {"role": "user", "content": message_content}
+    prompt = {"role": "user", "content": openai_image_content(message_content, images)}
     history.append(prompt)
     if persist:
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "user", message_content)
+        db.save_chat_message(
+            str(channelID), AI_MODEL_NAME, "user", persistent_image_text(message_content, images)
+        )
 
     request_history = list(history)
     if system_context:

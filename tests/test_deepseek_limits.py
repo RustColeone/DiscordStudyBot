@@ -40,6 +40,34 @@ class DeepSeekLimitTests(unittest.TestCase):
         self.assertIn("partial", result)
         self.assertIn("Ask me to continue", result)
 
+    def test_image_is_sent_as_multimodal_user_content(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="a cat"),
+            )]
+        )
+        images = [{
+            "url": "https://cdn.discordapp.com/photo.png",
+            "filename": "photo.png",
+            "content_type": "image/png",
+            "size": 1024,
+        }]
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message") as save_message:
+            result = deepseek_query.queryDeepSeek(
+                "what is this?", "channel", None, images=images
+            )
+
+        self.assertEqual(result, "a cat")
+        user_content = client.chat.completions.create.call_args.kwargs["messages"][-1]["content"]
+        self.assertEqual(user_content[0], {"type": "text", "text": "what is this?"})
+        self.assertEqual(user_content[1]["image_url"]["url"], images[0]["url"])
+        self.assertIn("[Attached images: photo.png]", save_message.call_args_list[0].args[3])
+
     def test_context_overflow_forces_compression_and_retries(self):
         client = Mock()
         client.chat.completions.create.side_effect = [

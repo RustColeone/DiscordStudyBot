@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from app.bot_types import BotResponse, HandlerResult, IncomingMessage
 from providers import unified_chat
 from services.command_registry import CommandRegistry, CommandTool
+from services.generation_activity import show_generation_typing
 
 
 class AgentFeature:
@@ -262,29 +263,37 @@ class AgentFeature:
         loop = asyncio.get_running_loop()
         try:
             try:
-                plan = await loop.run_in_executor(
-                    None,
-                    unified_chat.plan_agent_actions,
-                    planning_request,
-                    self.registry.schemas(),
-                    message.channel_id,
-                    message.created_at,
-                )
+                async with show_generation_typing(message):
+                    plan = await loop.run_in_executor(
+                        None,
+                        unified_chat.plan_agent_actions,
+                        planning_request,
+                        self.registry.schemas(),
+                        message.channel_id,
+                        message.created_at,
+                    )
                 self._validate_plan(plan)
             except Exception as error:
                 return [BotResponse(text=f"I couldn't build a valid action plan: {error}")]
 
             if not plan:
                 await self._update_progress(app, progress, "No tool is needed; composing a response...")
-                answer = await loop.run_in_executor(
-                    None,
-                    unified_chat.query_chat,
-                    request,
-                    message.channel_id,
-                    message.created_at,
-                    message.author_display_name,
-                    app.config.get("CREATOR_PROMPT") if message.metadata.get("is_creator") else None,
+                images = (
+                    (message.metadata.get("referenced_image_attachments") or [])
+                    + (message.metadata.get("image_attachments") or [])
                 )
+                async with show_generation_typing(message):
+                    answer = await loop.run_in_executor(
+                        None,
+                        unified_chat.query_chat,
+                        request,
+                        message.channel_id,
+                        message.created_at,
+                        message.author_display_name,
+                        app.config.get("CREATOR_PROMPT") if message.metadata.get("is_creator") else None,
+                        True,
+                        images,
+                    )
                 return [BotResponse(text=answer)]
 
             tool_names = self._format_tool_names(plan)

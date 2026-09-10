@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 DATABASE_PATH = 'bot_data.db'
 DEFAULT_LLM = "deepseek"
-DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_EFFORT = "high"
 
 @contextmanager
@@ -72,7 +72,7 @@ def init_database():
             CREATE TABLE IF NOT EXISTS channel_settings (
                 channel_id TEXT PRIMARY KEY,
                 active_llm TEXT DEFAULT 'deepseek',
-                active_model TEXT DEFAULT 'deepseek-v4-flash',
+                active_model TEXT DEFAULT 'deepseek-flash',
                 listen_mode INTEGER DEFAULT 0,
                 effort_level TEXT DEFAULT 'high',
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -90,6 +90,13 @@ def init_database():
             ''', (DEFAULT_LLM, DEFAULT_MODEL, DEFAULT_EFFORT))
 
         cursor.execute('''
+            UPDATE channel_settings
+            SET active_model = ?, last_updated = CURRENT_TIMESTAMP
+            WHERE active_llm = 'deepseek'
+              AND active_model IN ('deepseek-v4-flash', 'deepseek-v4-flash-vision-exp')
+        ''', (DEFAULT_MODEL,))
+
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 channel_id TEXT NOT NULL,
@@ -99,9 +106,25 @@ def init_database():
                 remind_at TEXT NOT NULL,
                 message TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_attempt_at TEXT,
+                last_error TEXT,
+                sent_at TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        cursor.execute("PRAGMA table_info(reminders)")
+        reminder_columns = {row[1] for row in cursor.fetchall()}
+        reminder_migrations = {
+            "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+            "last_attempt_at": "TEXT",
+            "last_error": "TEXT",
+            "sent_at": "TEXT",
+        }
+        for column_name, definition in reminder_migrations.items():
+            if column_name not in reminder_columns:
+                cursor.execute(f"ALTER TABLE reminders ADD COLUMN {column_name} {definition}")
 
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_reminders_due
@@ -319,7 +342,26 @@ def delete_pending_reminder(reminder_id: int, channel_id: str, author_id: str,
 
 def mark_reminder_sent(reminder_id: int) -> None:
     with get_db() as conn:
-        conn.execute("UPDATE reminders SET status = 'sent' WHERE id = ?", (reminder_id,))
+        conn.execute('''
+            UPDATE reminders
+            SET status = 'sent', sent_at = ?, last_error = NULL
+            WHERE id = ?
+        ''', (datetime.datetime.now(datetime.timezone.utc).isoformat(), reminder_id))
+
+def record_reminder_attempt(reminder_id: int) -> None:
+    with get_db() as conn:
+        conn.execute('''
+            UPDATE reminders
+            SET attempt_count = attempt_count + 1, last_attempt_at = ?, last_error = NULL
+            WHERE id = ? AND status = 'pending'
+        ''', (datetime.datetime.now(datetime.timezone.utc).isoformat(), reminder_id))
+
+def record_reminder_failure(reminder_id: int, error: str) -> None:
+    with get_db() as conn:
+        conn.execute('''
+            UPDATE reminders SET last_error = ?
+            WHERE id = ? AND status = 'pending'
+        ''', (error[:1000], reminder_id))
 
 # ==================== Export/Import Functions ====================
 

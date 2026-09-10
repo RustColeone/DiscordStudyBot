@@ -43,11 +43,11 @@
       "deepseek": {
         "name": "DeepSeek",
         "models": [
-          "deepseek-v4-flash",
+          "deepseek-flash",
           "deepseek-v4-pro",
-          "deepseek-v4-flash-vision-exp"
+          "deepseek-v4-flash"
         ],
-        "default_model": "deepseek-v4-flash"
+        "default_model": "deepseek-flash"
       },
       "gemini": {
         "name": "Gemini (Google)",

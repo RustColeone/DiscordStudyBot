@@ -1,10 +1,12 @@
 import json
+import asyncio
 from dataclasses import replace
 
 from providers import unified_chat
 from services import database as db
 from app.bot_types import BotResponse, HandlerResult, IncomingMessage
 from parsers.command_parsers import parse_chat_command
+from services.generation_activity import show_generation_typing
 
 
 class ChatFeature:
@@ -26,13 +28,23 @@ class ChatFeature:
 
         settings = db.get_channel_settings(message.channel_id)
         if settings["listen_mode"]:
-            answer = unified_chat.query_chat(
-                message.content,
-                self._channel_key(message),
-                message.created_at,
-                message.author_display_name,
-                self._creator_context(app, message),
+            loop = asyncio.get_running_loop()
+            images = (
+                (message.metadata.get("referenced_image_attachments") or [])
+                + (message.metadata.get("image_attachments") or [])
             )
+            async with show_generation_typing(message):
+                answer = await loop.run_in_executor(
+                    None,
+                    unified_chat.query_chat,
+                    message.content,
+                    self._channel_key(message),
+                    message.created_at,
+                    message.author_display_name,
+                    self._creator_context(app, message),
+                    True,
+                    images,
+                )
             return [BotResponse(text=answer)]
 
         return []
