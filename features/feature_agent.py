@@ -55,12 +55,16 @@ class AgentFeature:
             handler=self._current_time,
         ))
         self.registry.register(CommandTool(
-            name="google_search",
-            description="Search Google for current information.",
+            name="web_search",
+            description=(
+                "Retrieve live web evidence before answering. Use when the user requests a search or sources, "
+                "when facts may have changed recently, or when the answer is obscure or uncertain. Do not use "
+                "for casual conversation or stable facts the assistant can answer reliably from its knowledge."
+            ),
             parameters={"query": {"type": "string", "description": "Search query"}},
             required=["query"],
             risk="read_only",
-            handler=self._google_search,
+            handler=self._web_search,
         ))
         self.registry.register(CommandTool(
             name="create_reminder",
@@ -390,7 +394,7 @@ class AgentFeature:
                     outputs.append(BotResponse(text=f"**{index}. {step['tool']}**\n{result}"))
                 else:
                     for response in result:
-                        if response.text:
+                        if response.text and step["tool"] != "web_search":
                             response.text = f"**{index}. {step['tool']}**\n{response.text}"
                         outputs.append(response)
             except Exception as error:
@@ -409,10 +413,13 @@ class AgentFeature:
         responses = await self.time_feature.handle(app, replace(message, content="$time"))
         return responses[0].text or "No time returned."
 
-    async def _google_search(self, app, message, arguments) -> str:
-        query = json.dumps(arguments["query"])
-        responses = await self.search_feature.handle(app, replace(message, content=f"$google -s {query}"))
-        return "\n".join(response.text or "" for response in responses)
+    async def _web_search(self, app, message, arguments):
+        question = message.content[len("$agent"):].strip()
+        return await self.search_feature.answer_with_web(
+            message,
+            question=question,
+            search_query=arguments["query"],
+        )
 
     async def _wolfram_query(self, app, message, arguments) -> str:
         query = json.dumps(arguments["query"])

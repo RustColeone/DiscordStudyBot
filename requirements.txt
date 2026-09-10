@@ -14,6 +14,7 @@ PyYAML>=6.0
 # Utilities
 pytz>=2023.3
 requests>=2.31.0
+ddgs>=9.16.0
 psutil>=5.9.5
 dateparser>=1.2.0
 

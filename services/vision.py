@@ -1,9 +1,14 @@
+import base64
 from urllib.parse import urlparse
+
+import requests
 
 
 SUPPORTED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
+MAX_INLINE_IMAGE_BYTES = 34 * 1024 * 1024
+DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
 def image_metadata(attachment):
@@ -56,6 +61,43 @@ def openai_image_content(text: str, images: list[dict]):
             for image in images
         ],
     ]
+
+
+def inline_image_urls(images: list[dict]) -> list[dict]:
+    inline_images = []
+    total_bytes = 0
+    for image in images:
+        image_bytes = download_image_bytes(image["url"], MAX_IMAGE_BYTES)
+        total_bytes += len(image_bytes)
+        if total_bytes > MAX_INLINE_IMAGE_BYTES:
+            raise ValueError("Images exceed the 48 MiB inline request limit")
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        inline_images.append({
+            **image,
+            "url": f"data:{image['content_type']};base64,{encoded}",
+        })
+    return inline_images
+
+
+def download_image_bytes(url: str, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
+    with requests.get(url, stream=True, timeout=(10, 60)) as response:
+        response.raise_for_status()
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > max_bytes:
+            raise ValueError("Image exceeds the 32 MiB vision limit")
+
+        chunks = []
+        downloaded = 0
+        for chunk in response.iter_content(DOWNLOAD_CHUNK_BYTES):
+            if not chunk:
+                continue
+            downloaded += len(chunk)
+            if downloaded > max_bytes:
+                raise ValueError("Image exceeds the 32 MiB vision limit")
+            chunks.append(chunk)
+        if not chunks:
+            raise ValueError("Downloaded image is empty")
+        return b"".join(chunks)
 
 
 def persistent_image_text(text: str, images: list[dict]) -> str:

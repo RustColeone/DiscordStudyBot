@@ -9,7 +9,7 @@ from services import database as db
 from services.config_service import optional_secret
 from services.context_compression import compact_history_if_needed, context_limit_for_model
 from services.effort import max_tokens_for_effort
-from services.vision import openai_image_content, persistent_image_text
+from services.vision import inline_image_urls, openai_image_content, persistent_image_text
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
@@ -63,9 +63,13 @@ def queryChatGPT(user_input, channelID, time, model="gpt-3.5-turbo", username=No
     # Prepend username to message if provided
     message_content = f"[{username}]: {user_input}" if username else user_input
     images = images or []
+    try:
+        request_images = inline_image_urls(images) if images else []
+    except Exception as error:
+        return f"ChatGPT image preparation failed: {error}"
     
     # Add user message to history
-    prompt = {"role": "user", "content": openai_image_content(message_content, images)}
+    prompt = {"role": "user", "content": openai_image_content(message_content, request_images)}
     history.append(prompt)
     if persist:
         db.save_chat_message(

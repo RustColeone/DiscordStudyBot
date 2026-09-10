@@ -57,6 +57,10 @@ class DeepSeekLimitTests(unittest.TestCase):
 
         with patch.object(deepseek_query, "client", client), \
                 patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query, "inline_image_urls", return_value=[{
+                    **images[0],
+                    "url": "data:image/png;base64,aW1hZ2U=",
+                }]), \
                 patch.object(deepseek_query.db, "save_chat_message") as save_message:
             result = deepseek_query.queryDeepSeek(
                 "what is this?", "channel", None, images=images
@@ -65,8 +69,32 @@ class DeepSeekLimitTests(unittest.TestCase):
         self.assertEqual(result, "a cat")
         user_content = client.chat.completions.create.call_args.kwargs["messages"][-1]["content"]
         self.assertEqual(user_content[0], {"type": "text", "text": "what is this?"})
-        self.assertEqual(user_content[1]["image_url"]["url"], images[0]["url"])
+        self.assertEqual(
+            user_content[1]["image_url"]["url"],
+            "data:image/png;base64,aW1hZ2U=",
+        )
         self.assertIn("[Attached images: photo.png]", save_message.call_args_list[0].args[3])
+
+    def test_image_download_failure_does_not_call_deepseek_or_persist(self):
+        client = Mock()
+        images = [{
+            "url": "https://cdn.discordapp.com/photo.png",
+            "filename": "photo.png",
+            "content_type": "image/png",
+            "size": 1024,
+        }]
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query, "inline_image_urls", side_effect=RuntimeError("HTTP 403")), \
+                patch.object(deepseek_query.db, "save_chat_message") as save_message:
+            result = deepseek_query.queryDeepSeek(
+                "what is this?", "channel", None, images=images
+            )
+
+        self.assertEqual(result, "DeepSeek image preparation failed: HTTP 403")
+        client.chat.completions.create.assert_not_called()
+        save_message.assert_not_called()
 
     def test_context_overflow_forces_compression_and_retries(self):
         client = Mock()

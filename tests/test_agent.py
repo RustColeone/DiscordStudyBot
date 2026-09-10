@@ -28,6 +28,16 @@ class StubTimeFeature(StubFeature):
         return f"deleted reminder {reminder_id}"
 
 
+class StubSearchFeature(StubFeature):
+    def __init__(self):
+        super().__init__()
+        self.web_requests = []
+
+    async def answer_with_web(self, message, question, search_query):
+        self.web_requests.append((message, question, search_query))
+        return [BotResponse(text="Synthesized current answer [1].\n\n**Sources**\n[1] Source")]
+
+
 class StubProgressPlatform:
     supports_progress = True
 
@@ -159,6 +169,25 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
             response = await self.agent.handle(self.app, self._message("$agent show status"))
 
         self.assertIn("$system", response[0].text)
+
+    async def test_web_search_returns_synthesized_answer_without_tool_wrapper(self):
+        search = StubSearchFeature()
+        agent = AgentFeature(StubTimeFeature(), StubFeature(), search, StubFeature())
+        message = self._message("$agent what changed in DeepSeek today?")
+        plan = [{"tool": "web_search", "arguments": {"query": "DeepSeek latest changes"}}]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
+            response = await agent.handle(self.app, message)
+
+        self.assertEqual(
+            response[0].text,
+            "Synthesized current answer [1].\n\n**Sources**\n[1] Source",
+        )
+        self.assertNotIn("web_search", response[0].text)
+        self.assertEqual(
+            search.web_requests[0][1:],
+            ("what changed in DeepSeek today?", "DeepSeek latest changes"),
+        )
 
     async def test_write_plan_requires_confirmation(self):
         plan = [{"tool": "create_reminder", "arguments": {"request": "tomorrow at 8 PM to call Alex"}}]
