@@ -14,6 +14,7 @@ PyYAML>=6.0
 # Utilities
 pytz>=2023.3
 requests>=2.31.0
+pypdf>=5.0.0
 ddgs>=9.16.0
 psutil>=5.9.5
 dateparser>=1.2.0
@@ -29,7 +30,8 @@ pillow>=10.4.0; sys_platform == "win32"
 
 # AI APIs
 openai>=1.0.0
-google-generativeai>=0.3.0
+google-genai>=2.23.0
+anthropic>=0.67.0
 
 # Wolfram
 wolframclient>=1.1.7

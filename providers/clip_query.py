@@ -23,6 +23,7 @@ class ClipSpec:
     video_title: str = ""
     source_site: str = ""
     keep_file: bool = False
+    range_explicit: bool = False
 
 @dataclass
 class QualityOption:
@@ -108,6 +109,24 @@ def estimate_clip_size(duration: float, resolution: str, bitrate: str, fps: int,
     size_mb = (total_kbps * duration) / 8 / 1024
     
     return round(size_mb, 2)
+
+
+def calculate_discord_fit(duration: float, max_size_mb: float) -> Optional[Tuple[str, str, int]]:
+    """Choose conservative video settings for a clip that must fit Discord."""
+    if duration <= 0 or max_size_mb <= 0:
+        return None
+
+    target_total_kbps = max_size_mb * 0.90 * 8 * 1024 / duration
+    video_kbps = int(target_total_kbps - 128)
+    if video_kbps < 96:
+        return None
+    if video_kbps < 400:
+        resolution = "360p"
+    elif video_kbps < 800:
+        resolution = "480p"
+    else:
+        resolution = "720p"
+    return resolution, f"{video_kbps}k", 24
 
 def get_quality_options(duration: float, max_size_mb: float, output_format: str = "mp4") -> List[QualityOption]:
     """

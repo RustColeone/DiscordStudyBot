@@ -1,10 +1,42 @@
+import os
+import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from adapters.discord_adapter import DiscordAdapter
+from app.bot_types import BotAttachment, BotResponse
 
 
-class DiscordAccessTests(unittest.TestCase):
+class DiscordAccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_room_turns_are_sent_as_separate_ordered_messages(self):
+        adapter = DiscordAdapter.__new__(DiscordAdapter)
+        channel = SimpleNamespace(send=AsyncMock())
+        responses = [
+            BotResponse(text="**DeepSeek**\nFirst"),
+            BotResponse(text="**Luna**\nSecond"),
+            BotResponse(text="**Gemini**\nThird"),
+            BotResponse(text="**Claude**\nFourth"),
+        ]
+
+        await adapter._send_responses(channel, responses)
+
+        self.assertEqual(
+            [call.args[0] for call in channel.send.await_args_list],
+            ["**DeepSeek**\nFirst", "**Luna**\nSecond", "**Gemini**\nThird", "**Claude**\nFourth"],
+        )
+
+    async def test_live_room_turn_is_not_sent_twice(self):
+        adapter = DiscordAdapter.__new__(DiscordAdapter)
+        channel = SimpleNamespace(send=AsyncMock())
+
+        await adapter._send_responses(channel, [
+            BotResponse(text="**DeepSeek**\nAlready sent", metadata={"sent_live": True}),
+            BotResponse(text="**Sources**\nSource"),
+        ])
+
+        channel.send.assert_awaited_once_with("**Sources**\nSource", suppress_embeds=False)
+
     def setUp(self):
         self.bot_user = SimpleNamespace(id=42)
         self.adapter = DiscordAdapter.__new__(DiscordAdapter)
@@ -147,6 +179,57 @@ class DiscordAccessTests(unittest.TestCase):
 
         self.assertEqual([len(chunk) for chunk in chunks], [2000, 2000, 500])
         self.assertEqual("".join(chunks), content)
+
+    async def test_source_response_suppresses_discord_embeds(self):
+        channel = SimpleNamespace(send=AsyncMock())
+
+        await self.adapter._send_responses(
+            channel,
+            [BotResponse(text="Answer\nhttps://example.com", metadata={"suppress_embeds": True})],
+        )
+
+        channel.send.assert_awaited_once_with(
+            "Answer\nhttps://example.com",
+            suppress_embeds=True,
+        )
+
+    async def test_successful_attachment_upload_deletes_temporary_file(self):
+        descriptor, path = tempfile.mkstemp(suffix=".mp4")
+        os.close(descriptor)
+        channel = SimpleNamespace(send=AsyncMock())
+        response = BotResponse(
+            text="clip ready",
+            attachment=BotAttachment(path=path, filename="clip.mp4", delete_after_send=True),
+        )
+
+        with patch("adapters.discord_adapter.discord.File", return_value=object()):
+            await self.adapter._send_attachment_response(channel, response)
+
+        self.assertFalse(os.path.exists(path))
+
+    async def test_failed_attachment_upload_retains_rendered_file(self):
+        descriptor, path = tempfile.mkstemp(suffix=".mp4")
+        os.close(descriptor)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        channel = SimpleNamespace(send=AsyncMock(side_effect=[
+            RuntimeError("TLS failure"),
+            RuntimeError("TLS failure"),
+            RuntimeError("TLS failure"),
+            None,
+        ]))
+        response = BotResponse(
+            text="clip ready",
+            attachment=BotAttachment(path=path, filename="clip.mp4", delete_after_send=True),
+        )
+
+        with patch("adapters.discord_adapter.discord.File", return_value=object()), \
+                patch("adapters.discord_adapter.asyncio.sleep", new=AsyncMock()):
+            await self.adapter._send_attachment_response(channel, response)
+
+        self.assertTrue(os.path.exists(path))
+        fallback = channel.send.await_args_list[-1].args[0]
+        self.assertIn("Attachment upload failed after 3 attempts", fallback)
+        self.assertIn("retained on the bot host", fallback)
 
 
 if __name__ == "__main__":

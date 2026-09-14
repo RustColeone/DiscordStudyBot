@@ -28,6 +28,11 @@ class ChatFeature:
 
         settings = db.get_channel_settings(message.channel_id)
         if settings["listen_mode"]:
+            if settings.get("mode", "roleplay") == "agent":
+                return await app.agent_feature.handle(
+                    app,
+                    replace(message, content=f"$agent {message.content}"),
+                )
             loop = asyncio.get_running_loop()
             images = (
                 (message.metadata.get("referenced_image_attachments") or [])
@@ -57,6 +62,33 @@ class ChatFeature:
 
         responses = []
 
+        effective_mode = cmd.mode or db.get_channel_settings(self._channel_key(message))["mode"]
+        configuration_change = (
+            cmd.llm is not None
+            or cmd.model is not None
+            or cmd.effort is not None
+            or cmd.prompt_action == "set"
+            or bool(cmd.prompt_action and cmd.prompt_action.isdigit())
+        )
+        if configuration_change and effective_mode == "agent":
+            return [BotResponse(
+                text="Agent team models, effort, and personalities are server-admin configured. "
+                "Switch to `$chat --mode roleplay` to customize a role-play session."
+            )]
+
+        roleplay_change = cmd.llm or cmd.model or cmd.effort or (
+            cmd.prompt_action not in {None, "list", "show"}
+        )
+        if roleplay_change and effective_mode != "roleplay":
+            return [BotResponse(
+                text="Provider, model, effort, and persona settings belong to role-play mode. "
+                "Switch with `$chat --mode roleplay` first."
+            )]
+
+        if cmd.mode:
+            db.set_chat_mode(self._channel_key(message), cmd.mode)
+            responses.append(f"Chat mode set to **{cmd.mode}** for this channel.")
+
         if cmd.llm:
             responses.append(unified_chat.set_llm(self._channel_key(message), cmd.llm))
 
@@ -70,15 +102,23 @@ class ChatFeature:
             if cmd.prompt_action == "list":
                 responses.append(unified_chat.get_prompt_list())
             elif cmd.prompt_action == "show":
-                llm_name, prompt_content = unified_chat.show_prompt(self._channel_key(message))
-                if prompt_content:
-                    responses.append(f"**Current prompt for {llm_name}:**\n```\n{prompt_content}\n```")
-                else:
-                    with open("llm_config.json", "r", encoding="utf-8") as config_file:
-                        default_prompt = json.load(config_file)["prompts"][0]
+                if effective_mode == "agent":
                     responses.append(
-                        f"**Using default prompt:** {default_prompt['name']}\n```\n{default_prompt['content']}\n```"
+                        "Collaborative agent mode uses server-admin configured team personalities: "
+                        "DeepSeek and Gemini are juniors; Luna is student council president, and Claude serves on the "
+                        "disciplinary committee. "
+                        "Role-play prompts are inactive."
                     )
+                    cmd.prompt_action = None
+                else:
+                    llm_name, prompt_content = unified_chat.show_prompt(self._channel_key(message))
+                    if prompt_content:
+                        responses.append(f"**Current prompt for {llm_name}:**\n```\n{prompt_content}\n```")
+                    else:
+                        default_prompt = unified_chat.get_default_prompt(llm_name)
+                        responses.append(
+                            f"**Using default prompt:** {default_prompt['name']}\n```\n{default_prompt['content']}\n```"
+                        )
             elif cmd.prompt_action == "set":
                 unified_chat.set_custom_prompt(self._channel_key(message), cmd.prompt_value)
                 responses.append("✅ Custom prompt set!\n💡 Consider using `$chat --clear` to start fresh")
@@ -100,9 +140,17 @@ class ChatFeature:
                 responses.append("🔴 **Listen mode disabled**\nUse `$chat --send <message>` to chat")
 
         if cmd.message:
-            agent_message = replace(message, content=f"$agent {cmd.message}")
+            agent_message = replace(
+                message,
+                content=f"$agent {cmd.message}",
+                metadata={**message.metadata, "show_trace": cmd.show_trace},
+            )
             agent_responses = await app.agent_feature.handle(app, agent_message)
-            responses.extend(response.text for response in agent_responses if response.text)
+            if responses and agent_responses:
+                agent_responses[0].text = "\n\n".join(
+                    [*responses, agent_responses[0].text or ""]
+                ).strip()
+            return agent_responses
 
         if cmd.show_models:
             responses.append(unified_chat.get_models_list())

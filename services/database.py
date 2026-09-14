@@ -8,6 +8,7 @@ DATABASE_PATH = 'bot_data.db'
 DEFAULT_LLM = "deepseek"
 DEFAULT_MODEL = "deepseek-flash"
 DEFAULT_EFFORT = "high"
+DEFAULT_CHAT_MODE = "agent"
 
 @contextmanager
 def get_db():
@@ -55,6 +56,30 @@ def init_database():
                 PRIMARY KEY (channel_id, ai_model)
             )
         ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS conversation_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT NOT NULL,
+                message_id TEXT,
+                attachment_id TEXT,
+                author_id TEXT,
+                filename TEXT NOT NULL,
+                url TEXT NOT NULL,
+                content_type TEXT,
+                size INTEGER,
+                created_at TEXT,
+                UNIQUE(channel_id, url)
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_conversation_attachments
+            ON conversation_attachments(channel_id, id DESC)
+        ''')
+        cursor.execute("PRAGMA table_info(conversation_attachments)")
+        attachment_columns = {row[1] for row in cursor.fetchall()}
+        if "attachment_id" not in attachment_columns:
+            cursor.execute("ALTER TABLE conversation_attachments ADD COLUMN attachment_id TEXT")
         
         # Music state table
         cursor.execute('''
@@ -75,6 +100,7 @@ def init_database():
                 active_model TEXT DEFAULT 'deepseek-flash',
                 listen_mode INTEGER DEFAULT 0,
                 effort_level TEXT DEFAULT 'high',
+                chat_mode TEXT DEFAULT 'agent',
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -88,13 +114,21 @@ def init_database():
                 SET active_llm = ?, active_model = ?, effort_level = ?, last_updated = CURRENT_TIMESTAMP
                 WHERE active_llm = 'chatgpt' AND active_model = 'gpt-3.5-turbo'
             ''', (DEFAULT_LLM, DEFAULT_MODEL, DEFAULT_EFFORT))
+        if "chat_mode" not in channel_setting_columns:
+            cursor.execute("ALTER TABLE channel_settings ADD COLUMN chat_mode TEXT DEFAULT 'agent'")
+
+        cursor.execute('''
+            UPDATE channel_settings
+            SET chat_mode = ?, last_updated = CURRENT_TIMESTAMP
+            WHERE chat_mode IS NULL OR chat_mode NOT IN ('agent', 'roleplay')
+        ''', (DEFAULT_CHAT_MODE,))
 
         cursor.execute('''
             UPDATE channel_settings
             SET active_model = ?, last_updated = CURRENT_TIMESTAMP
             WHERE active_llm = 'deepseek'
-              AND active_model IN ('deepseek-v4-flash', 'deepseek-v4-flash-vision-exp')
-        ''', (DEFAULT_MODEL,))
+              AND active_model != ?
+          ''', (DEFAULT_MODEL, DEFAULT_MODEL))
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS reminders (
@@ -143,6 +177,22 @@ def save_chat_message(channel_id: str, ai_model: str, role: str, content: str):
             INSERT INTO chat_history (channel_id, ai_model, role, content)
             VALUES (?, ?, ?, ?)
         ''', (str(channel_id), ai_model, role, content))
+
+def replace_initial_system_prompt(channel_id: str, ai_model: str, old_content: str,
+                                  new_content: str) -> bool:
+    """Replace the first system prompt only when it still matches an old default."""
+    with get_db() as conn:
+        cursor = conn.execute('''
+            UPDATE chat_history
+            SET content = ?
+            WHERE id = (
+                SELECT id FROM chat_history
+                WHERE channel_id = ? AND ai_model = ? AND role = 'system'
+                ORDER BY id ASC
+                LIMIT 1
+            ) AND content = ?
+        ''', (new_content, str(channel_id), ai_model, old_content))
+        return cursor.rowcount > 0
 
 def load_chat_history(channel_id: str, ai_model: str) -> List[Dict[str, str]]:
     """Load raw history with any compressed context after the main system prompt."""
@@ -229,6 +279,132 @@ def get_chat_history_count(channel_id: str, ai_model: str) -> int:
             WHERE channel_id = ? AND ai_model = ?
         ''', (str(channel_id), ai_model))
         return cursor.fetchone()["count"]
+
+
+def save_conversation_attachments(channel_id: str, attachments: List[Dict]) -> List[int]:
+    """Persist Discord attachment references without downloading their content."""
+    if not attachments:
+        return []
+    attachment_ids = []
+    with get_db() as conn:
+        for attachment in attachments:
+            existing = None
+            if attachment.get("message_id") and attachment.get("attachment_id"):
+                existing = conn.execute('''
+                    SELECT id FROM conversation_attachments
+                    WHERE channel_id = ? AND message_id = ? AND attachment_id = ?
+                ''', (
+                    str(channel_id),
+                    attachment["message_id"],
+                    attachment["attachment_id"],
+                )).fetchone()
+            if existing:
+                conn.execute('''
+                    UPDATE conversation_attachments
+                    SET url = ?, filename = ?, content_type = ?, size = ?,
+                        author_id = COALESCE(?, author_id),
+                        created_at = COALESCE(?, created_at)
+                    WHERE id = ?
+                ''', (
+                    attachment["url"],
+                    attachment["filename"],
+                    attachment.get("content_type"),
+                    attachment.get("size"),
+                    attachment.get("author_id"),
+                    attachment.get("created_at"),
+                    existing["id"],
+                ))
+                attachment_ids.append(existing["id"])
+                continue
+            conn.execute('''
+                INSERT INTO conversation_attachments (
+                    channel_id, message_id, attachment_id, author_id, filename, url,
+                    content_type, size, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel_id, url) DO UPDATE SET
+                    message_id = COALESCE(excluded.message_id, message_id),
+                    attachment_id = COALESCE(excluded.attachment_id, attachment_id),
+                    author_id = COALESCE(excluded.author_id, author_id),
+                    filename = excluded.filename,
+                    content_type = COALESCE(excluded.content_type, content_type),
+                    size = COALESCE(excluded.size, size),
+                    created_at = COALESCE(excluded.created_at, created_at)
+            ''', (
+                str(channel_id),
+                attachment.get("message_id"),
+                attachment.get("attachment_id"),
+                attachment.get("author_id"),
+                attachment["filename"],
+                attachment["url"],
+                attachment.get("content_type"),
+                attachment.get("size"),
+                attachment.get("created_at"),
+            ))
+            row = conn.execute('''
+                SELECT id FROM conversation_attachments
+                WHERE channel_id = ? AND url = ?
+            ''', (str(channel_id), attachment["url"])).fetchone()
+            attachment_ids.append(row["id"])
+    return attachment_ids
+
+
+def list_conversation_attachments(channel_id: str, limit: int = 20) -> List[Dict]:
+    with get_db() as conn:
+        rows = conn.execute('''
+            SELECT id, channel_id, message_id, attachment_id, author_id, filename,
+                   url, content_type, size, created_at
+            FROM conversation_attachments
+            WHERE channel_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+        ''', (str(channel_id), max(1, int(limit)))).fetchall()
+        return [dict(row) for row in rows]
+
+
+def find_conversation_attachment(channel_id: str, selector: str) -> Optional[Dict]:
+    """Resolve an attachment by durable ID, filename, or the latest shorthand."""
+    normalized = str(selector or "latest").strip()
+    with get_db() as conn:
+        if normalized.lower() == "latest":
+            row = conn.execute('''
+                SELECT id, channel_id, message_id, attachment_id, author_id, filename,
+                       url, content_type, size, created_at
+                FROM conversation_attachments
+                WHERE channel_id = ?
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (str(channel_id),)).fetchone()
+        elif normalized.isdigit():
+            row = conn.execute('''
+                SELECT id, channel_id, message_id, attachment_id, author_id, filename,
+                       url, content_type, size, created_at
+                FROM conversation_attachments
+                WHERE channel_id = ? AND id = ?
+            ''', (str(channel_id), int(normalized))).fetchone()
+        else:
+            row = conn.execute('''
+                SELECT id, channel_id, message_id, attachment_id, author_id, filename,
+                       url, content_type, size, created_at
+                FROM conversation_attachments
+                WHERE channel_id = ? AND filename = ?
+                ORDER BY id DESC
+                LIMIT 1
+            ''', (str(channel_id), normalized)).fetchone()
+        return dict(row) if row else None
+
+
+def update_conversation_attachment_url(attachment_id: int, url: str) -> None:
+    with get_db() as conn:
+        conn.execute('''
+            UPDATE conversation_attachments SET url = ? WHERE id = ?
+        ''', (url, int(attachment_id)))
+
+
+def clear_conversation_attachments(channel_id: str) -> None:
+    with get_db() as conn:
+        conn.execute('''
+            DELETE FROM conversation_attachments WHERE channel_id = ?
+        ''', (str(channel_id),))
 
 # ==================== Music State Functions ====================
 
@@ -472,7 +648,7 @@ def get_channel_settings(channel_id: str) -> Dict:
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT active_llm, active_model, listen_mode, effort_level
+            SELECT active_llm, active_model, listen_mode, effort_level, chat_mode
             FROM channel_settings
             WHERE channel_id = ?
         ''', (str(channel_id),))
@@ -484,6 +660,7 @@ def get_channel_settings(channel_id: str) -> Dict:
                 "model": row["active_model"],
                 "listen_mode": bool(row["listen_mode"]),
                 "effort": row["effort_level"] or DEFAULT_EFFORT,
+                "mode": row["chat_mode"] or DEFAULT_CHAT_MODE,
             }
         else:
             # Return defaults if not set
@@ -492,7 +669,22 @@ def get_channel_settings(channel_id: str) -> Dict:
                 "model": DEFAULT_MODEL,
                 "listen_mode": False,
                 "effort": DEFAULT_EFFORT,
+                "mode": DEFAULT_CHAT_MODE,
             }
+
+def set_chat_mode(channel_id: str, mode: str) -> None:
+    if mode not in {"agent", "roleplay"}:
+        raise ValueError(f"Invalid chat mode: {mode}")
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO channel_settings (
+                channel_id, active_llm, active_model, effort_level, chat_mode, last_updated
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(channel_id) DO UPDATE SET
+                chat_mode = excluded.chat_mode,
+                last_updated = CURRENT_TIMESTAMP
+        ''', (str(channel_id), DEFAULT_LLM, DEFAULT_MODEL, DEFAULT_EFFORT, mode))
 
 def set_channel_llm(channel_id: str, llm_name: str, model_name: str = None):
     """Set the active LLM for a channel"""

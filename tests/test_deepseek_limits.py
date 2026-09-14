@@ -6,6 +6,31 @@ from providers import deepseek_query
 
 
 class DeepSeekLimitTests(unittest.TestCase):
+    def test_new_history_uses_deepseek_persona_default(self):
+        with patch.object(deepseek_query, "compact_history_if_needed"), \
+                patch.object(deepseek_query.db, "load_chat_history", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message") as save_message:
+            history = deepseek_query._load_history_from_db("channel")
+
+        self.assertEqual(history[0]["content"], deepseek_query.deepseek_default_prompt["content"])
+        self.assertNotIn("LANG_ZH_CN_ONLY", history[0]["content"])
+        self.assertIn("使用用户最近使用的语言回复", history[0]["content"])
+        self.assertEqual(save_message.call_args.args[3], deepseek_query.deepseek_default_prompt["content"])
+
+    def test_old_generic_default_is_migrated_without_clearing_history(self):
+        history = [
+            {"role": "system", "content": deepseek_query.system_prompt[0]["content"]},
+            {"role": "user", "content": "hello"},
+        ]
+        with patch.object(deepseek_query, "compact_history_if_needed"), \
+                patch.object(deepseek_query.db, "load_chat_history", return_value=history), \
+                patch.object(deepseek_query.db, "replace_initial_system_prompt") as replace_prompt:
+            loaded = deepseek_query._load_history_from_db("channel")
+
+        self.assertEqual(loaded[0]["content"], deepseek_query.deepseek_default_prompt["content"])
+        self.assertEqual(loaded[1], {"role": "user", "content": "hello"})
+        replace_prompt.assert_called_once()
+
     def test_high_effort_uses_supported_maximum_output(self):
         client = Mock()
         client.chat.completions.create.return_value = SimpleNamespace(
@@ -22,6 +47,27 @@ class DeepSeekLimitTests(unittest.TestCase):
 
         self.assertEqual(result, "done")
         self.assertEqual(client.chat.completions.create.call_args.kwargs["max_tokens"], 384000)
+
+    def test_retired_model_argument_is_canonicalized_to_deepseek_flash(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="done"),
+            )]
+        )
+
+        with patch.object(deepseek_query, "client", client), \
+                patch.object(deepseek_query, "_load_history_from_db", return_value=[]), \
+                patch.object(deepseek_query.db, "save_chat_message"):
+            deepseek_query.queryDeepSeek(
+                "hello", "channel", None, model="deepseek-reasoner"
+            )
+
+        self.assertEqual(
+            client.chat.completions.create.call_args.kwargs["model"],
+            "deepseek-flash",
+        )
 
     def test_output_limit_is_reported(self):
         client = Mock()

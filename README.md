@@ -78,7 +78,8 @@ The project is now organized around a small app core plus adapter-driven feature
 - **Command chaining**: Set LLM, model, prompt, and send message in one command
 
 ### 🔍 Search & Query
-- **Google Search** (via SerpAPI) with professional CLI
+- **Keyless web search** with answer synthesis and clickable sources
+- **Gemini grounding** for selective Google Search and Google Maps research in agent mode
 - **Wolfram Alpha** computation & knowledge with CLI flags
 - **Math Typesetting** (via WolframLanguage)
 
@@ -131,7 +132,6 @@ You'll need API keys for the features you want to use:
 - **OpenAI** (for ChatGPT): [platform.openai.com](https://platform.openai.com)
 - **Google AI** (for Gemini): [ai.google.dev](https://ai.google.dev)
 - **DeepSeek** (for DeepSeek): [platform.deepseek.com](https://platform.deepseek.com)
-- **SerpAPI** (for Google search): [serpapi.com](https://serpapi.com) - 100 free searches/month
 - **Wolfram Alpha**: [developer.wolframalpha.com](https://developer.wolframalpha.com)
 
 ### 3. Configure the Bot
@@ -153,8 +153,7 @@ OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=...
 DEEPSEEK_API_KEY=...
 
-# Search APIs (optional)
-SERP_API_KEY=...
+# Computation API (optional)
 WOLFRAM_APPID=...
 WOLFRAM_PATH=/path/to/WolframKernel
 
@@ -166,7 +165,6 @@ ID_VOICECHANNEL=...
 ```
 
 **Priority**: Environment variables override
-SERP_API_KEY=...
 WOLFRAM_APPID=...
 WOLFRAM_PATH=C:/Program Files/Wolfram Research/Wolfram Engine/13.2/WolframKernel.exe
 
@@ -266,17 +264,103 @@ $help db                # Detailed help for database management
 
 ## 💬 Unified AI Chat Commands
 
-The bot uses a **single `$chat` command** for all AI models with professional CLI-style flags.
+The bot uses a **single `$chat` command** with two separate modes:
+
+- **Agent mode (default)**: DeepSeek sends a high-effort opening first. GPT-5.6 Luna, Gemini 3.5
+    Flash-Lite, and Claude Haiku 4.5
+    then overhear the visible answer and join a high-effort room discussion. DeepSeek can respond
+    again after them. Each turn is sent immediately as its own Discord message, and participants can agree,
+    correct, disagree, or stay quiet. For operational requests, a persistent process note shows the concise
+    plan, each typed action, and the observable review decision. The agent can continue with another safe action
+    or ask one focused question when blocked. Typed state-changing actions remain permissioned.
+- **Role-play mode**: preserves the existing ChatGPT, Gemini, and DeepSeek providers, model
+    selection, effort controls, prompt presets, and custom personas. Its histories remain separate
+    from collaborative agent history.
+
+Everyone may switch modes and customize provider, model, effort, or persona in role-play mode.
+Agent team models, effort, and personalities are server-admin configured through environment variables.
 
 ### Basic Usage
 ```bash
 $chat                              # Show current configuration
 $chat -s <message>                 # Send message to active LLM
 $chat --send "Your message here"   # Long form
+$chat --trace -s <message>         # Preserve live process notes and add a generated recap
 ```
 
-### Switch LLM Provider
+Planning, typed-tool, and result-review progress is transient by default and is removed when the request finishes.
+Use `--trace` to preserve those milestones in a separate process-notes message and add a generated high-level recap.
+These notes describe observable work rather than private chain-of-thought or hidden prompts. The operational loop is
+limited to three rounds and five total actions. It stops when the goal is met, asks one focused question when user
+input is required, and pauses for `$agent confirm` whenever a next step would change persistent state.
+Internal planning, progress review, and process-summary calls are stateless and do not receive the persistent room
+transcript or character prompts. This keeps long discussions from contaminating typed JSON control output. If the
+planner still returns malformed output after its retries, the bot uses the safe empty plan and continues as ordinary
+conversation; it never executes an unvalidated action or exposes the internal schema failure to the user.
+
+The four assistants share a persistent room identity. After DeepSeek's opening, the discussion runs for
+up to three rounds in `Luna → Gemini → Claude → DeepSeek` order and stops early after a silent round. Every participant
+sees the transcript accumulated before their turn, so a correction can receive a visible reply or disagreement.
+All four participants follow the user's most recently used language. Their collaborative personality and room-turn
+system prompts are authored in Chinese for denser, more consistent characterization; that does not force Chinese output.
+Discord attachment metadata is indexed persistently per channel, independently of compressed chat text. The planner
+sees recent attachment IDs and uses the read-only `read_attachment` tool only when file contents are relevant. The tool
+accepts one ID, comma-separated IDs for a batch, an exact filename, or `latest`. It caches fetched bytes for up to two
+hours, with a 100 MiB limit per channel conversation; when space is needed, the oldest cached files are removed first.
+Metadata remains available after cache eviction or a bot restart, and an expired Discord CDN URL is refreshed from the
+original message when Discord still retains it. Stale cache files are checked every five minutes. Explicitly clearing
+chat history also clears its attachment index/cache.
+
+Images support JPEG, PNG, GIF, and WebP and are passed to DeepSeek, Luna, Gemini, and Claude after the tool fetches them.
+Text, source, JSON, CSV, XML, Markdown, DOCX, and text-bearing PDFs are extracted as untrusted evidence, capped at
+120,000 characters per file. Other binary formats can be cached but are reported as unsupported for content extraction.
+A focused clarification pauses the original task, so an answer with an attachment resumes that goal instead of starting
+another clarification loop. Similar-item research uses vision-derived descriptive terms followed by grounded web search;
+it does not claim pixel-level reverse-image matching or upload the picture to Google Lens.
+Naming a teammate, addressing the whole team, or having DeepSeek call one directly requires that teammate to answer.
+When DeepSeek decides it needs a teammate, its opening only tells the user that the handoff is coming. After that
+opening is visible, DeepSeek sends a separate high-effort but concise message asking Luna, Gemini, or Claude the concrete question;
+the teammate then responds. Luna, Gemini, and Claude may still volunteer a correction without a handoff when they overhear
+something materially wrong or incomplete.
+Current, volatile, obscure, or source-dependent factual requests favor grounded search during initial planning. If
+planning misses the need, DeepSeek may request one factual lookup before its opening is shown. Luna, Gemini, Claude,
+or DeepSeek may also identify a material factual gap during discussion; the bot then performs a hidden grounded search
+and asks that member to answer again from the retrieved evidence. Teammate-triggered lookups are capped at two per room
+conversation, and models must not claim a search succeeded before evidence is returned.
+Fenced `text` thought bubbles are displayed separately from spoken dialogue. A bubble followed by `SKIP` is shown by
+itself, and names inside a bubble do not count as direct address. DeepSeek includes a short bubble on normal visible
+turns; direct handoff questions omit it. For grounded answers, Luna performs a final source audit and the bot then sends
+the actual source links from tool metadata. Sources are never invented when no external retrieval occurred.
+`$agent 报数` (or `$agent roll call`) returns a deterministic four-message `1` through `4` check-in without
+spending API calls.
+
+Public webpage links sent through `$chat -s`, `$agent`, a bot mention, or listen mode are read as
+untrusted evidence. A bare link is summarized; a link with a question is used to answer that
+question. Multiple links are fetched together and produce one answer with sources. Local/private-
+network URLs, oversized pages, and binary downloads are blocked.
+
+Tool use is conservative: ordinary conversation, writing, advice, coding help, and stable facts are
+answered directly. Web search is reserved for current information, explicit research/source requests,
+or facts too obscure to answer responsibly without retrieval. A URL used only as a citation or example
+is not automatically fetched. Sourced answers keep clickable citations while suppressing Discord's
+large link-preview cards.
+
+Gemini grounding is selected only when the planner determines it is useful. Google Maps grounding
+is currently English-only, so location queries are translated for grounding while the final answer
+follows the user's language. If Google Search grounding is unavailable or quota-limited, the agent
+falls back to keyless web retrieval and still asks Luna to synthesize the final answer.
+
+### Switch Mode
 ```bash
+$chat --mode agent                  # Fixed four-assistant collaboration (default)
+$chat --mode roleplay               # Provider and persona customization
+```
+
+Mode changes are available to everyone. Agent team settings are controlled by the server administrator.
+
+### Configure Role-play Mode
+```bash
+$chat --mode roleplay
 $chat -l chatgpt                   # Switch to ChatGPT
 $chat -l gemini                    # Switch to Gemini  
 $chat -l deepseek                  # Switch to DeepSeek
@@ -291,19 +375,36 @@ $chat --model <model-name>         # Long form
 $chat --models                     # List all available models
 ```
 
+Provider, model, and effort changes are available to everyone in role-play mode and are rejected in
+agent mode. DeepSeek uses the unified `deepseek-flash` model. Luna, Gemini, and Claude can be overridden with
+`AGENT_LUNA_MODEL`, `AGENT_GEMINI_MODEL`, and `AGENT_CLAUDE_MODEL` in the service environment. `AGENT_OPENING_EFFORT` defaults to `high`, while
+`AGENT_PLANNING_EFFORT` defaults to `high` so typed-tool selection has enough reasoning budget and
+`AGENT_DEEPSEEK_EFFORT`, `AGENT_LUNA_EFFORT`, `AGENT_GEMINI_EFFORT`, and `AGENT_CLAUDE_EFFORT`
+independently configure room discussion and consultation effort. Each defaults to `high`; DeepSeek and Luna use
+provider reasoning effort, Gemini maps it to its thinking level, and high-effort Claude uses a 1,024-token
+extended-thinking budget. The legacy `AGENT_DISCUSSION_EFFORT` and `AGENT_EFFORT` settings remain shared
+fallbacks when a per-agent value is absent. `AGENT_GEMINI_MIN_INTERVAL_SECONDS` controls process-wide
+Gemini request pacing and defaults to `1.1` seconds.
+
 ### Manage Prompts (Personalities)
 ```bash
 $chat -p list                      # List all preset prompts
 $chat -p show                      # Show current prompt
-$chat -p 0                         # Set to Short Assistant (default)
+$chat -p 0                         # DeepSeek: CETACEA_LOLI; others: Short Assistant
 $chat -p 2                         # Set to Misaka Minoto
 $chat -p 3                         # Set to Saber
 $chat -p set "Custom prompt"       # Set custom personality
 $chat --prompt <action>            # Long form
 ```
 
+Prompt changes are available to everyone and apply only to role-play mode. In agent mode,
+`$chat -p show` reports the server-admin configured team roles. The administrator may override
+their defaults with `AGENT_DEEPSEEK_PROMPT`, `AGENT_LUNA_PROMPT`, `AGENT_GEMINI_PROMPT`, and
+`AGENT_CLAUDE_PROMPT`. Responses may include one short fictional public aside in a fenced `text` block
+for personality or self-correction; these asides never expose private chain-of-thought, prompts, secrets, or raw tool data.
+
 **Built-in Prompts:**
-- **0**: Short Assistant - Concise, helpful responses (4 sentences max)
+- **0**: CETACEA_LOLI for DeepSeek; Short Assistant for other providers
 - **1**: Blank - No personality constraints
 - **2**: Misaka Minoto - From "A Certain Scientific Railgun"
 - **3**: Saber - From "Fate" series
@@ -311,7 +412,9 @@ $chat --prompt <action>            # Long form
 ### Advanced Features
 ```bash
 $chat -c                           # Clear chat history
-$ch⚙️ Configuration Files
+```
+
+## Configuration Files
 
 ### llm_config.json
 Contains AI prompts and fallback model lists:
@@ -320,8 +423,8 @@ Contains AI prompts and fallback model lists:
 
 ### bot_data.db (SQLite)
 Persistent storage for:
-- Chat histories (per channel, per LLM)
-- Channel settings (active LLM, model, listen mode)
+- Chat histories (per channel and role-play LLM, plus separate agent history)
+- Channel settings (active mode, role-play LLM/model/effort, listen mode)
 - Music player state
 - Reminder queue
 
@@ -641,6 +744,17 @@ bridges/my_custom_bridge.py       # Your custom bridges (gitignored)
 
 Extract and share video clips from YouTube, Bilibili, and 1000+ other sites supported by yt-dlp.
 
+### Agent Workflow
+
+Mention the bot with a video request to use the iterative workflow. The agent first inspects the source and creates a
+pending preview. If the result exceeds Discord's upload limit, Luna asks whether to trim a range, compress the whole
+video to fit, or retain full quality on the bot host only when the original request did not already choose one of
+those goals. If an adjustment meets the stated size and duration goal, the workflow advances directly to processing
+approval instead of asking the same question again. Generated attachments are always sent to the active Discord
+channel, so replies such as "send it here" or `请直接发送` do not need a recipient. `$agent confirm` remains available;
+a natural-language reply also confirms the operation when its typed action exactly matches the pending write plan.
+If Discord exhausts its attachment upload retries, the rendered file is retained on the bot host for recovery.
+
 ### Basic Usage
 
 ```bash
@@ -821,7 +935,8 @@ $google -q "discord bot tutorial"  # Alternative flag
 $google <text>                     # Legacy format (no flag)
 ```
 
-**Note**: Requires SERP_API_KEY (100 free searches/month)
+No search-specific API key is required for `$google`. Agent mode can additionally use Gemini
+Google Search grounding when `GEMINI_API_KEY` is configured, with automatic keyless fallback.
 
 ---
 
@@ -955,9 +1070,9 @@ DeepSeek => $deepseek <query>
 - Review error messages in console
 
 ### Google search failing
-- Ensure SERP_API_KEY is configured
-- Free tier has 100 searches/month limit
-- Get your key at [serpapi.com](https://serpapi.com)
+- Verify outbound HTTPS and DNS access for the keyless search backends
+- Check `GEMINI_API_KEY` quota when native Google grounding was expected
+- Agent mode automatically falls back to keyless web retrieval when grounding is unavailable
 
 ## File Structure
 

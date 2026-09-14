@@ -6,6 +6,7 @@ from services import database as db
 
 
 CONTEXT_LIMITS = {
+    "agent": 1_000_000,
     "deepseek": 1_000_000,
     "gemini": 1_000_000,
     "chatgpt": 128_000,

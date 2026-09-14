@@ -19,6 +19,7 @@ class WeChatAuthorReference:
 
 
 class WeChatAdapter:
+    supports_live_responses = True
     supports_message_edit = False
     supports_voice = False
     supports_markdown = False
@@ -215,6 +216,8 @@ class WeChatAdapter:
 
     async def _send_responses_unlocked(self, channel_id: str, responses) -> None:
         for response in responses:
+            if response.metadata.get("sent_live"):
+                continue
             if response.attachment is not None:
                 await self._send_file_message_unlocked(channel_id, response)
                 continue

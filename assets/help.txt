@@ -9,6 +9,17 @@ Mention the bot with a request, or use $agent <request>
 $agent tools        List actions available to the agent
 $agent confirm      Confirm a plan containing state-changing actions
 $agent cancel       Cancel the pending plan
+$agent --trace <request>   Preserve a separate high-level process worklog
+$agent 报数         Four-person team check-in (also: roll call)
+
+DeepSeek sends a high-effort answer first. Luna, Gemini, Claude, and DeepSeek can then take high-effort
+follow-up turns in a visible room discussion, each sent immediately as a separate message. They may
+reply to corrections or disagreements and stop after a silent round. Name a maid, address the whole
+team, or let DeepSeek call her directly to require a reply. Trace notes identify who is listening
+and speaking without exposing private reasoning.
+If DeepSeek decides to ask a teammate, the opening only announces that choice. DeepSeek then sends
+a separate short message with the actual question before Luna, Gemini, or Claude answers. A teammate may also
+volunteer a correction after overhearing the opening, without waiting for a handoff.
 
 ## Time & Reminders
 $time              Show current time
@@ -26,13 +37,15 @@ $music -y "url"    Play YouTube (skip to it)
 $music -y "url" --queue   Queue without playing
 
 ## AI Chat
-$chat -s <msg>     Send to active LLM
+$chat -s <msg>     Send through the active chat mode
 $chat -s "remind me tomorrow at 1900 to ..."   Create a persistent reminder
-$chat -l <llm>     Set LLM (chatgpt/gemini/deepseek)
-$chat -m <model>   Set model
-$chat -p <0-3>     Set prompt preset
+$chat --mode agent/roleplay   Switch mode (available to everyone)
+$chat -l <llm>     Set role-play LLM
+$chat -m <model>   Set role-play model
+$chat -p <0-3>     Set role-play prompt
 $chat --listen on/off   Enable/disable auto-respond mode
-$chat --effort LEVEL    Set reasoning effort: low, medium, or high
+$chat --effort LEVEL    Set role-play effort
+$chat --trace -s <msg>  Append live process notes; final answer is sent separately
 $chat --models     List LLMs & models
 
 ## Bridge (External Apps)
@@ -51,6 +64,7 @@ $clip --force               Skip preview, process now
 ## Search
 $wolfram -q <query>    Wolfram Alpha
 $google -s <query>     Google Search
+Use $chat -s, $agent, a bot mention, or listen mode with a public link to read it.
 
 ## Database
 $db -s             View stats
@@ -61,13 +75,29 @@ $db -e/-i          Export/import
 === CHAT ===
 # Unified AI Chat System
 
+Modes:
+$chat --mode agent      Collaborative agent team (default)
+$chat --mode roleplay   Provider/persona mode
+
+In agent mode, DeepSeek sends a high-effort answer first. A high-effort discussion then runs for
+up to three rounds in Luna, Gemini, Claude, DeepSeek order. Each participant sees earlier visible turns and
+can reply, disagree, or stay quiet. Gemini also supplies Google Search and Google Maps grounding.
+Planned teammate questions are sent as separate DeepSeek messages after the opening; unsolicited
+corrections need no handoff.
+Thought bubbles are not treated as spoken dialogue; `SKIP` is hidden when a bubble is shown alone.
+Luna closes grounded work with a source audit before the bot sends the actual source links.
+Team models, personalities, and effort are
+server-admin configured. Search falls back to keyless retrieval if Google grounding is
+unavailable. Google Maps grounding is currently English-only.
+
 Basic Usage:
 $chat                    Show current status
 $chat -s <message>       Send message (or --send)
 
 Configuration:
-$chat -l <name>          Set LLM: chatgpt, gemini, deepseek (or --llm)
-$chat -m <name>          Set model for current LLM (or --model)
+$chat -l <name>          Set role-play LLM: chatgpt, gemini, deepseek
+$chat -m <name>          Set role-play model
+$chat --effort <level>   Set role-play effort: low, medium, high
 $chat --models           List all available LLMs and models
 $chat -st                Show configuration (or --status)
 
@@ -77,26 +107,36 @@ $chat -p show            Show current prompt
 $chat -p <0-3>           Set preset by index
 $chat -p set <text>      Set custom prompt
 
+Provider, model, effort, and prompt changes are available to everyone in role-play mode.
+Agent team configuration is restricted to the server administrator.
+
 History & Modes:
 $chat -c                 Clear chat history (or --clear)
 $chat --listen on        Enable listen mode (auto-respond to all messages)
 $chat --listen off       Disable listen mode
+$chat --trace -s <msg>   Keep a separate live process-notes message for this request
+
+Safe planning and tool milestones are appended as they happen. A generated high-level recap follows.
+Process notes are not private model chain-of-thought.
+
+The agent answers from its own knowledge by default. It searches only for current, explicitly
+researched, or genuinely obscure facts, and reads links only when their contents matter.
 
 Older chat turns are automatically compressed into a durable summary near the model's context limit.
 $chat -c removes both recent turns and compressed context for the active LLM.
 
 Command Chaining Examples:
 $chat -l gemini -m gemini-1.5-pro -s Hello
-$chat -c -l deepseek -p 2 -s Fresh start with custom prompt
+$chat --mode roleplay -c -l deepseek -p 2 -s Fresh start with custom prompt
 $chat -l chatgpt -m gpt-4 -p 0 -s Test
 
 Available LLMs:
 • chatgpt: gpt-3.5-turbo, gpt-4, gpt-4-turbo
 • gemini: gemini-2.0-flash-exp, gemini-2.5-pro, gemini-2.5-flash
-• deepseek: deepseek-chat, deepseek-reasoner
+• deepseek: deepseek-flash
 
 Preset Prompts:
-• 0: Short Assistant (default)
+• 0: CETACEA_LOLI for DeepSeek; Short Assistant for other providers (default)
 • 1: Blank
 • 2: Misaka Minoto
 • 3: Saber
@@ -142,9 +182,16 @@ Wolfram Alpha:
 $wolfram -q <query>      Query Wolfram Alpha (or --query)
 $wolfram <text>          Legacy format (no flag)
 
-Google Search:
-$google -s <query>       Search with SerpAPI (or --search, -q)
+Web Research:
+$google -s <query>       Research and synthesize an answer with sources (or --search, -q)
 $google <text>           Legacy format (no flag)
+
+Linked Pages:
+Use $chat -s, $agent, a bot mention, or listen mode with a public HTTP(S) page.
+A bare link is summarized automatically.
+Add a question with the link to ask about its contents. HTML, plain text, and JSON are supported.
+Private-network URLs, oversized pages, credentialed URLs, and binary downloads are rejected.
+Sources remain clickable, but Discord preview cards are suppressed in sourced answers.
 
 Examples:
 $wolfram -q integrate x^2

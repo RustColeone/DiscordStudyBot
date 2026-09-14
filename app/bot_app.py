@@ -1,3 +1,5 @@
+import asyncio
+
 from features.feature_bridge import BridgeFeature
 from features.feature_agent import AgentFeature
 from features.feature_admin import AdminFeature
@@ -10,12 +12,15 @@ from features.feature_music import MusicFeature
 from features.feature_search import SearchFeature
 from features.feature_system import SystemFeature
 from features.feature_time import TimeFeature
+from services.attachment_store import cleanup_expired_cache
 
 
 class BotApplication:
     def __init__(self, config):
         self.config = config
         self.platform = None
+        self.attachment_cleanup_task = None
+        cleanup_expired_cache()
 
         self.help_feature = HelpFeature()
         self.admin_feature = AdminFeature()
@@ -60,6 +65,16 @@ class BotApplication:
 
     def start_background_tasks(self) -> None:
         self.time_feature.start_scheduler(self)
+        if self.attachment_cleanup_task is None or self.attachment_cleanup_task.done():
+            self.attachment_cleanup_task = self.platform.create_background_task(
+                self._run_attachment_cleanup()
+            )
+
+    @staticmethod
+    async def _run_attachment_cleanup() -> None:
+        while True:
+            await asyncio.sleep(5 * 60)
+            await asyncio.to_thread(cleanup_expired_cache)
 
     async def handle_message(self, message):
         self._log_message(message)

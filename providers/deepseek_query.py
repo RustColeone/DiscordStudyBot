@@ -13,7 +13,9 @@ from services.vision import inline_image_urls, openai_image_content, persistent_
 
 # Load system prompts from shared JSON file
 with open("llm_config.json", "r", encoding="utf-8") as f:
-    system_prompt = json.load(f)["prompts"]
+    llm_config = json.load(f)
+    system_prompt = llm_config["prompts"]
+    deepseek_default_prompt = llm_config["deepseek_default_prompt"]
 
 with open("config.yml", "r") as ymlfile:
     botConfig = yaml.safe_load(ymlfile)
@@ -28,6 +30,7 @@ client = (
 )
 
 AI_MODEL_NAME = "deepseek"
+MODEL_NAME = "deepseek-flash"
 
 def _summarize_context(source, model):
     params = {
@@ -60,7 +63,7 @@ def _is_context_error(error):
     message = str(error).lower()
     return "context" in message and ("length" in message or "token" in message)
 
-def _load_history_from_db(channelID, model="deepseek-flash", effort="high"):
+def _load_history_from_db(channelID, model=MODEL_NAME, effort="high"):
     """Load chat history from database"""
     compact_history_if_needed(
         str(channelID),
@@ -73,16 +76,26 @@ def _load_history_from_db(channelID, model="deepseek-flash", effort="high"):
     
     # If no history, initialize with system prompt
     if not history:
-        system_message = {"role": "system", "content": system_prompt[0]["content"]}
-        db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", system_prompt[0]["content"])
+        system_message = {"role": "system", "content": deepseek_default_prompt["content"]}
+        db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", deepseek_default_prompt["content"])
         return [system_message]
+
+    if history[0] == {"role": "system", "content": system_prompt[0]["content"]}:
+        db.replace_initial_system_prompt(
+            str(channelID),
+            AI_MODEL_NAME,
+            system_prompt[0]["content"],
+            deepseek_default_prompt["content"],
+        )
+        history[0]["content"] = deepseek_default_prompt["content"]
     
     return history
 
-def queryDeepSeek(user_input, channelID, time, model="deepseek-flash", username=None, system_context=None,
+def queryDeepSeek(user_input, channelID, time, model=MODEL_NAME, username=None, system_context=None,
                   effort="high", persist=True, images=None):
     if client is None:
         return "DeepSeek is not configured."
+    model = MODEL_NAME
 
     # Load history from database
     history = _load_history_from_db(channelID, model, effort)
@@ -175,6 +188,7 @@ def changePrompt(channelID, index, time):
     db.clear_chat_history(str(channelID), AI_MODEL_NAME)
     
     # Set new system prompt
-    db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", system_prompt[index]["content"])
+    selected_prompt = deepseek_default_prompt if index == 0 else system_prompt[index]
+    db.save_chat_message(str(channelID), AI_MODEL_NAME, "system", selected_prompt["content"])
     
-    return f"✅ Prompt changed to **{system_prompt[index]['name']}** (index {index})\n🗑️ Chat history cleared"
+    return f"✅ Prompt changed to **{selected_prompt['name']}** (index {index})\n🗑️ Chat history cleared"

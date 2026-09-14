@@ -1,8 +1,15 @@
 from types import SimpleNamespace
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
-from services.vision import download_image_bytes, inline_image_urls
+from services.vision import (
+    DOWNLOAD_HEADERS,
+    download_image_bytes,
+    inline_image_urls,
+    supports_image_input,
+)
 
 
 class FakeResponse:
@@ -26,6 +33,21 @@ class FakeResponse:
 
 
 class VisionTests(unittest.TestCase):
+    def test_only_unified_deepseek_flash_supports_vision(self):
+        self.assertTrue(supports_image_input("deepseek", "deepseek-flash"))
+        self.assertFalse(supports_image_input("deepseek", "deepseek-v4-flash"))
+        self.assertFalse(supports_image_input("deepseek", "deepseek-reasoner"))
+
+    def test_reads_cached_local_image_without_http_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "photo.png"
+            path.write_bytes(b"image")
+            with patch("services.vision.requests.get") as get:
+                image = download_image_bytes(str(path))
+
+        self.assertEqual(image, b"image")
+        get.assert_not_called()
+
     def test_downloads_image_and_builds_inline_data_url(self):
         image = {
             "url": "https://cdn.discordapp.com/photo.png",
@@ -39,7 +61,12 @@ class VisionTests(unittest.TestCase):
         ) as get:
             inline = inline_image_urls([image])
 
-        get.assert_called_once_with(image["url"], stream=True, timeout=(10, 60))
+        get.assert_called_once_with(
+            image["url"],
+            stream=True,
+            timeout=(10, 60),
+            headers=DOWNLOAD_HEADERS,
+        )
         self.assertEqual(inline[0]["url"], "data:image/png;base64,aW1hZ2U=")
 
     def test_rejects_oversized_image_from_content_length(self):

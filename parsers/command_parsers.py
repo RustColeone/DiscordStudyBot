@@ -139,6 +139,8 @@ class ChatCommand:
         self.clear_history: bool = False
         self.listen_mode: Optional[str] = None  # 'on', 'off', or None
         self.effort: Optional[str] = None
+        self.mode: Optional[str] = None
+        self.show_trace: bool = False
         self.errors: List[str] = []
     
     def has_action(self) -> bool:
@@ -152,7 +154,8 @@ class ChatCommand:
             self.show_status or
             self.clear_history or
             self.listen_mode is not None or
-            self.effort is not None
+            self.effort is not None or
+            self.mode is not None
         )
 
 def parse_chat_command(command_text: str) -> ChatCommand:
@@ -169,6 +172,8 @@ def parse_chat_command(command_text: str) -> ChatCommand:
         --clear, -c                Clear chat history
         --listen on/off            Enable or disable listen mode
         --effort, -e <level>       Set effort (low/medium/high)
+        --mode <agent|roleplay>    Set collaborative agent or role-play mode
+        --trace, -t                Preserve a separate high-level process worklog
     
     Examples:
         $chat --llm gemini --model gemini-1.5-pro --send Hello
@@ -287,6 +292,19 @@ def parse_chat_command(command_text: str) -> ChatCommand:
             else:
                 cmd.errors.append("--effort requires 'low', 'medium', or 'high'")
                 i += 1
+
+        elif token == '--mode':
+            value, consumed = _consume_value(tokens, i + 1)
+            if value and value.lower() in ['agent', 'roleplay']:
+                cmd.mode = value.lower()
+                i += consumed
+            else:
+                cmd.errors.append("--mode requires 'agent' or 'roleplay'")
+                i += 1
+
+        elif token in ['--trace', '-t']:
+            cmd.show_trace = True
+            i += 1
         
         # Unknown flag
         else:

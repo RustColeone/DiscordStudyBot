@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -9,6 +10,10 @@ SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 MAX_IMAGE_BYTES = 32 * 1024 * 1024
 MAX_INLINE_IMAGE_BYTES = 34 * 1024 * 1024
 DOWNLOAD_CHUNK_BYTES = 64 * 1024
+DOWNLOAD_HEADERS = {
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "User-Agent": "DiscordStudyBot/1.0 (+local vision fetcher)",
+}
 
 
 def image_metadata(attachment):
@@ -36,11 +41,7 @@ def image_metadata(attachment):
 def supports_image_input(provider: str, model: str) -> bool:
     normalized = model.lower()
     if provider == "deepseek":
-        return normalized in {
-            "deepseek-flash",
-            "deepseek-v4-flash",
-            "deepseek-v4-flash-vision-exp",
-        }
+        return normalized == "deepseek-flash"
     if provider == "gemini":
         return normalized.startswith(("gemini-", "gemma-3", "gemma-3n"))
     if provider == "chatgpt":
@@ -67,10 +68,10 @@ def inline_image_urls(images: list[dict]) -> list[dict]:
     inline_images = []
     total_bytes = 0
     for image in images:
-        image_bytes = download_image_bytes(image["url"], MAX_IMAGE_BYTES)
+        image_bytes = download_image_bytes(image.get("path") or image["url"], MAX_IMAGE_BYTES)
         total_bytes += len(image_bytes)
         if total_bytes > MAX_INLINE_IMAGE_BYTES:
-            raise ValueError("Images exceed the 48 MiB inline request limit")
+            raise ValueError("Images exceed the 34 MiB source-image limit")
         encoded = base64.b64encode(image_bytes).decode("ascii")
         inline_images.append({
             **image,
@@ -80,7 +81,16 @@ def inline_image_urls(images: list[dict]) -> list[dict]:
 
 
 def download_image_bytes(url: str, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
-    with requests.get(url, stream=True, timeout=(10, 60)) as response:
+    local_path = Path(url)
+    if not str(url).startswith(("https://", "http://")) and local_path.is_file():
+        if local_path.stat().st_size > max_bytes:
+            raise ValueError("Image exceeds the 32 MiB vision limit")
+        image_bytes = local_path.read_bytes()
+        if not image_bytes:
+            raise ValueError("Image file is empty")
+        local_path.touch()
+        return image_bytes
+    with requests.get(url, stream=True, timeout=(10, 60), headers=DOWNLOAD_HEADERS) as response:
         response.raise_for_status()
         content_length = response.headers.get("Content-Length")
         if content_length and int(content_length) > max_bytes:

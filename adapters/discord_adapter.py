@@ -6,6 +6,7 @@ import discord
 
 from app.bot_types import IncomingMessage
 from services.command_queue import CommandQueue, QueuedCommand
+from services.attachment_store import attachment_metadata
 from services.vision import image_metadata
 
 
@@ -13,6 +14,7 @@ class DiscordAdapter:
     supports_progress = True
     supports_message_edit = True
     supports_voice = True
+    supports_live_responses = True
 
     def __init__(self, app, config):
         self.app = app
@@ -112,18 +114,32 @@ class DiscordAdapter:
         reference = getattr(native_message, "reference", None)
         referenced_message = getattr(reference, "resolved", None)
         referenced_content = getattr(referenced_message, "content", "") or ""
+        referenced_attachments = [
+            metadata for attachment in getattr(referenced_message, "attachments", [])
+            if (metadata := attachment_metadata(
+                attachment,
+                getattr(referenced_message, "id", None),
+                getattr(getattr(referenced_message, "author", None), "id", None),
+                getattr(referenced_message, "created_at", None),
+            )) is not None
+        ]
         referenced_attachment_urls = [
-            attachment.url for attachment in getattr(referenced_message, "attachments", [])
-            if getattr(attachment, "url", None)
+            attachment["url"] for attachment in referenced_attachments
         ]
         referenced_image_attachments = [
             image for attachment in getattr(referenced_message, "attachments", [])
             if (image := image_metadata(attachment)) is not None
         ]
-        attachment_urls = [
-            attachment.url for attachment in getattr(native_message, "attachments", [])
-            if getattr(attachment, "url", None)
+        attachments = [
+            metadata for attachment in getattr(native_message, "attachments", [])
+            if (metadata := attachment_metadata(
+                attachment,
+                getattr(native_message, "id", None),
+                getattr(author, "id", None),
+                getattr(native_message, "created_at", None),
+            )) is not None
         ]
+        attachment_urls = [attachment["url"] for attachment in attachments]
         image_attachments = [
             image for attachment in getattr(native_message, "attachments", [])
             if (image := image_metadata(attachment)) is not None
@@ -154,8 +170,10 @@ class DiscordAdapter:
                 "was_mentioned": was_mentioned,
                 "is_creator": is_creator,
                 "referenced_content": referenced_content,
+                "referenced_attachments": referenced_attachments,
                 "referenced_attachment_urls": referenced_attachment_urls,
                 "referenced_image_attachments": referenced_image_attachments,
+                "attachments": attachments,
                 "attachment_urls": attachment_urls,
                 "image_attachments": image_attachments,
             },
@@ -163,9 +181,14 @@ class DiscordAdapter:
 
     async def _send_responses(self, channel, responses):
         for response in responses:
+            if response.metadata.get("sent_live"):
+                continue
             if response.text is not None and response.attachment is None:
                 for chunk in self._split_message(response.text):
-                    await channel.send(chunk)
+                    await channel.send(
+                        chunk,
+                        suppress_embeds=bool(response.metadata.get("suppress_embeds")),
+                    )
                 continue
 
             if response.attachment is not None:
@@ -180,12 +203,14 @@ class DiscordAdapter:
         file_name = attachment.filename or os.path.basename(attachment.path)
         attempts = 3
         last_error = None
+        uploaded = False
 
         try:
             for attempt in range(1, attempts + 1):
                 try:
                     discord_file = discord.File(attachment.path, filename=file_name)
                     await channel.send(response.text or None, file=discord_file)
+                    uploaded = True
                     return
                 except Exception as error:
                     last_error = error
@@ -194,9 +219,12 @@ class DiscordAdapter:
                         await asyncio.sleep(attempt)
 
             fallback_text = response.text or f"⚠️ Failed to upload attachment: {file_name}"
-            await channel.send(f"{fallback_text}\n⚠️ Attachment upload failed after {attempts} attempts: {last_error}")
+            await channel.send(
+                f"{fallback_text}\n⚠️ Attachment upload failed after {attempts} attempts: {last_error}\n"
+                "The rendered file was retained on the bot host instead of being deleted."
+            )
         finally:
-            if attachment.delete_after_send and os.path.exists(attachment.path):
+            if uploaded and attachment.delete_after_send and os.path.exists(attachment.path):
                 os.remove(attachment.path)
 
     async def send_channel_message(self, channel_id: str, content: str):

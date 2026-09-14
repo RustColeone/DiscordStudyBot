@@ -47,7 +47,8 @@ class ClipFeature:
                 clip.keep_file = cmd.keep_file
 
         responses = [BotResponse(text=f"🎬 Processing {len(clips_to_process)} clip(s)... (this may take some time)")]
-        responses.extend(await self._build_clip_file_responses(clips_to_process))
+        max_size = clipQuery.get_discord_size_limit(premium_tier)
+        responses.extend(await self._build_clip_file_responses(clips_to_process, max_size))
         clipQuery.clear_pending_clips(channel_id)
         responses.append(BotResponse(text="✅ All clips processed"))
         return responses
@@ -140,6 +141,7 @@ class ClipFeature:
                     video_title=title,
                     source_site=site,
                     keep_file=bool(cmd.keep_file),
+                    range_explicit=index < len(cmd.starts) or index < len(cmd.ends),
                 )
 
                 is_audio = default_format.lower() in ["mp3", "m4a", "wav", "aac", "ogg", "flac"]
@@ -163,9 +165,99 @@ class ClipFeature:
             return responses
 
         clipQuery.store_pending_clips(channel_id, clips)
-        return [BotResponse(text=self._build_preview_message(clips, max_size))]
+        return [BotResponse(
+            text=self._build_preview_message(clips, max_size),
+            metadata={
+                "clip_preview": {
+                    "limit_mb": max_size,
+                    "clips": [self._clip_summary(clip) for clip in clips],
+                }
+            },
+        )]
 
-    async def _build_clip_file_responses(self, clips) -> HandlerResult:
+    def pending_agent_context(self, channel_id: str, premium_tier: int) -> str:
+        clips = clipQuery.get_pending_clips(channel_id) or []
+        if not clips:
+            return ""
+        max_size = clipQuery.get_discord_size_limit(premium_tier)
+        summaries = [self._clip_summary(clip) for clip in clips]
+        return (
+            "Pending clip task (structured state): "
+            f"Discord upload limit is {max_size}MB; clips={summaries}. "
+            "Resolve the user's latest answer against this pending task. Use adjust_pending_clip to trim or compress, "
+            "manage_pending_clips to confirm/cancel, and ask_clarification only when the user's intended goal remains ambiguous."
+        )
+
+    async def adjust_pending_for_agent(self, message: IncomingMessage, arguments) -> HandlerResult:
+        channel_id = message.channel_id
+        clips = clipQuery.get_pending_clips(channel_id) or []
+        clip_index = int(arguments.get("clip", 1)) - 1
+        if clip_index < 0 or clip_index >= len(clips):
+            return [BotResponse(text="❌ No matching pending clip to adjust")]
+
+        clip = clips[clip_index]
+        action = arguments["action"]
+        max_size = clipQuery.get_discord_size_limit(message.metadata.get("guild_premium_tier", 0))
+        if action == "trim":
+            if not arguments.get("start") or not arguments.get("end"):
+                return [BotResponse(text="❌ Trimming requires both a start and end time")]
+            start = clipQuery.parse_time(arguments["start"])
+            end = min(clipQuery.parse_time(arguments["end"]), clip.end)
+            if start < 0 or end <= start:
+                return [BotResponse(text="❌ End time must be after start time")]
+            clipQuery.update_clip_setting(channel_id, clip_index, start=start, end=end)
+        elif action == "fit_discord":
+            duration = clip.end - clip.start
+            fit_settings = clipQuery.calculate_discord_fit(duration, max_size)
+            if fit_settings is None:
+                return [BotResponse(text=(
+                    "⚠️ The full video is too long to fit the Discord limit at usable video quality. "
+                    "Please choose a shorter start and end time."
+                ))]
+            resolution, bitrate, fps = fit_settings
+            clipQuery.update_clip_setting(
+                channel_id,
+                clip_index,
+                resolution=arguments.get("resolution") or resolution,
+                bitrate=bitrate,
+                fps=fps,
+            )
+        elif action == "keep_full_quality":
+            clipQuery.update_clip_setting(channel_id, clip_index, keep_file=True)
+
+        preview = self._build_preview_message(clips, max_size)
+        note = ""
+        if action == "keep_full_quality" and clip.estimated_size_mb > max_size:
+            note = (
+                "\n\n⚠️ This remains too large for Discord upload. It can be processed and retained on the bot host, "
+                "but trimming or compression is required for Discord delivery."
+            )
+        return [BotResponse(
+            text=preview + note,
+            metadata={
+                "clip_preview": {
+                    "limit_mb": max_size,
+                    "clips": [self._clip_summary(item) for item in clips],
+                }
+            },
+        )]
+
+    @staticmethod
+    def _clip_summary(clip) -> dict:
+        return {
+            "title": clip.video_title,
+            "start": clip.start,
+            "end": clip.end,
+            "duration": clip.end - clip.start,
+            "resolution": clip.resolution,
+            "bitrate": clip.bitrate,
+            "format": clip.output_format,
+            "estimated_size_mb": clip.estimated_size_mb,
+            "keep_file": clip.keep_file,
+            "range_explicit": clip.range_explicit,
+        }
+
+    async def _build_clip_file_responses(self, clips, max_size=None) -> HandlerResult:
         responses = []
         for index, clip in enumerate(clips, start=1):
             temp_path = None
@@ -177,6 +269,19 @@ class ClipFeature:
                 if success and os.path.exists(temp_path):
                     file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
                     keep_note = " (kept)" if clip.keep_file else ""
+                    if max_size is not None and file_size_mb > max_size:
+                        if clip.keep_file:
+                            responses.append(BotResponse(text=(
+                                f"📹 Clip {index}/{len(clips)}: {clip.video_title} ({file_size_mb:.2f}MB, kept on host). "
+                                f"The result exceeds Discord's {max_size:g}MB upload limit, so it was not attached."
+                            )))
+                        else:
+                            os.remove(temp_path)
+                            responses.append(BotResponse(text=(
+                                f"❌ Clip {index} rendered at {file_size_mb:.2f}MB, above Discord's {max_size:g}MB limit. "
+                                "It was deleted; trim it or choose Discord-fit compression and try again."
+                            )))
+                        continue
                     responses.append(
                         BotResponse(
                             text=f"📹 Clip {index}/{len(clips)}: {clip.video_title} ({file_size_mb:.2f}MB){keep_note}",

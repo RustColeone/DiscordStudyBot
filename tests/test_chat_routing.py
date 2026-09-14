@@ -62,7 +62,7 @@ class ChatRoutingTests(unittest.IsolatedAsyncioTestCase):
     async def test_effort_setting_is_persisted(self):
         message = self.message("$chat --effort high")
 
-        with patch(
+        with patch("features.feature_chat.db.get_channel_settings", return_value={"mode": "roleplay"}), patch(
             "features.feature_chat.unified_chat.set_effort",
             return_value="Effort set to **high** for this channel",
         ) as set_effort:
@@ -88,6 +88,97 @@ class ChatRoutingTests(unittest.IsolatedAsyncioTestCase):
         routed_message = self.agent.handle.await_args.args[1]
         self.assertEqual(routed_message.content, "$agent hello")
         self.assertFalse(routed_message.metadata["is_creator"])
+
+    async def test_trace_flag_is_forwarded_to_agent_metadata(self):
+        message = self.message('$chat --trace -s "research this"')
+
+        await self.feature.handle(self.app, message)
+
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent research this")
+        self.assertTrue(routed_message.metadata["show_trace"])
+
+    async def test_trace_image_metadata_is_forwarded_to_agent(self):
+        message = self.message('$chat --trace -s "what car is this?"')
+        image = {
+            "url": "https://cdn.discordapp.com/car.jpg",
+            "filename": "car.jpg",
+            "content_type": "image/jpeg",
+            "size": 1024,
+        }
+        message.metadata["image_attachments"] = [image]
+
+        await self.feature.handle(self.app, message)
+
+        routed_message = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed_message.content, "$agent what car is this?")
+        self.assertEqual(routed_message.metadata["image_attachments"], [image])
+        self.assertTrue(routed_message.metadata["show_trace"])
+
+    async def test_non_creator_can_change_mode(self):
+        message = self.message("$chat --mode roleplay", is_creator=False)
+
+        with patch("features.feature_chat.db.set_chat_mode") as set_mode:
+            responses = await self.feature.handle(self.app, message)
+
+        set_mode.assert_called_once_with("channel", "roleplay")
+        self.assertIn("Chat mode set to **roleplay**", responses[0].text)
+
+    async def test_non_creator_can_change_roleplay_model(self):
+        message = self.message("$chat --mode roleplay --model gpt-4o", is_creator=False)
+
+        with patch("features.feature_chat.db.set_chat_mode") as set_mode, \
+                patch("features.feature_chat.unified_chat.set_model", return_value="model changed") as set_model:
+            responses = await self.feature.handle(self.app, message)
+
+        set_mode.assert_called_once_with("channel", "roleplay")
+        set_model.assert_called_once_with("channel", "gpt-4o")
+        self.assertIn("model changed", responses[0].text)
+
+    async def test_agent_configuration_is_server_admin_only(self):
+        message = self.message("$chat --model another-model", is_creator=False)
+
+        with patch(
+            "features.feature_chat.db.get_channel_settings",
+            return_value={"mode": "agent"},
+        ), patch("features.feature_chat.unified_chat.set_model") as set_model:
+            responses = await self.feature.handle(self.app, message)
+
+        self.assertIn("server-admin configured", responses[0].text)
+        set_model.assert_not_called()
+
+    async def test_creator_can_switch_to_roleplay_then_set_provider(self):
+        message = self.message("$chat --mode roleplay --llm gemini")
+
+        with patch("features.feature_chat.db.set_chat_mode") as set_mode, \
+                patch("features.feature_chat.unified_chat.set_llm", return_value="switched") as set_llm:
+            responses = await self.feature.handle(self.app, message)
+
+        set_mode.assert_called_once_with("channel", "roleplay")
+        set_llm.assert_called_once_with("channel", "gemini")
+        self.assertIn("Chat mode set to **roleplay**", responses[0].text)
+
+    async def test_agent_response_metadata_is_preserved(self):
+        self.agent.handle.return_value = [BotResponse(
+            text="grounded answer",
+            metadata={"suppress_embeds": True},
+        )]
+
+        responses = await self.feature.handle(self.app, self.message("$chat -s current news"))
+
+        self.assertTrue(responses[0].metadata["suppress_embeds"])
+
+    async def test_passive_agent_mode_uses_typed_agent(self):
+        message = self.message("what is current?", is_creator=False)
+        with patch(
+            "features.feature_chat.db.get_channel_settings",
+            return_value={"listen_mode": True, "mode": "agent"},
+        ):
+            responses = await self.feature.handle_passive(self.app, message)
+
+        routed = self.agent.handle.await_args.args[1]
+        self.assertEqual(routed.content, "$agent what is current?")
+        self.assertEqual(responses[0].text, "reminder scheduled")
 
 
 if __name__ == "__main__":
