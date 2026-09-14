@@ -7,6 +7,7 @@ from features.feature_broadcast import BroadcastFeature
 from features.feature_chat import ChatFeature
 from features.feature_clip import ClipFeature
 from features.feature_database import DatabaseFeature
+from features.feature_draw import DrawFeature
 from features.feature_help import HelpFeature
 from features.feature_music import MusicFeature
 from features.feature_search import SearchFeature
@@ -27,6 +28,7 @@ class BotApplication:
         self.chat_feature = ChatFeature()
         self.time_feature = TimeFeature()
         self.system_feature = SystemFeature()
+        self.draw_feature = DrawFeature()
         self.clip_feature = ClipFeature()
         self.broadcast_feature = BroadcastFeature()
         self.music_feature = MusicFeature()
@@ -43,6 +45,7 @@ class BotApplication:
             self.database_feature,
             self.bridge_feature,
             self.broadcast_feature,
+            self.draw_feature,
         )
 
         self.command_features = [
@@ -51,6 +54,7 @@ class BotApplication:
             self.agent_feature,
             self.time_feature,
             self.system_feature,
+            self.draw_feature,
             self.clip_feature,
             self.broadcast_feature,
             self.music_feature,

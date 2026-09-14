@@ -171,7 +171,7 @@ def parse_chat_command(command_text: str) -> ChatCommand:
         --status, -st              Show current configuration
         --clear, -c                Clear chat history
         --listen on/off            Enable or disable listen mode
-        --effort, -e <level>       Set effort (low/medium/high)
+        --effort, -e <level>       Set effort (low/medium/high/max)
         --mode <agent|roleplay>    Set collaborative agent or role-play mode
         --trace, -t                Preserve a separate high-level process worklog
     
@@ -286,11 +286,11 @@ def parse_chat_command(command_text: str) -> ChatCommand:
 
         elif token in ['--effort', '-e']:
             value, consumed = _consume_value(tokens, i + 1)
-            if value and value.lower() in ['low', 'medium', 'high']:
+            if value and value.lower() in ['low', 'medium', 'high', 'max']:
                 cmd.effort = value.lower()
                 i += consumed
             else:
-                cmd.errors.append("--effort requires 'low', 'medium', or 'high'")
+                cmd.errors.append("--effort requires 'low', 'medium', 'high', or 'max'")
                 i += 1
 
         elif token == '--mode':
@@ -654,6 +654,70 @@ def parse_reminder_command(command_text: str) -> ReminderCommand:
             i += 1
     
     return cmd
+
+# ==================== Draw Commands ====================
+
+class DrawCommand:
+    def __init__(self):
+        self.provider: Optional[str] = None
+        self.model: Optional[str] = None
+        self.prompt: str = ""
+        self.list_models: bool = False
+        self.status: bool = False
+        self.errors: List[str] = []
+
+
+def parse_draw_command(command_text: str) -> DrawCommand:
+    cmd = DrawCommand()
+    text = command_text.strip()
+    if text.startswith('$draw'):
+        text = text[5:].strip()
+
+    tokens = _tokenize(text)
+    prompt_parts = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in ['--provider', '-p']:
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
+                cmd.provider = tokens[i + 1]
+                i += 2
+            else:
+                cmd.errors.append(f"{token} requires a provider")
+                i += 1
+        elif token in ['--model', '-m']:
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith('-'):
+                cmd.model = tokens[i + 1]
+                i += 2
+            else:
+                cmd.errors.append(f"{token} requires a model")
+                i += 1
+        elif token == '--models':
+            cmd.list_models = True
+            i += 1
+        elif token == '--status':
+            cmd.status = True
+            i += 1
+        elif token.startswith('-'):
+            cmd.errors.append(f"Unknown flag: {token}")
+            i += 1
+        else:
+            prompt_parts.append(token)
+            i += 1
+
+    cmd.prompt = ' '.join(prompt_parts).strip()
+    if cmd.list_models and cmd.status:
+        cmd.errors.append("Choose either --models or --status")
+    if cmd.model and not cmd.provider:
+        cmd.errors.append("--model requires --provider")
+    if cmd.list_models and cmd.model:
+        cmd.errors.append("--models does not accept --model")
+    if (cmd.list_models or cmd.status) and cmd.prompt:
+        cmd.errors.append("--models and --status do not accept a description")
+    if cmd.status and (cmd.provider or cmd.model):
+        cmd.errors.append("--status does not accept provider or model overrides")
+    return cmd
+
 
 # ==================== Clip Commands ====================
 

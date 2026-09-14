@@ -76,6 +76,7 @@ The project is now organized around a small app core plus adapter-driven feature
 - **Dynamic model fetching**: Automatically updates available models from providers
 - **Persistent fallback**: Models cached in config for offline reliability
 - **Command chaining**: Set LLM, model, prompt, and send message in one command
+- **Multi-provider image generation**: Use `$draw` with Gemini Nano Banana or OpenAI GPT Image 2.5
 
 ### 🔍 Search & Query
 - **Keyless web search** with answer synthesis and clickable sources
@@ -254,6 +255,7 @@ python main.py --mode wechat
 ```bash
 $help                    # Show quick reference
 $help chat              # Detailed help for unified chat
+$help chat 2            # Open page 2 when a help topic has multiple pages
 $help music             # Detailed help for music player
 $help search            # Detailed help for search commands
 $help time              # Detailed help for time/reminders
@@ -378,13 +380,31 @@ $chat --models                     # List all available models
 Provider, model, and effort changes are available to everyone in role-play mode and are rejected in
 agent mode. DeepSeek uses the unified `deepseek-flash` model. Luna, Gemini, and Claude can be overridden with
 `AGENT_LUNA_MODEL`, `AGENT_GEMINI_MODEL`, and `AGENT_CLAUDE_MODEL` in the service environment. `AGENT_OPENING_EFFORT` defaults to `high`, while
-`AGENT_PLANNING_EFFORT` defaults to `high` so typed-tool selection has enough reasoning budget and
+`AGENT_PLANNING_EFFORT` defaults to `max`; Luna owns the stateless typed-tool planner and progress reviewer so
+DeepSeek content filtering cannot erase the action plan. `low`, `medium`, `high`, and `max` are valid efforts.
 `AGENT_DEEPSEEK_EFFORT`, `AGENT_LUNA_EFFORT`, `AGENT_GEMINI_EFFORT`, and `AGENT_CLAUDE_EFFORT`
 independently configure room discussion and consultation effort. Each defaults to `high`; DeepSeek and Luna use
-provider reasoning effort, Gemini maps it to its thinking level, and high-effort Claude uses a 1,024-token
-extended-thinking budget. The legacy `AGENT_DISCUSSION_EFFORT` and `AGENT_EFFORT` settings remain shared
+provider reasoning effort, Gemini maps `max` to its highest native thinking level, and high/max Claude uses extended
+thinking. The legacy `AGENT_DISCUSSION_EFFORT` and `AGENT_EFFORT` settings remain shared
 fallbacks when a per-agent value is absent. `AGENT_GEMINI_MIN_INTERVAL_SECONDS` controls process-wide
 Gemini request pacing and defaults to `1.1` seconds.
+
+`$draw <description>` uses the independent draw configuration. Gemini is the default provider with
+`gemini-2.5-flash-image` (Nano Banana), while OpenAI defaults to `gpt-image-2.5-sunburst`. Select a request explicitly
+with `$draw -p openai -m gpt-image-2.5-flare <description>` or `$draw -p gemini -m <model> <description>`. Use
+`$draw --models` for live catalogs and `$draw --status` for configured defaults. Attached images and images on the
+replied-to message are passed as visual references.
+
+Configure this subsystem with `DRAW_DEFAULT_PROVIDER`, `DRAW_GEMINI_MODEL`, `DRAW_OPENAI_MODEL`, and
+`DRAW_OUTPUT_DIR`. OpenAI output can also use `DRAW_OPENAI_OUTPUT_FORMAT`, `DRAW_OPENAI_QUALITY`, and
+`DRAW_OPENAI_SIZE`. Natural image requests through `$chat -s` remain assigned to Gemini and use the configured
+Gemini draw model; direct `$draw` overrides do not change collaborative-room ownership.
+
+OpenRouter is optional. Set `OPENROUTER_API_KEY`, an `OPENROUTER_<NAME>_MODEL` catalog slug, and change only that
+member's `AGENT_<NAME>_BACKEND` from `direct` to `openrouter`. Other members continue spending their direct-provider
+balances. `WEB_SEARCH_BACKEND=openrouter` enables OpenRouter's model-agnostic web plugin using
+`OPENROUTER_WEB_SEARCH_MODEL` (default `openrouter/auto`); failed OpenRouter searches fall back to the existing search
+pipeline. `$chat --status` reports each member's effective backend and model.
 
 ### Manage Prompts (Personalities)
 ```bash
@@ -452,6 +472,7 @@ $chat --listen on                 # 开启监听模式（自动回复）
 ```bash
 $help                             # 查看全部命令
 $help chat                        # 查看聊天系统详细帮助
+$help chat 2                      # 查看较长帮助主题的第 2 页
 
 # 时间相关
 $start                            # 开始时钟

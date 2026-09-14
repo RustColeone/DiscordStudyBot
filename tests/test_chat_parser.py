@@ -15,6 +15,12 @@ class ChatParserTests(unittest.TestCase):
 
         self.assertIn("--mode requires 'agent' or 'roleplay'", command.errors)
 
+    def test_parses_max_effort(self):
+        command = parse_chat_command("$chat --effort max")
+
+        self.assertEqual(command.effort, "max")
+        self.assertEqual(command.errors, [])
+
 
 if __name__ == "__main__":
     unittest.main()

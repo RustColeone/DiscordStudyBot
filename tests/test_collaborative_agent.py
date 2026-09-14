@@ -122,6 +122,25 @@ class CollaborativeAgentTests(unittest.TestCase):
         ])
         self.assertNotIn(collaborative_agent.AGENT_PROMPT, str(messages))
 
+    def test_filtered_primary_completion_returns_an_explicit_error(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="content_filter",
+                message=SimpleNamespace(content=""),
+            )]
+        )
+        history = [{"role": "system", "content": collaborative_agent.AGENT_PROMPT}]
+
+        with patch.object(collaborative_agent, "deepseek_client", client), \
+                patch.object(collaborative_agent, "DEEPSEEK_BACKEND", "direct"), \
+                patch.object(collaborative_agent, "_load_history", return_value=history), \
+                patch.object(collaborative_agent.db, "save_chat_message"):
+            answer = collaborative_agent.query_agent("hello", "channel", None)
+
+        self.assertIn("DeepSeek returned no answer", answer)
+        self.assertIn("content_filter", answer)
+
     def test_all_room_members_can_request_grounding_for_material_uncertainty(self):
         for prompt in (
             collaborative_agent.AGENT_PROMPT,
@@ -151,13 +170,29 @@ class CollaborativeAgentTests(unittest.TestCase):
         self.assertIn("不得使用 <<ASK:name>> 标记", request["messages"][0]["content"])
         self.assertIn("开场中的交接机制在本回合无效", request["messages"][0]["content"])
 
+    def test_deepseek_discussion_accepts_max_effort(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="Reviewed."))]
+        )
+
+        with patch.object(collaborative_agent, "deepseek_client", client), \
+                patch.object(collaborative_agent, "DEEPSEEK_BACKEND", "direct"), \
+                patch.object(collaborative_agent, "AGENT_DEEPSEEK_EFFORT", "max"):
+            collaborative_agent.consult_deepseek("Review this")
+
+        request = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["reasoning_effort"], "max")
+        self.assertEqual(request["max_tokens"], 4000)
+
     def test_deepseek_handoff_is_a_high_effort_direct_question(self):
         client = Mock()
         client.chat.completions.create.return_value = SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content="Luna, what tradeoff matters most here?"))]
         )
 
-        with patch.object(collaborative_agent, "deepseek_client", client):
+        with patch.object(collaborative_agent, "deepseek_client", client), \
+            patch.object(collaborative_agent, "AGENT_DEEPSEEK_EFFORT", "high"):
             answer = collaborative_agent.compose_deepseek_handoff("Ask Luna about the tradeoff")
 
         self.assertEqual(answer, "Luna, what tradeoff matters most here?")
@@ -187,6 +222,57 @@ class CollaborativeAgentTests(unittest.TestCase):
         self.assertIn("在讨论停滞时拍板", request["messages"][0]["content"])
         self.assertIn("不必等到严重问题才开口", request["messages"][0]["content"])
         self.assertIn("温和反对或纠正 DeepSeek", request["messages"][0]["content"])
+
+    def test_luna_control_call_is_persona_free_and_uses_max_effort(self):
+        client = Mock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="[]"),
+            )]
+        )
+
+        with patch.object(collaborative_agent, "openai_client", client), \
+                patch.object(collaborative_agent, "LUNA_BACKEND", "direct"):
+            answer = collaborative_agent.query_luna_control(
+                "choose tools",
+                "Return only JSON.",
+                "max",
+            )
+
+        self.assertEqual(answer, "[]")
+        request = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["reasoning_effort"], "max")
+        self.assertEqual(request["max_completion_tokens"], 8192)
+        self.assertEqual(request["messages"], [
+            {"role": "system", "content": "Return only JSON."},
+            {"role": "user", "content": "choose tools"},
+        ])
+        self.assertNotIn(collaborative_agent.LUNA_PROMPT, str(request["messages"]))
+
+    def test_luna_can_move_to_openrouter_without_using_direct_client(self):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="OpenRouter Luna"),
+            )]
+        )
+        direct_client = Mock()
+
+        with patch.object(collaborative_agent, "openai_client", direct_client), \
+                patch.object(collaborative_agent, "LUNA_BACKEND", "openrouter"), \
+                patch.object(collaborative_agent, "OPENROUTER_LUNA_MODEL", "openai/luna") , \
+                patch.object(
+                    collaborative_agent.openrouter_query,
+                    "create_completion",
+                    return_value=response,
+                ) as openrouter:
+            answer = collaborative_agent.consult_luna("Review this")
+
+        self.assertEqual(answer, "OpenRouter Luna")
+        direct_client.chat.completions.create.assert_not_called()
+        self.assertEqual(openrouter.call_args.args[1], "openai/luna")
+        self.assertEqual(openrouter.call_args.args[2], collaborative_agent.AGENT_LUNA_EFFORT)
 
     def test_luna_receives_locally_downloaded_image(self):
         client = Mock()
@@ -218,7 +304,7 @@ class CollaborativeAgentTests(unittest.TestCase):
 
         self.assertEqual(answer, "Gemini advice")
         request = client.models.generate_content.call_args.kwargs
-        self.assertEqual(request["model"], "gemini-3.5-flash-lite")
+        self.assertEqual(request["model"], "gemini-3.8-flash-lite")
         self.assertEqual(
             request["config"].thinking_config.thinking_level,
             collaborative_agent.types.ThinkingLevel.LOW,
@@ -242,6 +328,29 @@ class CollaborativeAgentTests(unittest.TestCase):
         content = client.models.generate_content.call_args.kwargs["contents"]
         self.assertEqual(content.parts[1].inline_data.data, b"image")
         self.assertEqual(content.parts[1].inline_data.mime_type, "image/jpeg")
+
+    def test_gemini_can_move_to_openrouter_without_using_google_client(self):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="OpenRouter Gemini"),
+            )]
+        )
+        direct_client = Mock()
+
+        with patch.object(collaborative_agent, "gemini_client", direct_client), \
+                patch.object(collaborative_agent, "GEMINI_BACKEND", "openrouter"), \
+                patch.object(collaborative_agent, "OPENROUTER_GEMINI_MODEL", "google/gemini"), \
+                patch.object(
+                    collaborative_agent.openrouter_query,
+                    "create_completion",
+                    return_value=response,
+                ) as openrouter:
+            answer = collaborative_agent.consult_gemini("Check this")
+
+        self.assertEqual(answer, "OpenRouter Gemini")
+        direct_client.models.generate_content.assert_not_called()
+        self.assertEqual(openrouter.call_args.args[1], "google/gemini")
 
     def test_claude_haiku_uses_room_personality_and_high_effort_response(self):
         client = Mock()
@@ -282,6 +391,29 @@ class CollaborativeAgentTests(unittest.TestCase):
         self.assertEqual(request["max_tokens"], 2000)
         self.assertNotIn("thinking", request)
 
+    def test_claude_can_move_to_openrouter_without_using_anthropic_client(self):
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="OpenRouter Claude"),
+            )]
+        )
+        direct_client = Mock()
+
+        with patch.object(collaborative_agent, "claude_client", direct_client), \
+                patch.object(collaborative_agent, "CLAUDE_BACKEND", "openrouter"), \
+                patch.object(collaborative_agent, "OPENROUTER_CLAUDE_MODEL", "anthropic/claude"), \
+                patch.object(
+                    collaborative_agent.openrouter_query,
+                    "create_completion",
+                    return_value=response,
+                ) as openrouter:
+            answer = collaborative_agent.consult_claude("Review this")
+
+        self.assertEqual(answer, "OpenRouter Claude")
+        direct_client.messages.create.assert_not_called()
+        self.assertEqual(openrouter.call_args.args[1], "anthropic/claude")
+
     def test_claude_receives_locally_downloaded_image(self):
         client = Mock()
         client.messages.create.return_value = SimpleNamespace(
@@ -316,7 +448,7 @@ class CollaborativeAgentTests(unittest.TestCase):
             result = collaborative_agent.ground_with_google("coffee in Seattle", "maps")
 
         client.interactions.create.assert_called_once_with(
-            model="gemini-3.5-flash-lite",
+            model="gemini-3.8-flash-lite",
             input="coffee in Seattle",
             tools=[{"type": "google_maps"}],
         )

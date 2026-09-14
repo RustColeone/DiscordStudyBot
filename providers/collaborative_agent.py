@@ -12,10 +12,11 @@ from google import genai
 from google.genai import types
 from openai import OpenAI
 
+from providers import openrouter_query
 from services import database as db
 from services.config_service import optional_secret
 from services.context_compression import compact_history_if_needed, context_limit_for_model
-from services.effort import normalize_effort
+from services.effort import max_tokens_for_effort, normalize_effort
 from services.vision import (
     download_image_bytes,
     inline_image_urls,
@@ -27,11 +28,19 @@ from services.vision import (
 AGENT_HISTORY_NAME = "agent"
 PRIMARY_MODEL = os.getenv("AGENT_DEEPSEEK_MODEL") or os.getenv("AGENT_WHALE_MODEL", "deepseek-flash")
 LUNA_MODEL = os.getenv("AGENT_LUNA_MODEL", "gpt-5.6-luna")
-GEMINI_MODEL = os.getenv("AGENT_GEMINI_MODEL", "gemini-3.5-flash-lite")
+GEMINI_MODEL = os.getenv("AGENT_GEMINI_MODEL", "gemini-3.8-flash-lite")
 CLAUDE_MODEL = os.getenv("AGENT_CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 GROUNDING_MODEL = GEMINI_MODEL
+DEEPSEEK_BACKEND = os.getenv("AGENT_DEEPSEEK_BACKEND", "direct").strip().lower()
+LUNA_BACKEND = os.getenv("AGENT_LUNA_BACKEND", "direct").strip().lower()
+GEMINI_BACKEND = os.getenv("AGENT_GEMINI_BACKEND", "direct").strip().lower()
+CLAUDE_BACKEND = os.getenv("AGENT_CLAUDE_BACKEND", "direct").strip().lower()
+OPENROUTER_DEEPSEEK_MODEL = os.getenv("OPENROUTER_DEEPSEEK_MODEL", "").strip()
+OPENROUTER_LUNA_MODEL = os.getenv("OPENROUTER_LUNA_MODEL", "").strip()
+OPENROUTER_GEMINI_MODEL = os.getenv("OPENROUTER_GEMINI_MODEL", "").strip()
+OPENROUTER_CLAUDE_MODEL = os.getenv("OPENROUTER_CLAUDE_MODEL", "").strip()
 AGENT_OPENING_EFFORT = normalize_effort(os.getenv("AGENT_OPENING_EFFORT", "high"))
-AGENT_PLANNING_EFFORT = normalize_effort(os.getenv("AGENT_PLANNING_EFFORT", "high"))
+AGENT_PLANNING_EFFORT = normalize_effort(os.getenv("AGENT_PLANNING_EFFORT", "max"))
 AGENT_DISCUSSION_EFFORT = normalize_effort(
     os.getenv("AGENT_DISCUSSION_EFFORT") or os.getenv("AGENT_EFFORT", "high")
 )
@@ -48,10 +57,12 @@ AGENT_CLAUDE_EFFORT = normalize_effort(
     os.getenv("AGENT_CLAUDE_EFFORT") or AGENT_DISCUSSION_EFFORT
 )
 AGENT_MAX_TOKENS = 2000
+AGENT_CONTROL_MAX_TOKENS = 8192
 GEMINI_THINKING_LEVELS = {
     "low": types.ThinkingLevel.LOW,
     "medium": types.ThinkingLevel.MEDIUM,
     "high": types.ThinkingLevel.HIGH,
+    "max": types.ThinkingLevel.HIGH,
 }
 try:
     GEMINI_MIN_INTERVAL_SECONDS = max(
@@ -184,6 +195,15 @@ def _summarize_context(source: str) -> str:
 
 
 def _query_whale(messages: list[dict], effort: str, max_tokens: int):
+    if DEEPSEEK_BACKEND == "openrouter":
+        return openrouter_query.create_completion(
+            messages,
+            OPENROUTER_DEEPSEEK_MODEL,
+            effort,
+            max_tokens,
+        )
+    if deepseek_client is None:
+        raise RuntimeError("DeepSeek is not configured")
     params = {
         "model": PRIMARY_MODEL,
         "messages": messages,
@@ -196,8 +216,40 @@ def _query_whale(messages: list[dict], effort: str, max_tokens: int):
     except Exception as error:
         if "reasoning_effort" not in str(error):
             raise
+        if params["reasoning_effort"] == "max":
+            params["reasoning_effort"] = "high"
+            try:
+                return deepseek_client.chat.completions.create(**params)
+            except Exception as fallback_error:
+                if "reasoning_effort" not in str(fallback_error):
+                    raise
         params.pop("reasoning_effort")
         return deepseek_client.chat.completions.create(**params)
+
+
+def _query_luna(messages: list[dict], effort: str, max_tokens: int):
+    if LUNA_BACKEND == "openrouter":
+        return openrouter_query.create_completion(
+            messages,
+            OPENROUTER_LUNA_MODEL,
+            effort,
+            max_tokens,
+        )
+    if openai_client is None:
+        raise RuntimeError("Luna is not configured")
+    params = {
+        "model": LUNA_MODEL,
+        "messages": messages,
+        "max_completion_tokens": max_tokens,
+        "reasoning_effort": normalize_effort(effort),
+    }
+    try:
+        return openai_client.chat.completions.create(**params)
+    except Exception as error:
+        if params["reasoning_effort"] != "max" or "reasoning_effort" not in str(error):
+            raise
+        params["reasoning_effort"] = "high"
+        return openai_client.chat.completions.create(**params)
 
 
 def _load_history(channel_id) -> list[dict]:
@@ -225,7 +277,7 @@ def _load_history(channel_id) -> list[dict]:
 
 def query_agent(user_input, channel_id, time, username=None, system_context=None,
                 persist=True, images=None, effort=None, use_history=True) -> str:
-    if deepseek_client is None:
+    if DEEPSEEK_BACKEND != "openrouter" and deepseek_client is None:
         return "Collaborative agent is not configured: DEEPSEEK_API_KEY is missing."
 
     message_content = f"[{username}]: {user_input}" if username else user_input
@@ -254,12 +306,13 @@ def query_agent(user_input, channel_id, time, username=None, system_context=None
         )
 
     try:
+        selected_effort = effort or AGENT_DEEPSEEK_EFFORT
         response = _query_whale(
             request_history,
-            effort or AGENT_DEEPSEEK_EFFORT,
-            AGENT_MAX_TOKENS,
+            selected_effort,
+            max_tokens_for_effort(selected_effort),
         )
-        answer = response.choices[0].message.content or ""
+        answer = openrouter_query.completion_text(response, "DeepSeek")
         if persist:
             db.save_chat_message(str(channel_id), AGENT_HISTORY_NAME, "assistant", answer)
         return answer
@@ -279,55 +332,73 @@ def save_team_exchange(user_input: str, answer: str, channel_id, username=None, 
 
 
 def consult_luna(request: str, images=None) -> str:
-    if openai_client is None:
-        raise RuntimeError("Luna is not configured")
     images = images or []
     request_images = inline_image_urls(images) if images else []
-    response = openai_client.chat.completions.create(
-        model=LUNA_MODEL,
-        messages=[
+    response = _query_luna(
+        [
             {"role": "system", "content": LUNA_PROMPT},
             {"role": "user", "content": openai_image_content(request, request_images)},
         ],
-        max_completion_tokens=AGENT_MAX_TOKENS,
-        reasoning_effort=AGENT_LUNA_EFFORT,
+        AGENT_LUNA_EFFORT,
+        max_tokens_for_effort(AGENT_LUNA_EFFORT),
     )
-    return response.choices[0].message.content or "No advice was returned."
+    return openrouter_query.completion_text(response)
+
+
+def query_luna_control(request: str, system_context: str, effort: str | None = None) -> str:
+    response = _query_luna(
+        [
+            {"role": "system", "content": system_context},
+            {"role": "user", "content": request},
+        ],
+        effort or AGENT_PLANNING_EFFORT,
+        AGENT_CONTROL_MAX_TOKENS,
+    )
+    return openrouter_query.completion_text(response)
 
 
 def consult_deepseek(request: str) -> str:
-    if deepseek_client is None:
-        raise RuntimeError("DeepSeek is not configured")
     response = _query_whale(
         [
             {"role": "system", "content": DEEPSEEK_DISCUSSION_PROMPT},
             {"role": "user", "content": request},
         ],
         AGENT_DEEPSEEK_EFFORT,
-        AGENT_MAX_TOKENS,
+        max_tokens_for_effort(AGENT_DEEPSEEK_EFFORT),
     )
     return response.choices[0].message.content or "SKIP"
 
 
 def compose_deepseek_handoff(request: str) -> str:
-    if deepseek_client is None:
-        raise RuntimeError("DeepSeek is not configured")
     response = _query_whale(
         [
             {"role": "system", "content": DEEPSEEK_HANDOFF_PROMPT},
             {"role": "user", "content": request},
         ],
         AGENT_DEEPSEEK_EFFORT,
-        AGENT_MAX_TOKENS,
+        max_tokens_for_effort(AGENT_DEEPSEEK_EFFORT),
     )
     return response.choices[0].message.content or ""
 
 
 def consult_gemini(request: str, images=None) -> str:
+    images = images or []
+    if GEMINI_BACKEND == "openrouter":
+        request_images = inline_image_urls(images) if images else []
+        response = openrouter_query.create_completion(
+            [
+                {"role": "system", "content": GEMINI_PROMPT},
+                {"role": "user", "content": openai_image_content(request, request_images)},
+            ],
+            OPENROUTER_GEMINI_MODEL,
+            AGENT_GEMINI_EFFORT,
+            max_tokens_for_effort(AGENT_GEMINI_EFFORT),
+        )
+        return openrouter_query.completion_text(response)
     if gemini_client is None:
         raise RuntimeError("Gemini is not configured")
     parts = [types.Part.from_text(text=request)]
-    for image in images or []:
+    for image in images:
         parts.append(types.Part.from_bytes(
             data=download_image_bytes(image.get("path") or image["url"]),
             mime_type=image["content_type"],
@@ -339,7 +410,7 @@ def consult_gemini(request: str, images=None) -> str:
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=GEMINI_PROMPT,
-                max_output_tokens=AGENT_MAX_TOKENS,
+                max_output_tokens=max_tokens_for_effort(AGENT_GEMINI_EFFORT),
                 temperature=0.3,
                 thinking_config=types.ThinkingConfig(
                     thinking_level=GEMINI_THINKING_LEVELS[AGENT_GEMINI_EFFORT]
@@ -351,10 +422,23 @@ def consult_gemini(request: str, images=None) -> str:
 
 
 def consult_claude(request: str, images=None) -> str:
+    images = images or []
+    if CLAUDE_BACKEND == "openrouter":
+        request_images = inline_image_urls(images) if images else []
+        response = openrouter_query.create_completion(
+            [
+                {"role": "system", "content": CLAUDE_PROMPT},
+                {"role": "user", "content": openai_image_content(request, request_images)},
+            ],
+            OPENROUTER_CLAUDE_MODEL,
+            AGENT_CLAUDE_EFFORT,
+            4096 if AGENT_CLAUDE_EFFORT == "max" else AGENT_MAX_TOKENS,
+        )
+        return openrouter_query.completion_text(response)
     if claude_client is None:
         raise RuntimeError("Claude is not configured")
     content = []
-    for image in images or []:
+    for image in images:
         image_bytes = download_image_bytes(image.get("path") or image["url"])
         content.append({
             "type": "image",
@@ -367,12 +451,19 @@ def consult_claude(request: str, images=None) -> str:
     content.append({"type": "text", "text": request})
     parameters = {
         "model": CLAUDE_MODEL,
-        "max_tokens": 3072 if AGENT_CLAUDE_EFFORT == "high" else AGENT_MAX_TOKENS,
+        "max_tokens": (
+            4096 if AGENT_CLAUDE_EFFORT == "max"
+            else 3072 if AGENT_CLAUDE_EFFORT == "high"
+            else AGENT_MAX_TOKENS
+        ),
         "system": CLAUDE_PROMPT,
         "messages": [{"role": "user", "content": content}],
     }
-    if AGENT_CLAUDE_EFFORT == "high":
-        parameters["thinking"] = {"type": "enabled", "budget_tokens": 1024}
+    if AGENT_CLAUDE_EFFORT in {"high", "max"}:
+        parameters["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": 2048 if AGENT_CLAUDE_EFFORT == "max" else 1024,
+        }
     response = claude_client.messages.create(
         **parameters,
     )

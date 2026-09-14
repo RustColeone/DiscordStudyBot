@@ -28,7 +28,7 @@ class AgentFeature:
 
     def __init__(self, time_feature, system_feature, search_feature, help_feature,
                  music_feature=None, clip_feature=None, database_feature=None,
-                 bridge_feature=None, broadcast_feature=None):
+                 bridge_feature=None, broadcast_feature=None, draw_feature=None):
         self.time_feature = time_feature
         self.system_feature = system_feature
         self.search_feature = search_feature
@@ -38,6 +38,7 @@ class AgentFeature:
         self.database_feature = database_feature
         self.bridge_feature = bridge_feature
         self.broadcast_feature = broadcast_feature
+        self.draw_feature = draw_feature
         self.registry = CommandRegistry()
         self.pending_plans: Dict[str, Dict[str, Any]] = {}
         self.pending_tasks: Dict[str, Dict[str, Any]] = {}
@@ -158,6 +159,22 @@ class AgentFeature:
             risk="read_only",
             handler=self._read_web_page,
         ))
+        if self.draw_feature is not None:
+            self.registry.register(CommandTool(
+                name="generate_image",
+                description=(
+                    "Ask Gemini's Nano Banana image model to draw, illustrate, render, create, or edit an image "
+                    "from a visual description. Use this whenever the user requests an image as the deliverable. Gemini owns "
+                    "image-generation tasks; do not substitute a text description of what the image could look like."
+                ),
+                parameters={"prompt": {
+                    "type": "string",
+                    "description": "Complete visual description and requested style for Gemini to render",
+                }},
+                required=["prompt"],
+                risk="prepare",
+                handler=self._generate_image,
+            ))
         self.registry.register(CommandTool(
             name="create_reminder",
             description="Create a persistent reminder from a phrase such as 'tomorrow at 8 PM to call Alex'.",
@@ -772,6 +789,18 @@ class AgentFeature:
                 return responses, True
 
             if any(response.attachment is not None for response in round_responses):
+                if any(response.metadata.get("generated_image") for response in round_responses):
+                    transcript = "\n\n".join(
+                        response.text or f"**Gemini**\nGenerated `{response.attachment.filename}`."
+                        for response in round_responses
+                        if response.attachment is not None or response.text
+                    )
+                    collaborative_agent.save_team_exchange(
+                        request,
+                        transcript,
+                        message.channel_id,
+                        message.author_display_name,
+                    )
                 await self._update_progress(
                     app,
                     progress,
@@ -1078,7 +1107,9 @@ class AgentFeature:
                     outputs.append(BotResponse(text=f"**{index}. {step['tool']}**\n{result}"))
                 else:
                     for response in result:
-                        if response.text and step["tool"] not in {"web_search", "read_web_page"}:
+                        if response.text and step["tool"] not in {
+                            "web_search", "read_web_page", "generate_image"
+                        }:
                             response.text = f"**{index}. {step['tool']}**\n{response.text}"
                         outputs.append(response)
                 await self._update_progress(
@@ -1110,6 +1141,8 @@ class AgentFeature:
             action = "Claude accepted the invitation" if completed else "DeepSeek is inviting Claude into the room"
         elif tool in {"web_search", "google_maps"}:
             action = "Gemini finished grounded research" if completed else "Gemini is checking grounded sources"
+        elif tool == "generate_image":
+            action = "Gemini finished drawing" if completed else "Gemini is drawing the requested image"
         else:
             readable = tool.replace("_", " ")
             action = f"DeepSeek completed {readable}" if completed else f"DeepSeek is running {readable}"
@@ -1270,6 +1303,15 @@ class AgentFeature:
             message,
             question=question,
             urls=arguments["url"],
+        )
+
+    async def _generate_image(self, app, message, arguments):
+        if self.draw_feature is None:
+            raise RuntimeError("Image generation is not available")
+        return await self.draw_feature.generate(
+            message,
+            arguments["prompt"],
+            provider="gemini",
         )
 
     async def _read_attachment(self, app, message, arguments):

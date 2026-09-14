@@ -44,6 +44,23 @@ class StubSearchFeature(StubFeature):
         return [BotResponse(text="Combined page summary [1][2].")]
 
 
+class StubDrawFeature:
+    def __init__(self):
+        self.requests = []
+
+    async def generate(self, message, description, **options):
+        self.requests.append((message, description, options))
+        return [BotResponse(
+            text="**Gemini**\nI finished the image.",
+            attachment=BotAttachment(
+                path="/tmp/generated.png",
+                filename="generated.png",
+                delete_after_send=True,
+            ),
+            metadata={"generated_by": "Gemini", "generated_image": True},
+        )]
+
+
 class StubProgressPlatform:
     supports_progress = True
 
@@ -119,6 +136,32 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         planner.assert_called_once()
         self.assertIn("$agent confirm", response[0].text)
 
+    async def test_image_request_is_executed_by_gemini_and_saved_to_room_history(self):
+        draw = StubDrawFeature()
+        agent = AgentFeature(
+            StubTimeFeature(), StubFeature(), StubSearchFeature(), StubFeature(),
+            draw_feature=draw,
+        )
+        plan = [{
+            "tool": "generate_image",
+            "arguments": {"prompt": "An anime-style moonlit library"},
+        }]
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save_exchange:
+            responses = await agent.handle(
+                self.app,
+                self._message("$agent draw a moonlit library in anime style"),
+            )
+
+        self.assertEqual(draw.requests[0][1], "An anime-style moonlit library")
+        self.assertEqual(draw.requests[0][2], {"provider": "gemini"})
+        self.assertEqual(responses[0].text, "**Gemini**\nI finished the image.")
+        self.assertEqual(responses[0].attachment.filename, "generated.png")
+        save_exchange.assert_called_once()
+        self.assertIn("Gemini", save_exchange.call_args.args[1])
+
     async def test_lists_reminders_from_multilingual_plan(self):
         message = self._message("$agent 查看所有提醒")
         plan = [{"tool": "list_reminders", "arguments": {}}]
@@ -159,18 +202,18 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "features.feature_agent.db.get_channel_settings",
             return_value={"mode": "roleplay", "effort": "high"},
-        ), patch("features.feature_agent.unified_chat.query_chat", side_effect=[
-                "No tool needed.",
-                "No tool needed.",
-                "No tool needed.",
-                "这是一个需要区分法律文本与实际执行的问题。",
-            ]) as query_chat:
+        ), patch(
+            "providers.unified_chat.collaborative_agent.query_luna_control",
+            side_effect=["No tool needed."] * 3,
+        ) as query_luna, patch(
+            "features.feature_agent.unified_chat.query_chat",
+            return_value="这是一个需要区分法律文本与实际执行的问题。",
+        ) as query_chat:
             response = await self.agent.handle(self.app, message)
 
         self.assertEqual(response[0].text, "这是一个需要区分法律文本与实际执行的问题。")
-        self.assertEqual(query_chat.call_count, 4)
-        for call in query_chat.call_args_list[:3]:
-            self.assertFalse(call.kwargs["use_history"])
+        self.assertEqual(query_luna.call_count, 3)
+        query_chat.assert_called_once()
 
     async def test_conversational_image_is_fetched_before_vision(self):
         message = self._message("$agent what is this?")

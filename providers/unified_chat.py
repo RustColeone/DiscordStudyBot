@@ -330,6 +330,10 @@ def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> l
             "Choose google_maps for places, nearby businesses, opening hours, directions, or location-specific "
             "recommendations, and write its query in English. Do not choose web_search for a request that google_maps "
             "can answer directly. "
+            "Choose generate_image whenever the user asks the team to draw, illustrate, render, create, generate, "
+            "or visually edit an image. Image generation belongs to Gemini; preserve all requested subjects, style, "
+            "composition, and constraints in the prompt. Do not return [] and answer with only prose when the user "
+            "expects an image file. "
             "In collaborative agent mode, DeepSeek is the primary speaker. Choose consult_luna when a complex "
             "request benefits from coordination, tradeoff analysis, plan review, or the user explicitly asks Luna "
             "to join. Choose consult_gemini for factual analysis, comparisons, uncertainty checks, or when the user "
@@ -354,14 +358,10 @@ def plan_agent_actions(user_input: str, tools: list, channel_id: int, time) -> l
             f"Registered tools: {tool_json}"
             f"{previous_error}"
         )
-        response = query_chat(
+        response = collaborative_agent.query_luna_control(
             user_input,
-            channel_id,
-            time,
-            system_context=planner_context,
-            persist=False,
-            agent_effort=collaborative_agent.AGENT_PLANNING_EFFORT,
-            use_history=False,
+            planner_context,
+            collaborative_agent.AGENT_PLANNING_EFFORT,
         )
         try:
             start = response.find("[")
@@ -412,13 +412,10 @@ def review_agent_progress(
         f"Attempted actions: {json.dumps(attempted_actions, ensure_ascii=False)}\n"
         f"Observable outcomes: {json.dumps(outcomes, ensure_ascii=False)}"
     )
-    response = query_chat(
+    response = collaborative_agent.query_luna_control(
         prompt,
-        channel_id,
-        time,
-        persist=False,
-        agent_effort=collaborative_agent.AGENT_PLANNING_EFFORT,
-        use_history=False,
+        "Return only the requested JSON decision. This is an invisible control turn without persona formatting.",
+        collaborative_agent.AGENT_PLANNING_EFFORT,
     )
     try:
         start = response.find("{")
@@ -575,13 +572,33 @@ def get_status(channel_id: int) -> str:
     """Get current LLM and model status"""
     settings = db.get_channel_settings(str(channel_id))
     if settings.get("mode", "roleplay") == "agent":
+        deepseek_model = (
+            collaborative_agent.OPENROUTER_DEEPSEEK_MODEL
+            if collaborative_agent.DEEPSEEK_BACKEND == "openrouter"
+            else collaborative_agent.PRIMARY_MODEL
+        ) or "not configured"
+        luna_model = (
+            collaborative_agent.OPENROUTER_LUNA_MODEL
+            if collaborative_agent.LUNA_BACKEND == "openrouter"
+            else collaborative_agent.LUNA_MODEL
+        ) or "not configured"
+        gemini_model = (
+            collaborative_agent.OPENROUTER_GEMINI_MODEL
+            if collaborative_agent.GEMINI_BACKEND == "openrouter"
+            else collaborative_agent.GEMINI_MODEL
+        ) or "not configured"
+        claude_model = (
+            collaborative_agent.OPENROUTER_CLAUDE_MODEL
+            if collaborative_agent.CLAUDE_BACKEND == "openrouter"
+            else collaborative_agent.CLAUDE_MODEL
+        ) or "not configured"
         return (
             "**Current Configuration:**\n"
             "Mode: **Collaborative Agent** (`agent`)\n"
-            f"Primary: DeepSeek (`{collaborative_agent.PRIMARY_MODEL}`)\n"
-            f"Student council president: Luna (`{collaborative_agent.LUNA_MODEL}`)\n"
-            f"Junior researcher + grounding: Gemini (`{collaborative_agent.GEMINI_MODEL}`)\n"
-            f"Disciplinary committee senior: Claude (`{collaborative_agent.CLAUDE_MODEL}`)\n"
+            f"Primary: DeepSeek (`{deepseek_model}` via `{collaborative_agent.DEEPSEEK_BACKEND}`)\n"
+            f"Planner + student council president: Luna (`{luna_model}` via `{collaborative_agent.LUNA_BACKEND}`)\n"
+            f"Junior researcher + grounding: Gemini (`{gemini_model}` via `{collaborative_agent.GEMINI_BACKEND}`)\n"
+            f"Disciplinary committee senior: Claude (`{claude_model}` via `{collaborative_agent.CLAUDE_BACKEND}`)\n"
             f"Opening effort: **{collaborative_agent.AGENT_OPENING_EFFORT}**\n"
             f"Planning effort: **{collaborative_agent.AGENT_PLANNING_EFFORT}** (server-admin configured)\n"
             f"DeepSeek effort: **{collaborative_agent.AGENT_DEEPSEEK_EFFORT}**\n"

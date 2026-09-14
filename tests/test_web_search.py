@@ -58,6 +58,62 @@ class WebSearchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Synthesize the evidence", query.call_args.args[4])
         self.assertIn("Forecast", query.call_args.args[4])
 
+    async def test_openrouter_backend_bypasses_existing_search_pipeline(self):
+        sources = [{
+            "title": "Current source",
+            "url": "https://example.com/current",
+            "provider": "OpenRouter Web",
+        }]
+        with patch.dict("os.environ", {"WEB_SEARCH_BACKEND": "openrouter"}), \
+                patch(
+                    "features.feature_search.openrouterQuery.is_configured",
+                    return_value=True,
+                ), patch(
+                    "features.feature_search.openrouterQuery.query_web",
+                    return_value=("Current answer", sources),
+                ) as openrouter_search, patch(
+                    "features.feature_search.googleQuery.queryWeb",
+                ) as existing_search:
+            responses = await SearchFeature().answer_with_web(
+                self.message(),
+                "What changed?",
+                ["latest update", "current status"],
+            )
+
+        openrouter_search.assert_called_once_with(
+            "What changed?",
+            "latest update; current status",
+        )
+        existing_search.assert_not_called()
+        self.assertIn("Current answer", responses[0].text)
+        self.assertIn("[Current source](https://example.com/current)", responses[0].text)
+        self.assertTrue(responses[0].metadata["live_search"])
+
+    async def test_openrouter_failure_falls_back_to_existing_search(self):
+        results = [{"title": "Fallback", "url": "https://example.com", "snippet": "Evidence"}]
+        with patch.dict("os.environ", {"WEB_SEARCH_BACKEND": "openrouter"}), \
+                patch(
+                    "features.feature_search.openrouterQuery.is_configured",
+                    return_value=True,
+                ), patch(
+                    "features.feature_search.openrouterQuery.query_web",
+                    side_effect=RuntimeError("temporary failure"),
+                ), patch(
+                    "features.feature_search.googleQuery.queryWeb",
+                    return_value=results,
+                ), patch(
+                    "features.feature_search.unified_chat.query_chat",
+                    return_value="Fallback answer [1].",
+                ):
+            responses = await SearchFeature().answer_with_web(
+                self.message(),
+                "What changed?",
+                "latest update",
+            )
+
+        self.assertIn("Fallback answer", responses[0].text)
+        self.assertIn("[Fallback](https://example.com)", responses[0].text)
+
     async def test_multiple_queries_are_deduplicated_before_one_synthesis(self):
         first = {"title": "First", "url": "https://example.com/one", "snippet": "One"}
         duplicate = {"title": "Duplicate", "url": "https://example.com/one", "snippet": "Same"}

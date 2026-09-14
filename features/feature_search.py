@@ -1,6 +1,8 @@
 import asyncio
+import os
 
 from providers import google_query as googleQuery
+from providers import openrouter_query as openrouterQuery
 from providers import unified_chat
 from providers import web_page_query as webPageQuery
 from providers import wolfram_query as wolframQuery
@@ -44,6 +46,26 @@ class SearchFeature:
         search_query,
     ) -> HandlerResult:
         search_queries = [search_query] if isinstance(search_query, str) else list(search_query)
+        search_backend = os.getenv("WEB_SEARCH_BACKEND", "direct").strip().lower()
+        if search_backend in {"openrouter", "auto"} and openrouterQuery.is_configured():
+            try:
+                answer, sources = await asyncio.to_thread(
+                    openrouterQuery.query_web,
+                    question,
+                    "; ".join(search_queries),
+                )
+                if sources:
+                    answer += "\n\n**Sources**\n" + "\n".join(
+                        f"[{index}] [{source['title']}]({source['url']})"
+                        for index, source in enumerate(sources, 1)
+                    )
+                return [BotResponse(
+                    text=answer,
+                    metadata={"live_search": True, "suppress_embeds": bool(sources)},
+                )]
+            except Exception as error:
+                print(f"OpenRouter web search unavailable: {error}", flush=True)
+
         evidence, sources, errors = await self.collect_web_evidence(search_queries)
         if not evidence:
             print(f"Web search unavailable for {search_queries!r}: {'; '.join(errors)}", flush=True)

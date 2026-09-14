@@ -1,76 +1,42 @@
-# Discord Study Bot - Quick Reference
-Use: $help <topic> for detailed info (chat, music, clip, search, bridge, time, db)
+# Discord Study Bot - Commands
 
-## System
-$system / $status   Show server time, temperature, CPU, memory, and storage
+Use $help <command> for detailed help.
+Use $help <command> <page> when a topic has multiple pages.
 
-## Agent
-Mention the bot with a request, or use $agent <request>
-$agent tools        List actions available to the agent
-$agent confirm      Confirm a plan containing state-changing actions
-$agent cancel       Cancel the pending plan
-$agent --trace <request>   Preserve a separate high-level process worklog
-$agent 报数         Four-person team check-in (also: roll call)
+$agent <request>            Ask the collaborative agent team
+$chat [options]             Chat modes, history, models, and listening
+$system / $status           Show server health and resource usage
+$time                       Show local and world times
+$start / $stop              Start or stop the live clock
+$remind / $remindMeIn       Create and manage reminders
+$music [options]            Control voice playback and playlists
+$draw [options] <description> Generate an image with Gemini or OpenAI
+$clip [options]             Preview and create video or audio clips
+$google / $wolfram          Search the web or run a computation
+$bridge [options]           Connect to an external application
+$db [options]               Inspect, export, or import bot data
+$broadcast <message>        Send to the configured broadcast channel
+$help <command> [page]      Open detailed command help
 
-DeepSeek sends a high-effort answer first. Luna, Gemini, Claude, and DeepSeek can then take high-effort
-follow-up turns in a visible room discussion, each sent immediately as a separate message. They may
-reply to corrections or disagreements and stop after a silent round. Name a maid, address the whole
-team, or let DeepSeek call her directly to require a reply. Trace notes identify who is listening
-and speaking without exposing private reasoning.
-If DeepSeek decides to ask a teammate, the opening only announces that choice. DeepSeek then sends
-a separate short message with the actual question before Luna, Gemini, or Claude answers. A teammate may also
-volunteer a correction after overhearing the opening, without waiting for a handoff.
-
-## Time & Reminders
-$time              Show current time
-$start             Start live clock
-$stop              Stop clock/timer
-$remindMeIn -t <min> -m <msg>   Set reminder
-$remind tomorrow at 8 PM to <msg>   Set a persistent reminder
-
-## Music Player
-$music -i          Connect to voice
-$music -p          Play/pause
-$music -n/-prev    Next/previous song
-$music --name      Show current song
-$music -y "url"    Play YouTube (skip to it)
-$music -y "url" --queue   Queue without playing
-
-## AI Chat
-$chat -s <msg>     Send through the active chat mode
-$chat -s "remind me tomorrow at 1900 to ..."   Create a persistent reminder
-$chat --mode agent/roleplay   Switch mode (available to everyone)
-$chat -l <llm>     Set role-play LLM
-$chat -m <model>   Set role-play model
-$chat -p <0-3>     Set role-play prompt
-$chat --listen on/off   Enable/disable auto-respond mode
-$chat --effort LEVEL    Set role-play effort
-$chat --trace -s <msg>  Append live process notes; final answer is sent separately
-$chat --models     List LLMs & models
-
-## Bridge (External Apps)
-$bridge --init              Initialize bridge
-$bridge --send "msg"        Send message
-$bridge --listen on/off     Enable/disable auto-forward
-$bridge --status            Show status
-$bridge --disconnect        Close bridge
-
-## Video Clips
-$clip -u "url" -s 5 -e 15    Preview clip (5-15 seconds)
-$clip --format gif          Convert to GIF
-$clip --confirm             Process pending clips
-$clip --force               Skip preview, process now
-
-## Search
-$wolfram -q <query>    Wolfram Alpha
-$google -s <query>     Google Search
-Use $chat -s, $agent, a bot mention, or listen mode with a public link to read it.
-
-## Database
-$db -s             View stats
-$db -e/-i          Export/import
+Detailed topics: agent, chat, system, music, draw, clip, search, bridge, time, db, broadcast
 
 ---DETAILED-HELP---
+
+=== AGENT ===
+# Collaborative Agent Team
+
+Mention the bot with a request, or use:
+$agent <request>           Ask the team to answer or perform an action
+$agent tools               List actions available to the agent
+$agent confirm             Approve a pending state-changing plan
+$agent cancel              Cancel a pending plan
+$agent --trace <request>   Keep a separate high-level process worklog
+$agent 报数                Four-person team check-in (also: roll call)
+
+DeepSeek speaks first. Luna, Gemini, Claude, and DeepSeek may then discuss the request for up to
+three rounds, replying in separate messages and stopping after a silent round. Name a teammate or
+address the team when you require particular members to answer. Teammates may also volunteer a useful
+correction after hearing the opening. Trace notes show observable work without private reasoning.
 
 === CHAT ===
 # Unified AI Chat System
@@ -97,7 +63,7 @@ $chat -s <message>       Send message (or --send)
 Configuration:
 $chat -l <name>          Set role-play LLM: chatgpt, gemini, deepseek
 $chat -m <name>          Set role-play model
-$chat --effort <level>   Set role-play effort: low, medium, high
+$chat --effort <level>   Set role-play effort: low, medium, high, max
 $chat --models           List all available LLMs and models
 $chat -st                Show configuration (or --status)
 
@@ -141,6 +107,12 @@ Preset Prompts:
 • 2: Misaka Minoto
 • 3: Saber
 
+=== SYSTEM ===
+# System Status
+
+$system                   Show server time, CPU, temperature, memory, and storage
+$status                   Alias for $system
+
 === MUSIC ===
 # Music Player Commands
 
@@ -174,6 +146,34 @@ Playlist Behavior:
 
 Legacy Format:
 Old commands still work: $music initialize, $music play, etc.
+
+=== DRAW ===
+# Image Generation
+
+$draw <description>                  Generate with the configured default
+$draw -p <provider> <description>    Choose gemini or openai
+$draw -p <provider> -m <model> <description>
+$draw --models                       Query available models from both providers
+$draw --models -p <provider>         Query one provider
+$draw --status                       Show configured defaults
+
+Describe the subject, style, composition, lighting, colors, and other constraints in ordinary
+language. Attach or reply to an image to use it as a visual reference.
+
+Examples:
+$draw a moonlit library in anime style
+$draw -p openai -m gpt-image-2.5-flare a square watercolor reading icon
+$draw -p gemini -m gemini-3.1-flash-image redesign the attached poster
+
+The default provider is Gemini with `gemini-2.5-flash-image` (Nano Banana). OpenAI supports
+GPT Image 2.5 Sunburst and Flare. `$draw --models` asks each configured provider for its live
+catalog instead of relying on this help text.
+
+Natural requests also work through collaborative chat:
+$chat -s "draw a moonlit library in anime style"
+
+Collaborative image requests remain owned by Gemini so Luna can plan and audit the task without
+changing the room's teammate responsibilities. Direct `$draw` provider choices do not alter chat.
 
 === SEARCH ===
 # Search & Computation
@@ -309,5 +309,10 @@ $db -i                   Import database from JSON (or --import)
 
 Legacy Commands:
 $dbStats, $dbExport, $dbImport still work
+
+=== BROADCAST ===
+# Broadcast Messages
+
+$broadcast <message>      Send a message to the configured broadcast channel
 
 

@@ -23,6 +23,15 @@ EFFORT_PROFILES: Dict[str, Dict[str, object]] = {
             "check arguments and ordering, and verify the result before answering."
         ),
     },
+    "max": {
+        "max_tokens": 4000,
+        "deepseek_max_tokens": 384000,
+        "planning_attempts": 3,
+        "instruction": (
+            "Use maximum available reasoning. Resolve ambiguity from context, inspect all available tools, "
+            "check arguments and ordering, test competing interpretations, and verify the result before answering."
+        ),
+    },
 }
 
 
