@@ -50,7 +50,9 @@ class ClipFeature:
         max_size = clipQuery.get_discord_size_limit(premium_tier)
         responses.extend(await self._build_clip_file_responses(clips_to_process, max_size))
         clipQuery.clear_pending_clips(channel_id)
-        responses.append(BotResponse(text="✅ All clips processed"))
+        if not any(response.metadata.get("tool_status") == "failed" or (response.text or "").startswith("❌")
+                   for response in responses):
+            responses.append(BotResponse(text="✅ All clips processed"))
         return responses
 
     async def _handle_update(self, channel_id: str, cmd, premium_tier: int) -> HandlerResult:
@@ -154,7 +156,7 @@ class ClipFeature:
                 )
                 clips.append(clip)
             except Exception as error:
-                return [BotResponse(text=f"❌ Error processing URL {url}: {error}")]
+                return [self._failure(f"Error processing URL {url}: {error}", error)]
 
         if not clips:
             return [BotResponse(text="❌ No valid clips to process")]
@@ -187,6 +189,61 @@ class ClipFeature:
             "Resolve the user's latest answer against this pending task. Use adjust_pending_clip to trim or compress, "
             "manage_pending_clips to confirm/cancel, and ask_clarification only when the user's intended goal remains ambiguous."
         )
+
+    @staticmethod
+    def _failure(message, error=None):
+        source_error = isinstance(error, clipQuery.VideoSourceError)
+        return BotResponse(text="❌ " + message, metadata={
+            "tool_status": "failed", "retryable": False,
+            "error_code": "source_unavailable" if source_error else "processing_failed",
+        })
+
+    async def download_for_agent(self, message, arguments):
+        """Download the requested range, using full duration and Discord-fit defaults."""
+        try:
+            progress = message.metadata.get("tool_progress")
+            if progress is not None:
+                await progress("Inspecting the video source and duration...")
+            title, site, full_duration = await clipQuery.get_video_info(arguments["url"])
+            start = clipQuery.parse_time(arguments["start"]) if arguments.get("start") else 0
+            end = clipQuery.parse_time(arguments["end"]) if arguments.get("end") else full_duration
+            end = min(end, full_duration)
+            if start < 0 or end <= start:
+                return [self._failure("The requested video range is invalid")]
+            max_size = clipQuery.get_discord_size_limit(message.metadata.get("guild_premium_tier", 0))
+            fit = clipQuery.calculate_discord_fit(end - start, max_size)
+            if fit is None:
+                return [BotResponse(
+                    text="The full requested range cannot fit the upload limit at usable quality. Choose a shorter range or another destination.",
+                    metadata={"tool_status": "needs_input", "error_code": "upload_limit"},
+                )]
+            resolution, bitrate, fps = fit
+            fps = arguments.get("fps") or fps
+            clip = clipQuery.ClipSpec(
+                url=arguments["url"], start=start, end=end,
+                resolution=arguments.get("resolution") or resolution,
+                bitrate=arguments.get("bitrate") or bitrate, fps=fps, output_format="mp4",
+                video_title=title, source_site=site,
+            )
+            encoding = {
+                "duration_seconds": end - start, "fps": fps, "resolution": clip.resolution,
+                "video_bitrate": clip.bitrate, "audio_bitrate": "128k", "upload_limit_mb": max_size,
+                "estimated_size_mb": clipQuery.estimate_clip_size(end - start, clip.resolution, clip.bitrate, fps),
+            }
+            if progress is not None:
+                await progress(f"Keeping {end - start:g}s at {fps} fps; video {clip.bitrate} + audio 128k, "
+                               f"estimated {encoding['estimated_size_mb']:.2f} MB / {max_size:g} MB limit.")
+            responses = await self._build_clip_file_responses([clip], max_size, progress)
+            for response in responses:
+                response.metadata["video_encoding"] = encoding
+                # The next character turn receives measured settings, rather than inventing a bitrate calculation.
+                response.text = (response.text or "") + (
+                    f"\nRequested range: {end - start:g}s; {fps} fps; {clip.resolution}; "
+                    f"video {clip.bitrate} + audio 128k; estimated {encoding['estimated_size_mb']:.2f} MB; "
+                    f"upload limit {max_size:g} MB. The rendered file size is checked separately.")
+            return responses
+        except Exception as error:
+            return [self._failure(str(error), error)]
 
     async def adjust_pending_for_agent(self, message: IncomingMessage, arguments) -> HandlerResult:
         channel_id = message.channel_id
@@ -257,7 +314,7 @@ class ClipFeature:
             "range_explicit": clip.range_explicit,
         }
 
-    async def _build_clip_file_responses(self, clips, max_size=None) -> HandlerResult:
+    async def _build_clip_file_responses(self, clips, max_size=None, progress=None) -> HandlerResult:
         responses = []
         for index, clip in enumerate(clips, start=1):
             temp_path = None
@@ -265,7 +322,10 @@ class ClipFeature:
                 extension = clip.output_format or "mp4"
                 temp_path = clipQuery.allocate_clip_output_path(clip, index)
 
-                success = await clipQuery.create_clip(clip, temp_path)
+                if progress is not None:
+                    success = await clipQuery.create_clip(clip, temp_path, progress=progress)
+                else:
+                    success = await clipQuery.create_clip(clip, temp_path)
                 if success and os.path.exists(temp_path):
                     file_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
                     keep_note = " (kept)" if clip.keep_file else ""
@@ -293,11 +353,11 @@ class ClipFeature:
                         )
                     )
                 else:
-                    responses.append(BotResponse(text=f"❌ Failed to process clip {index}"))
+                    responses.append(self._failure(f"Failed to process clip {index}"))
                     if temp_path and os.path.exists(temp_path):
                         os.remove(temp_path)
             except Exception as error:
-                responses.append(BotResponse(text=f"❌ Error processing clip {index}: {error}"))
+                responses.append(self._failure(f"Error processing clip {index}: {error}", error))
                 if temp_path and os.path.exists(temp_path):
                     os.remove(temp_path)
         return responses

@@ -74,7 +74,7 @@ def _build_request(channelID, prompt_index=0, system_context=None, initialize=Fa
         ))
     return system_instruction, contents
 
-def queryGemini(user_input, channelID, time, model="gemini-2.5-flash", username=None, system_context=None,
+def queryGemini(user_input, channelID, time, model="gemini-3.8-flash", username=None, system_context=None,
                 effort="high", persist=True, images=None):
     if client is None:
         return "Gemini is not configured."

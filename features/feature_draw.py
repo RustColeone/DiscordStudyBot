@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 from app.bot_types import BotAttachment, BotResponse, HandlerResult, IncomingMessage
 from parsers.command_parsers import parse_draw_command
@@ -65,6 +66,16 @@ class DrawFeature:
         for index, image in enumerate(images):
             detail = image.text or "I finished the image."
             caption = f"**{display_name}** - `{selection.model}`\n{detail}" if index == 0 else None
+            image_path = Path(image.path)
+            tool_image = {
+                "url": image.path,
+                "path": image.path,
+                "filename": image.filename,
+                "content_type": image.mime_type,
+                "size": image_path.stat().st_size if image_path.is_file() else None,
+                "origin": "generated",
+                "description": description,
+            }
             responses.append(BotResponse(
                 text=caption,
                 attachment=BotAttachment(
@@ -78,6 +89,7 @@ class DrawFeature:
                     "generation_prompt": description,
                     "image_provider": selection.provider,
                     "image_model": selection.model,
+                    "tool_images": [tool_image],
                 },
             ))
         return responses
@@ -94,15 +106,20 @@ class DrawFeature:
 
     @staticmethod
     def _format_models(catalogs: dict[str, list[str]], errors: dict[str, str]) -> str:
-        lines = ["**Available draw models (live)**"]
+        lines = [
+            "**Available draw models**",
+            "Provider catalogs are queried live; verified current models remain visible if lookup is unavailable.",
+        ]
         for provider in ["gemini", "openai"]:
             if provider not in catalogs and provider not in errors:
                 continue
-            lines.append(f"\n**{provider.title()}**")
-            if provider in errors:
-                lines.append(f"Unavailable: {errors[provider]}")
-            elif catalogs[provider]:
+            default_model = image_generation.default_model(provider)
+            display_name = "Gemini" if provider == "gemini" else "OpenAI"
+            lines.append(f"\n**{display_name}** (default: `{default_model}`)")
+            if catalogs.get(provider):
                 lines.extend(f"- `{model}`" for model in catalogs[provider])
             else:
                 lines.append("No image models returned by the provider.")
+            if provider in errors:
+                lines.append(f"Live lookup unavailable: {errors[provider]}.")
         return "\n".join(lines)

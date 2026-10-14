@@ -12,6 +12,10 @@ from services.vision import download_image_bytes
 
 
 IMAGE_MODEL = os.getenv("DRAW_OPENAI_MODEL", "gpt-image-2.5-sunburst").strip()
+KNOWN_IMAGE_MODELS = (
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare",
+)
 OUTPUT_DIR = Path(os.getenv(
     "DRAW_OUTPUT_DIR",
     os.getenv("GENERATED_IMAGE_DIR", "temp/generated_images"),
@@ -27,11 +31,15 @@ client = OpenAI(api_key=_api_key) if _api_key else None
 def list_image_models() -> list[str]:
     if client is None:
         raise RuntimeError("OpenAI image generation is not configured")
-    return sorted({
+    models = {
         str(item.id)
         for item in client.models.list()
         if str(getattr(item, "id", "")).startswith("gpt-image-")
-    })
+    }
+    models.update(KNOWN_IMAGE_MODELS)
+    if IMAGE_MODEL:
+        models.add(IMAGE_MODEL)
+    return sorted(models)
 
 
 def generate_image(

@@ -164,10 +164,81 @@ def init_database():
             CREATE INDEX IF NOT EXISTS idx_reminders_due
             ON reminders(status, remind_at)
         ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS character_diary (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                author_id TEXT NOT NULL,
+                character TEXT NOT NULL CHECK(character IN ('DeepSeek', 'Luna', 'Gemini', 'Claude')),
+                memory_key TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('fact', 'episode', 'reflection')),
+                note TEXT NOT NULL,
+                importance INTEGER NOT NULL CHECK(importance BETWEEN 1 AND 5),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(platform, channel_id, author_id, character, memory_key)
+            )
+        ''')
         
         print("Database initialized successfully")
 
 # ==================== Chat History Functions ====================
+
+def save_diary_note(scope: tuple, character: str, memory_key: str, kind: str,
+                    note: str, importance: int) -> None:
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO character_diary
+                (platform, channel_id, author_id, character, memory_key, kind, note, importance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(platform, channel_id, author_id, character, memory_key) DO UPDATE SET
+                kind = excluded.kind, note = excluded.note, importance = excluded.importance,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE character_diary.note != excluded.note
+               OR character_diary.kind != excluded.kind
+               OR character_diary.importance != excluded.importance
+        ''', (*scope, character, memory_key, kind, note, importance))
+
+
+def list_diary_notes(scope: tuple, character: str, limit: int = 20, terms: list | None = None,
+                     offset: int = 0) -> List[Dict]:
+    query = '''
+        SELECT id, memory_key, kind, note, importance, created_at, updated_at FROM character_diary
+        WHERE platform = ? AND channel_id = ? AND author_id = ? AND character = ?
+    '''
+    parameters = [*scope, character]
+    if terms:
+        query += " AND (" + " OR ".join("LOWER(note || ' ' || memory_key) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+        parameters.extend("%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%" for term in terms)
+    query += " ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?"
+    parameters.extend((limit, offset))
+    with get_db() as conn:
+        return [dict(row) for row in conn.execute(query, parameters).fetchall()]
+
+
+def count_diary_notes(scope: tuple, character: str) -> int:
+    with get_db() as conn:
+        return conn.execute('''
+            SELECT COUNT(*) FROM character_diary
+            WHERE platform = ? AND channel_id = ? AND author_id = ? AND character = ?
+        ''', (*scope, character)).fetchone()[0]
+
+
+def delete_diary_note(scope: tuple, character: str, note_id: int) -> bool:
+    with get_db() as conn:
+        return bool(conn.execute('''
+            DELETE FROM character_diary
+            WHERE platform = ? AND channel_id = ? AND author_id = ? AND character = ? AND id = ?
+        ''', (*scope, character, note_id)).rowcount)
+
+
+def clear_diary_notes(scope: tuple, character: str) -> int:
+    with get_db() as conn:
+        return conn.execute('''
+            DELETE FROM character_diary
+            WHERE platform = ? AND channel_id = ? AND author_id = ? AND character = ?
+        ''', (*scope, character)).rowcount
 
 def save_chat_message(channel_id: str, ai_model: str, role: str, content: str):
     """Save a single chat message to database"""
@@ -215,6 +286,17 @@ def load_chat_history(channel_id: str, ai_model: str) -> List[Dict[str, str]]:
             insert_at = 1 if history and history[0]["role"] == "system" else 0
             history.insert(insert_at, summary_message)
         return history
+
+def load_recent_chat_history(channel_id: str, ai_model: str, limit: int = 12) -> List[Dict]:
+    """Read a bounded window for planning and room participants, oldest first."""
+    with get_db() as conn:
+        rows = conn.execute('''
+            SELECT role, content FROM chat_history
+            WHERE channel_id = ? AND ai_model = ? AND role IN ('user', 'assistant')
+            ORDER BY id DESC LIMIT ?
+        ''', (str(channel_id), ai_model, limit)).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
 
 def load_chat_history_records(channel_id: str, ai_model: str) -> List[Dict]:
     with get_db() as conn:

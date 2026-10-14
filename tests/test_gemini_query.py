@@ -44,22 +44,36 @@ class GeminiQueryTests(unittest.TestCase):
             )
 
         self.assertEqual(answer, "I see it")
+        self.assertEqual(client.models.generate_content.call_args.kwargs["model"], "gemini-3.8-flash")
         parts = client.models.generate_content.call_args.kwargs["contents"][-1].parts
         self.assertEqual(parts[1].inline_data.mime_type, "image/png")
         self.assertEqual(parts[1].inline_data.data, b"png")
 
     def test_model_discovery_uses_supported_actions(self):
         client = Mock()
-        client.models.list.return_value = [SimpleNamespace(
-            name="models/gemini-3.5-flash-lite",
-            supported_actions=["generateContent"],
-        )]
+        client.models.list.return_value = [
+            SimpleNamespace(
+                name="models/gemini-3.5-flash-lite",
+                supported_actions=["generateContent"],
+            ),
+            SimpleNamespace(
+                name="models/gemini-3.6-flash",
+                supported_actions=["generateContent"],
+            ),
+            SimpleNamespace(
+                name="models/gemini-3.8-flash",
+                supported_actions=["generateContent"],
+            ),
+        ]
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "configured"}), \
                 patch.object(unified_chat.genai, "Client", return_value=client):
             models = unified_chat._fetch_gemini_models()
 
-        self.assertEqual(models, ["gemini-3.5-flash-lite"])
+        self.assertEqual(
+            models,
+            ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"],
+        )
 
 
 if __name__ == "__main__":

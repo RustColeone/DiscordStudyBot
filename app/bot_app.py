@@ -10,10 +10,13 @@ from features.feature_database import DatabaseFeature
 from features.feature_draw import DrawFeature
 from features.feature_help import HelpFeature
 from features.feature_music import MusicFeature
+from features.feature_memory import MemoryFeature
 from features.feature_search import SearchFeature
 from features.feature_system import SystemFeature
 from features.feature_time import TimeFeature
 from services.attachment_store import cleanup_expired_cache
+from services.mcp_tools import MCPToolManager
+from services.request_timing import RequestTiming, current_timing
 
 
 class BotApplication:
@@ -21,6 +24,7 @@ class BotApplication:
         self.config = config
         self.platform = None
         self.attachment_cleanup_task = None
+        self.mcp_refresh_task = None
         cleanup_expired_cache()
 
         self.help_feature = HelpFeature()
@@ -35,6 +39,8 @@ class BotApplication:
         self.bridge_feature = BridgeFeature()
         self.search_feature = SearchFeature()
         self.database_feature = DatabaseFeature()
+        self.memory_feature = MemoryFeature()
+        self.mcp_tool_manager = MCPToolManager(config.get("MCP_SERVERS"))
         self.agent_feature = AgentFeature(
             self.time_feature,
             self.system_feature,
@@ -51,6 +57,7 @@ class BotApplication:
         self.command_features = [
             self.help_feature,
             self.admin_feature,
+            self.memory_feature,
             self.agent_feature,
             self.time_feature,
             self.system_feature,
@@ -67,12 +74,27 @@ class BotApplication:
     def attach_platform(self, platform) -> None:
         self.platform = platform
 
-    def start_background_tasks(self) -> None:
+    async def start_background_tasks(self) -> None:
+        await self.mcp_tool_manager.connect(self.agent_feature.registry)
         self.time_feature.start_scheduler(self)
         if self.attachment_cleanup_task is None or self.attachment_cleanup_task.done():
             self.attachment_cleanup_task = self.platform.create_background_task(
                 self._run_attachment_cleanup()
             )
+        if self.mcp_refresh_task is None or self.mcp_refresh_task.done():
+            self.mcp_refresh_task = self.platform.create_background_task(
+                self._run_mcp_refresh()
+            )
+
+    async def stop_background_tasks(self) -> None:
+        cancelled = []
+        for task in (self.attachment_cleanup_task, self.mcp_refresh_task):
+            if task is not None:
+                task.cancel()
+            cancelled.append(task)
+        if cancelled:
+            await asyncio.gather(*cancelled, return_exceptions=True)
+        await self.mcp_tool_manager.close()
 
     @staticmethod
     async def _run_attachment_cleanup() -> None:
@@ -80,7 +102,22 @@ class BotApplication:
             await asyncio.sleep(5 * 60)
             await asyncio.to_thread(cleanup_expired_cache)
 
+    async def _run_mcp_refresh(self) -> None:
+        while True:
+            await asyncio.sleep(5 * 60)
+            await self.mcp_tool_manager.refresh()
+
     async def handle_message(self, message):
+        timing = message.metadata.setdefault("request_timing", RequestTiming())
+        token = current_timing.set(timing)
+        timing.record("handler_started")
+        try:
+            return await self._handle_message(message)
+        finally:
+            timing.record("handler_finished")
+            current_timing.reset(token)
+
+    async def _handle_message(self, message):
         self._log_message(message)
         if message.author_is_bot:
             return []

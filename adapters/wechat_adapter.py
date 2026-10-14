@@ -473,6 +473,7 @@ class WeChatAdapter:
             channel_name=channel_id,
             is_dm=False,
             metadata={
+                "platform": "wechat",
                 "native_message": channel_id,
                 "native_channel": channel_id,
                 "native_client": None,
@@ -573,7 +574,7 @@ class WeChatAdapter:
                 await worker
 
     async def _run_loop(self) -> None:
-        self.app.start_background_tasks()
+        await self.app.start_background_tasks()
         try:
             if self.primary_chat:
                 await self._run_single_chat_loop()
@@ -586,6 +587,7 @@ class WeChatAdapter:
             await self._run_global_scan_loop()
         finally:
             await self._shutdown_workers()
+            await self.app.stop_background_tasks()
 
     def run(self):
         asyncio.run(self._run_loop())

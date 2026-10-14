@@ -201,8 +201,14 @@ class SearchFeature:
             if not page_text:
                 break
             remaining_chars -= len(page_text)
+            links = page.get("links", [])
+            link_index = ""
+            if links:
+                link_index = "\nDiscovered page links:\n" + "\n".join(
+                    f"- {link['title']}: {link['url']}" for link in links
+                )
             evidence.append(
-                f"[{index}] {page['title']}\nURL: {page['url']}\nPage text:\n{page_text}"
+                f"[{index}] {page['title']}\nURL: {page['url']}{link_index}\nPage text:\n{page_text}"
             )
             sources.append({"title": page["title"], "url": page["url"], "provider": "Linked page"})
         return "\n\n".join(evidence), sources

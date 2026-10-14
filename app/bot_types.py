@@ -36,6 +36,9 @@ class PlatformAdapter(Protocol):
     async def send_channel_message(self, channel_id: str, content: str) -> Any:
         ...
 
+    async def send_channel_response(self, channel_id: str, response: BotResponse) -> Any:
+        ...
+
     async def edit_message(self, native_message: Any, content: str) -> None:
         ...
 

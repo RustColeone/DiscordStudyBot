@@ -1,11 +1,23 @@
+import asyncio
+import json
 from datetime import datetime, timezone
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.bot_types import BotAttachment, BotResponse, IncomingMessage
 from features.feature_agent import AgentFeature
 from features.feature_clip import ClipFeature
+from features.feature_time import TimeFeature
+from providers import unified_chat
+from providers.unified_chat import AgentPlan
+from services.agent_task import AgentTask
+from services import database as db
+from services.character_diary import diary_scope
+from features.feature_clip import ClipFeature
+from providers import clip_query
 
 
 class StubFeature:
@@ -19,8 +31,13 @@ class StubFeature:
 
 
 class StubTimeFeature(StubFeature):
-    def create_natural_reminder(self, app, message, text):
-        return [BotResponse(text=f"scheduled: {text}")]
+    def __init__(self, response=None):
+        super().__init__(response)
+        self.reminder_requests = []
+
+    def create_structured_reminder(self, app, message, **schedule):
+        self.reminder_requests.append((message, schedule))
+        return [BotResponse(text=f"scheduled: {schedule['reminder_text']}")]
 
     def list_reminders(self, message, include_all=False):
         return "pending reminders"
@@ -87,13 +104,24 @@ class StubLiveRoomPlatform:
 
     def __init__(self):
         self.sent = []
+        self.deleted = []
+        self.sent_responses = []
 
     async def send_channel_message(self, channel_id, content):
         self.sent.append((channel_id, content))
-        return object()
+        return content
+
+    async def send_channel_response(self, channel_id, response):
+        self.sent_responses.append(response)
+        self.sent.append((channel_id, response.text))
+        return response.text or response.attachment
+
+    async def delete_message(self, message):
+        self.deleted.append(message)
 
 
-class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
+class LegacyAgentFeatureTests(unittest.IsolatedAsyncioTestCase):
+    """Coverage of retained planner/roleplay helpers; active room tests live in test_shared_room."""
     def setUp(self):
         self.settings_patcher = patch(
             "features.feature_agent.db.get_channel_settings",
@@ -120,7 +148,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_lists_registered_tools(self):
-        response = await self.agent.handle(self.app, self.message)
+        response = await self.agent._handle_legacy(self.app, self.message)
 
         self.assertIn("system_status", response[0].text)
         self.assertIn("create_reminder", response[0].text)
@@ -128,12 +156,22 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_natural_reminder_uses_registered_tool(self):
         message = self._message("$agent remind me tomorrow at this time to test")
-        plan = [{"tool": "create_reminder", "arguments": {"request": "tomorrow at this time to test"}}]
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "test",
+                "schedule_type": "absolute",
+                "remind_at": "2026-09-10T00:00:00+00:00",
+            },
+        }]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan) as planner:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         planner.assert_called_once()
+        runtime_context = planner.call_args.args[4]
+        self.assertIn("2026-09-09 00:00:00 Wednesday UTC+0000", runtime_context)
+        self.assertIn("Configured IANA timezone: UTC", runtime_context)
         self.assertIn("$agent confirm", response[0].text)
 
     async def test_image_request_is_executed_by_gemini_and_saved_to_room_history(self):
@@ -150,7 +188,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
                 patch("features.feature_agent.collaborative_agent.save_team_exchange") as save_exchange:
-            responses = await agent.handle(
+            responses = await agent._handle_legacy(
                 self.app,
                 self._message("$agent draw a moonlit library in anime style"),
             )
@@ -167,7 +205,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "list_reminders", "arguments": {}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan) as planner:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         planner.assert_called_once()
         self.assertIn("pending reminders", response[0].text)
@@ -176,10 +214,10 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "delete_reminder", "arguments": {"reminder_id": 1}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            preview = await self.agent.handle(self.app, self._message("$agent remove reminder 1"))
+            preview = await self.agent._handle_legacy(self.app, self._message("$agent remove reminder 1"))
 
         self.assertIn("$agent confirm", preview[0].text)
-        confirmed = await self.agent.handle(self.app, self._message("$agent confirm"))
+        confirmed = await self.agent._handle_legacy(self.app, self._message("$agent confirm"))
         self.assertIn("deleted reminder 1", confirmed[0].text)
 
     async def test_empty_plan_falls_back_to_conversation(self):
@@ -189,10 +227,13 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
                 patch("features.feature_agent.unified_chat.query_chat", return_value="doing well") as query_chat:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(response[0].text, "doing well")
-        self.assertEqual(query_chat.call_args.args[4], "private context")
+        system_context = query_chat.call_args.args[4]
+        self.assertIn("Authoritative request-time context", system_context)
+        self.assertIn("Configured IANA timezone: UTC", system_context)
+        self.assertIn("private context", system_context)
 
     async def test_malformed_internal_planning_still_reaches_conversation(self):
         message = self._message(
@@ -209,7 +250,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
             "features.feature_agent.unified_chat.query_chat",
             return_value="这是一个需要区分法律文本与实际执行的问题。",
         ) as query_chat:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(response[0].text, "这是一个需要区分法律文本与实际执行的问题。")
         self.assertEqual(query_luna.call_count, 3)
@@ -253,7 +294,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.feature_agent.collaborative_agent.consult_gemini", return_value="SKIP"), \
                 patch("features.feature_agent.collaborative_agent.consult_deepseek", return_value="SKIP"), \
                 patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(response[0].text, "**DeepSeek**\na cat")
         read_attachment.assert_called_once_with(record)
@@ -266,7 +307,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         }]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await self.agent.handle(self.app, self._message("$agent clip this video"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent clip this video"))
 
         self.assertIn("Which video should I clip?", response[0].text)
 
@@ -337,12 +378,12 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            first = await self.agent.handle(
+            first = await self.agent._handle_legacy(
                 self.app, self._message("$agent 你们查一下有没有类似的")
             )
             follow_up = self._message("$agent 刚才图片里的")
             follow_up.metadata["attachments"] = [image]
-            second = await self.agent.handle(self.app, follow_up)
+            second = await self.agent._handle_legacy(self.app, follow_up)
 
         self.assertEqual(first[0].text, "**DeepSeek**\n你想查找哪一项类似的东西？")
         self.assertNotIn("ask_clarification", first[0].text)
@@ -379,7 +420,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "size": 1024, "cached_path": "/tmp/insect.jpg", "text": "",
                     "image": {**record, "path": "/tmp/insect.jpg"},
                 }):
-            response = await self.agent.handle(
+            response = await self.agent._handle_legacy(
                 self.app, self._message("$agent 查一下之前图片里有没有类似的")
             )
 
@@ -440,7 +481,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 ), patch(
                     "features.feature_agent.collaborative_agent.consult_deepseek", return_value="SKIP"
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(
+            responses = await self.agent._handle_legacy(
                 self.app, self._message("$agent compare attachments 1 and 2")
             )
 
@@ -453,13 +494,45 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "list_reminders", "arguments": {}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await self.agent.handle(self.app, self._message("$agent show my reminders"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent show my reminders"))
 
         self.assertIn("pending reminders", response[0].text)
         self.assertIn("deciding whether to invite Luna, Gemini, or Claude", platform.sent[0][1])
         self.assertTrue(any("plan: try `list reminders`" in content.lower() for _, content in platform.edited))
         self.assertTrue(any("deepseek is running list reminders" in content.lower() for _, content in platform.edited))
         self.assertEqual(platform.deleted, [platform.sent[0][2]])
+
+    async def test_slow_generation_shows_public_outline_and_elapsed_heartbeat(self):
+        platform = StubProgressPlatform()
+        self.app.platform = platform
+        progress = object()
+        task = AgentTask(
+            goal="Explain converter stability",
+            response_depth="detailed",
+            response_mode="deliverable",
+            approach="Compare the power-stage poles, zeros, and feedback sampling point.",
+        )
+
+        async def delayed_answer():
+            await asyncio.sleep(0.025)
+            return "done"
+
+        with patch.object(AgentFeature, "GENERATION_PROGRESS_INTERVAL_SECONDS", 0.005):
+            result = await self.agent._await_generation(
+                self.app,
+                progress,
+                None,
+                delayed_answer(),
+                self.agent._generation_progress_status("DeepSeek", task),
+            )
+
+        self.assertEqual(result, "done")
+        messages = [content for _, content in platform.edited]
+        self.assertTrue(messages[0].startswith("Thinking:\n```text\nDeepSeek:"))
+        self.assertIn("power-stage poles, zeros", messages[0])
+        heartbeat = next(content for content in messages if "Still working" in content)
+        self.assertIn("elapsed", heartbeat)
+        self.assertTrue(heartbeat.endswith("\n```"))
 
     async def test_agent_mode_removes_transient_progress_when_review_is_blocked(self):
         platform = StubProgressPlatform()
@@ -475,7 +548,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
                 patch("features.feature_agent.unified_chat.review_agent_progress", return_value=review):
-            response = await self.agent.handle(self.app, self._message("$agent handle my reminder"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent handle my reminder"))
 
         self.assertIn("Which reminder should I use?", response[-1].text)
         self.assertEqual(platform.deleted, [platform.sent[0][2]])
@@ -506,13 +579,75 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.unified_chat.review_agent_progress",
                     side_effect=reviews,
                 ) as reviewer:
-            response = await self.agent.handle(self.app, self._message("$agent when is my reminder?"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent when is my reminder?"))
 
         self.assertIn("Which timezone should I use?", response[-1].text)
         self.assertEqual(reviewer.call_count, 2)
         self.assertIn("pending reminders", reviewer.call_args_list[1].args[3][0])
         self.assertTrue(any("$time" in outcome for outcome in reviewer.call_args_list[1].args[3]))
         self.assertTrue(any("Continuing with `current time`" in content for _, content in platform.edited))
+
+    async def test_document_search_continues_into_discovered_source(self):
+        source_url = "https://casebyte.ai/legislation/219/part-P2/s4"
+        search_response = BotResponse(
+            text="Search result excerpt identifies section titles but does not contain the provisions.",
+            metadata={
+                "tool_evidence": True,
+                "sources": [{
+                    "title": "Cap. 219 section 4",
+                    "url": source_url,
+                    "provider": "Web",
+                }],
+            },
+        )
+        page_response = BotResponse(
+            text="Linked-page evidence:\nSection 4. A legal estate in land may be disposed of only by deed.",
+            metadata={
+                "tool_evidence": True,
+                "sources": [{
+                    "title": "Cap. 219 section 4",
+                    "url": source_url,
+                    "provider": "Linked page",
+                }],
+            },
+        )
+        reviews = [
+            {
+                "status": "continue",
+                "summary": "The search found the source; its text still needs to be read.",
+                "actions": [{"tool": "read_web_page", "arguments": {"url": source_url}}],
+                "question": "",
+            },
+            {
+                "status": "complete",
+                "summary": "The requested provision is now available for summarization.",
+                "actions": [],
+                "question": "",
+            },
+        ]
+        plan = [{"tool": "web_search", "arguments": {"query": "Cap. 219 sections 4 and 5"}}]
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch.object(self.agent, "_web_search", return_value=[search_response]), \
+                patch.object(self.agent, "_read_web_page", return_value=[page_response]) as read_page, \
+                patch(
+                    "features.feature_agent.unified_chat.review_agent_progress",
+                    side_effect=reviews,
+                ) as reviewer:
+            responses, stopped = await self.agent._execute_goal_plan(
+                self.app,
+                self._message("$agent Summarize sections 4 and 5 of Cap. 219"),
+                "Summarize sections 4 and 5 of Cap. 219",
+                plan,
+                "channel:user",
+            )
+
+        self.assertFalse(stopped)
+        self.assertEqual(len(responses), 2)
+        self.assertIn(source_url, reviewer.call_args_list[0].args[3][0])
+        read_page.assert_awaited_once()
+        self.assertEqual(read_page.await_args.args[2]["url"], [source_url])
+        self.assertIn("Section 4", reviewer.call_args_list[1].args[3][1])
 
     async def test_reviewed_write_action_requires_confirmation_and_resumes(self):
         platform = StubProgressPlatform()
@@ -524,7 +659,11 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 "summary": "No matching reminder exists, so creating it is the remaining step.",
                 "actions": [{
                     "tool": "create_reminder",
-                    "arguments": {"request": "tomorrow at 8 PM to call Alex"},
+                    "arguments": {
+                        "message": "call Alex",
+                        "schedule_type": "absolute",
+                        "remind_at": "2026-09-10T20:00:00+00:00",
+                    },
                 }],
                 "question": "",
             },
@@ -542,8 +681,8 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.unified_chat.review_agent_progress",
                     side_effect=reviews,
                 ):
-            preview = await self.agent.handle(self.app, self._message("$agent ensure I call Alex tomorrow"))
-            confirmed = await self.agent.handle(self.app, self._message("$agent confirm"))
+            preview = await self.agent._handle_legacy(self.app, self._message("$agent ensure I call Alex tomorrow"))
+            confirmed = await self.agent._handle_legacy(self.app, self._message("$agent confirm"))
 
         self.assertIn("need your approval", preview[-1].text)
         self.assertIn("create_reminder", preview[-1].text)
@@ -570,7 +709,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.unified_chat.review_agent_progress") as reviewer:
-            response = await agent.handle(self.app, self._message("$agent confirm"))
+            response = await agent._handle_legacy(self.app, self._message("$agent confirm"))
 
         self.assertIs(response[0].attachment, attachment)
         reviewer.assert_not_called()
@@ -597,7 +736,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
                 patch("features.feature_agent.unified_chat.review_agent_progress") as reviewer:
-            response = await agent.handle(self.app, self._message("$agent 请直接发送"))
+            response = await agent._handle_legacy(self.app, self._message("$agent 请直接发送"))
 
         self.assertEqual(len(response), 1)
         self.assertIs(response[0].attachment, attachment)
@@ -621,7 +760,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await agent.handle(self.app, self._message("$agent what is happening?"))
+            response = await agent._handle_legacy(self.app, self._message("$agent what is happening?"))
 
         self.assertIn("$agent confirm", response[-1].text)
         self.assertEqual(clips.messages, [])
@@ -654,8 +793,8 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.unified_chat.review_agent_progress",
                     side_effect=reviews,
                 ):
-            first = await self.agent.handle(self.app, self._message("$agent when is my reminder?"))
-            second = await self.agent.handle(self.app, self._message("$agent use UTC"))
+            first = await self.agent._handle_legacy(self.app, self._message("$agent when is my reminder?"))
+            second = await self.agent._handle_legacy(self.app, self._message("$agent use UTC"))
 
         self.assertIn("Which timezone should I use?", first[-1].text)
         self.assertIn("How early should I alert you?", second[-1].text)
@@ -672,7 +811,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.feature_agent.collaborative_agent.consult_luna") as luna, \
             patch("features.feature_agent.collaborative_agent.consult_gemini") as gemini, \
             patch("features.feature_agent.collaborative_agent.consult_claude") as claude:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([item.text for item in response], [
             "**DeepSeek**\n1！我在这儿，主人。",
@@ -689,7 +828,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         platform = StubProgressPlatform()
         self.app.platform = platform
 
-        response = await self.agent.handle(self.app, self._message("$agent --trace roll call"))
+        response = await self.agent._handle_legacy(self.app, self._message("$agent --trace roll call"))
 
         self.assertEqual(len(response), 4)
         self.assertIn("1! Present", response[0].text)
@@ -723,13 +862,11 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.feature_agent.collaborative_agent.save_team_exchange") as save_exchange, \
                 patch("features.feature_agent.unified_chat.query_chat", return_value="Whale opening") as opening:
             message = self._message("$agent --trace Luna and Gemini, identify this car")
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([item.text for item in response], [
             "**DeepSeek**\nWhale opening",
-            "**DeepSeek**\nLuna, can you coordinate this?",
             "**Luna**\nLuna advice",
-            "**DeepSeek**\nGemini, can you research this?",
             "**Gemini**\nGemini advice",
         ])
         save_exchange.assert_called_once()
@@ -738,6 +875,8 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         opening_context = opening.call_args_list[0].args[4]
         self.assertIn("已经安排单独交接给：Luna, Gemini", opening_context)
         self.assertIn("<<ASK:name>>", opening_context)
+        self.assertIn("conversation 时从一个有用的观察或问题开始", opening_context)
+        self.assertIn("不要代替队友回答", opening_context)
         trace = platform.edited[-1][1]
         self.assertIn("DeepSeek is inviting Luna into the room", trace)
         self.assertIn("Luna is listening to the room", trace)
@@ -770,6 +909,176 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(display, "```text\nDeepSeek 已经说完整了。\n```")
         self.assertEqual(spoken, "")
 
+    def test_trailing_skip_after_spoken_turn_is_hidden(self):
+        display, spoken = self.agent._parse_team_turn(
+            "Claude",
+            "```text\nOne last check.\n```\nA concise correction.\n\nSKIP",
+        )
+
+        self.assertEqual(display, "```text\nOne last check.\n```\nA concise correction.")
+        self.assertEqual(spoken, "A concise correction.")
+
+    def test_unfinished_reasoning_fence_is_closed_and_not_treated_as_spoken(self):
+        display, spoken = self.agent._parse_team_turn(
+            "Gemini",
+            "```text\nI need to verify the boundary condition.",
+        )
+
+        self.assertEqual(
+            display,
+            "```text\nI need to verify the boundary condition.\n```",
+        )
+        self.assertEqual(spoken, "")
+
+    async def test_live_reasoning_is_separate_and_deleted_without_trace(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        responses = []
+
+        await self.agent._emit_room_turn(
+            self.app,
+            self._message("$agent explain this"),
+            BotResponse(
+                text=(
+                    "**Gemini**\n```text\nCheck the limiting cases first.\n```\n"
+                    "The complete answer follows."
+                )
+            ),
+            responses,
+        )
+
+        self.assertEqual([content for _, content in platform.sent], [
+            "**Gemini reasoning**\n```text\nCheck the limiting cases first.\n```",
+            "**Gemini**\nThe complete answer follows.",
+        ])
+        self.assertEqual(platform.deleted, [platform.sent[0][1]])
+        self.assertEqual(
+            [response.text for response in responses],
+            ["**Gemini**\nThe complete answer follows."],
+        )
+        self.assertTrue(responses[0].metadata["sent_live"])
+
+    async def test_live_reasoning_is_retained_with_trace(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        responses = []
+
+        await self.agent._emit_room_turn(
+            self.app,
+            self._message("$agent --trace explain this"),
+            BotResponse(
+                text="**Claude**\n```text\nAudit the hidden assumption.\n```\nThe assumption matters."
+            ),
+            responses,
+            preserve_reasoning=True,
+        )
+
+        self.assertEqual(platform.deleted, [])
+        self.assertEqual([response.text for response in responses], [
+            "**Claude reasoning**\n```text\nAudit the hidden assumption.\n```",
+            "**Claude**\nThe assumption matters.",
+        ])
+        self.assertTrue(all(response.metadata["sent_live"] for response in responses))
+
+    async def test_live_room_formula_preserves_text_image_text_order(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        responses = []
+
+        await self.agent._emit_room_turn(
+            self.app,
+            self._message("$agent explain matching"),
+            BotResponse(
+                text="**Gemini**\nBefore the equation.\n\n$$Z_L=Z_S^*$$\n\nAfter the equation."
+            ),
+            responses,
+        )
+
+        math_response = platform.sent_responses[1]
+        self.addCleanup(lambda: Path(math_response.attachment.path).unlink(missing_ok=True))
+        self.assertEqual(
+            [response.text for response in platform.sent_responses],
+            ["**Gemini**\nBefore the equation.\n\n", None, "\n\nAfter the equation."],
+        )
+        self.assertTrue(math_response.metadata["rendered_math"])
+        self.assertTrue(all(response.metadata["sent_live"] for response in responses))
+
+    async def test_trace_flag_retains_opening_reasoning_through_room_loop(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        message = self._message("$agent --trace explain this")
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch(
+                    "features.feature_agent.unified_chat.plan_agent_actions",
+                    return_value=AgentPlan([], response_depth="concise"),
+                ), patch(
+                    "features.feature_agent.unified_chat.query_chat",
+                    return_value="```text\nChoose the simplest valid model.\n```\nComplete answer.",
+                ), patch("features.feature_agent.collaborative_agent.consult_luna", return_value="SKIP"), \
+                patch("features.feature_agent.collaborative_agent.consult_gemini", return_value="SKIP"), \
+                patch("features.feature_agent.collaborative_agent.consult_claude", return_value="SKIP"), \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._handle_legacy(self.app, message)
+
+        self.assertEqual(platform.deleted, [])
+        self.assertEqual([response.text for response in responses], [
+            "**DeepSeek reasoning**\n```text\nChoose the simplest valid model.\n```",
+            "**DeepSeek**\nComplete answer.",
+        ])
+
+    async def test_legacy_asides_render_for_selected_room_members(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        message = self._message("$agent compare the interacting causes")
+        plan = AgentPlan(
+            [],
+            response_depth="detailed",
+            response_mode="deliverable",
+            participants=["Luna", "Gemini", "Claude"],
+            approach="Compare mechanisms and limits.",
+        )
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch(
+                    "features.feature_agent.unified_chat.query_chat",
+                    return_value="```text\nFrame the central distinction.\n```\nMain answer.",
+                ), patch(
+                    "features.feature_agent.collaborative_agent.consult_luna",
+                    return_value="```text\nOrganize the shared conclusion.\n```\nLuna review.",
+                ), patch(
+                    "features.feature_agent.collaborative_agent.consult_gemini",
+                    return_value="```text\nCheck the technical boundary.\n```\nGemini review.",
+                ), patch(
+                    "features.feature_agent.collaborative_agent.consult_claude",
+                    return_value="```text\nAudit the hidden assumption.\n```\nClaude review.",
+                ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._handle_legacy(self.app, message)
+
+        self.assertEqual([content for _, content in platform.sent], [
+            "**DeepSeek reasoning**\n```text\nFrame the central distinction.\n```",
+            "**DeepSeek**\nMain answer.",
+            "**Luna reasoning**\n```text\nOrganize the shared conclusion.\n```",
+            "**Luna**\nLuna review.",
+            "**Gemini reasoning**\n```text\nCheck the technical boundary.\n```",
+            "**Gemini**\nGemini review.",
+            "**Claude reasoning**\n```text\nAudit the hidden assumption.\n```",
+            "**Claude**\nClaude review.",
+        ])
+        self.assertEqual(platform.deleted, [
+            platform.sent[0][1],
+            platform.sent[2][1],
+            platform.sent[4][1],
+            platform.sent[6][1],
+        ])
+        self.assertEqual([response.text for response in responses], [
+            "**DeepSeek**\nMain answer.",
+            "**Luna**\nLuna review.",
+            "**Gemini**\nGemini review.",
+            "**Claude**\nClaude review.",
+        ])
+
     def test_room_allows_three_discussion_rounds(self):
         self.assertEqual(self.agent.MAX_ROOM_DISCUSSION_ROUNDS, 3)
 
@@ -780,6 +1089,14 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(text, "Let me ask Luna and Gemini.")
         self.assertEqual(targets, ["Luna", "Gemini"])
+
+    def test_discussion_reply_markers_are_hidden_and_deduplicated(self):
+        text, targets = self.agent._extract_discussion_handoffs(
+            "That changes the conclusion. <<REPLY:DeepSeek>><<REPLY:deepseek>>"
+        )
+
+        self.assertEqual(text, "That changes the conclusion.")
+        self.assertEqual(targets, ["DeepSeek"])
 
     def test_grounding_request_markers_are_hidden_and_deduplicated(self):
         text, queries = self.agent._extract_grounding_requests(
@@ -814,7 +1131,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         image = {**record, "path": "/tmp/car.jpg"}
         message = self._message("$agent identify this car")
         claude_turn = "```text\nThat badge seems familiar... wait, the arches matter more.\n```\nIt resembles an Audi Quattro."
-        plan = [{"tool": "read_attachment", "arguments": {"attachment": "3"}}]
+        plan = AgentPlan([{"tool": "read_attachment", "arguments": {"attachment": "3"}}], participants=["Claude"])
 
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.db.list_conversation_attachments", return_value=[record]), \
@@ -838,9 +1155,9 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
-        self.assertEqual(responses[1].text, f"**Claude**\n{claude_turn}")
+        self.assertEqual(responses[1].text, "**Claude**\nIt resembles an Audi Quattro.")
         self.assertEqual(claude.call_args_list[0].args[1], [image])
         self.assertIn("目前对话：\nDeepSeek: It may be an Audi.", claude.call_args_list[0].args[0])
 
@@ -860,15 +1177,13 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ) as deepseek, patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([response.text for response in responses], [
             "**DeepSeek**\nBrief answer.",
-            "**Claude**\n```text\nDeepSeek 已经答完整了，人家不用补充。\n```",
         ])
         self.assertNotIn("\nSKIP", "\n".join(response.text or "" for response in responses))
-        self.assertIn("最近一位的口头发言：无（只有公开心声）", deepseek.call_args.args[0])
-        self.assertIn("你是否被直接点名：否", deepseek.call_args.args[0])
+        deepseek.assert_not_called()
 
     async def test_read_only_teammate_failure_does_not_stop_other_teammates(self):
         plan = [
@@ -889,29 +1204,30 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=["Luna, can you review this?", "Gemini, can you research this?"],
                 ), \
                 patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(response[0].text, "**DeepSeek**\nWhale continued")
-        self.assertEqual(response[1].text, "**DeepSeek**\nLuna, can you review this?")
-        self.assertEqual(response[2].text, "**Luna**\nLuna continued")
+        self.assertEqual(response[1].text, "**Luna**\nLuna continued")
         self.assertNotIn("**Gemini**", "\n".join(item.text or "" for item in response))
         self.assertIn("Gemini could not join this turn", response[-1].text)
         self.assertTrue(any("Gemini could not join" in content for _, content in platform.edited))
 
     async def test_overhearing_teammates_skip_when_nothing_needs_adding(self):
-        message = self._message("$agent hello everyone")
+        message = self._message("$agent hello")
 
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
-                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=AgentPlan([], response_mode="deliverable", participants=["Luna", "Gemini"])), \
                 patch("features.feature_agent.unified_chat.query_chat", return_value="Hello, Master."), \
                 patch("features.feature_agent.collaborative_agent.consult_luna", return_value="SKIP") as luna, \
                 patch("features.feature_agent.collaborative_agent.consult_gemini", return_value="skip") as gemini, \
                 patch("features.feature_agent.collaborative_agent.save_team_exchange") as save_exchange:
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([item.text for item in responses], ["**DeepSeek**\nHello, Master."])
         self.assertIn("目前对话：\nDeepSeek: Hello, Master.", luna.call_args.args[0])
         self.assertIn("目前对话：\nDeepSeek: Hello, Master.", gemini.call_args.args[0])
+        self.assertIn("Configured IANA timezone: UTC", luna.call_args.args[2])
+        self.assertIn("Configured IANA timezone: UTC", gemini.call_args.args[2])
         save_exchange.assert_called_once()
 
     async def test_deepseek_searches_before_showing_uncertain_opening(self):
@@ -942,7 +1258,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(query_chat.call_count, 2)
         ground.assert_called_once_with("latest Python release", "search")
@@ -991,6 +1307,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 None,
                 None,
                 [],
+                AgentTask("explain the recent release", participants=["Gemini"]),
             )
 
         ground.assert_called_once_with("project latest release", "search")
@@ -1000,13 +1317,242 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("<<SEARCH:", visible)
         self.assertIn("https://example.com/release", visible)
 
+    async def test_room_members_receive_shared_completed_tool_state(self):
+        message = self._message("$agent remind me in one hour")
+        task = AgentTask(
+            "remind me in one hour",
+            capabilities=self.agent.registry.schemas(),
+            participants=["Luna"],
+        )
+        task.record(
+            "tool.succeeded",
+            "orchestrator",
+            tool="create_reminder",
+            result="Reminder 42 scheduled for 2026-09-15 01:00 PDT: microwave",
+        )
+
+        with patch(
+            "features.feature_agent.collaborative_agent.consult_luna",
+            return_value="SKIP",
+        ) as luna, patch(
+            "features.feature_agent.collaborative_agent.consult_gemini",
+            return_value="SKIP",
+        ), patch(
+            "features.feature_agent.collaborative_agent.consult_claude",
+            return_value="SKIP",
+        ), patch(
+            "features.feature_agent.collaborative_agent.consult_deepseek",
+            return_value="SKIP",
+        ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            await self.agent._continue_room_conversation(
+                self.app,
+                message,
+                "remind me in one hour",
+                "The reminder has been created.",
+                "Reminder evidence is available.",
+                [],
+                [],
+                [],
+                None,
+                None,
+                [],
+                task,
+            )
+
+        luna_context = luna.call_args.args[0]
+        self.assertIn('"type": "tool.succeeded"', luna_context)
+        self.assertIn('"tool": "create_reminder"', luna_context)
+        self.assertIn("Reminder 42 scheduled for 2026-09-15 01:00 PDT", luna_context)
+
+    async def test_room_member_can_use_shared_tool_and_resume_with_result(self):
+        message = self._message("$agent check my reminders")
+        task = AgentTask(
+            "check my reminders",
+            capabilities=self.agent.registry.schemas(),
+        )
+
+        with patch(
+            "features.feature_agent.collaborative_agent.consult_luna",
+            return_value="SKIP",
+        ), patch(
+            "features.feature_agent.collaborative_agent.compose_deepseek_handoff",
+            return_value="Gemini, please verify the reminder list.",
+        ), patch(
+            "features.feature_agent.collaborative_agent.consult_gemini",
+            side_effect=[
+                '<tool_calls>[{"tool":"list_reminders","arguments":{}}]</tool_calls>',
+                "I checked the shared result: there are pending reminders.",
+                "SKIP",
+            ],
+        ) as gemini, patch(
+            "features.feature_agent.collaborative_agent.consult_claude",
+            return_value="SKIP",
+        ), patch(
+            "features.feature_agent.collaborative_agent.consult_deepseek",
+            return_value="SKIP",
+        ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app,
+                message,
+                "check my reminders",
+                "Gemini, could you verify the reminder list?",
+                "No tool result yet.",
+                [{"name": "Gemini", "request": "verify the reminder list"}],
+                [],
+                [],
+                None,
+                None,
+                [],
+                task,
+            )
+
+        resumed_context = gemini.call_args_list[1].args[0]
+        self.assertIn('"type": "tool.succeeded"', resumed_context)
+        self.assertIn('"tool": "list_reminders"', resumed_context)
+        self.assertIn("pending reminders", resumed_context)
+        self.assertIn(
+            "I checked the shared result",
+            "\n".join(response.text or "" for response in responses),
+        )
+
+    async def test_room_image_search_is_shared_with_requester_and_later_agents(self):
+        message = self._message("$agent explain a buck converter")
+        task = AgentTask(
+            "explain a buck converter",
+            capabilities=self.agent.registry.schemas(),
+            response_mode="deliverable", participants=["Luna", "Gemini"],
+        )
+        located = SimpleNamespace(
+            path="/tmp/buck-reference.png",
+            filename="buck-reference.png",
+            mime_type="image/png",
+            title="Buck converter current paths",
+            source_url="https://example.com/buck",
+            image_url="https://images.example/buck.png",
+        )
+
+        with patch(
+            "features.feature_agent.collaborative_agent.consult_luna",
+            side_effect=[
+                '<tool_calls>[{"tool":"image_search","arguments":{"query":"buck converter current paths"}}]</tool_calls>',
+                "The diagram makes the switch states easier to compare.",
+                "The attributed source matches the room's use of the image.",
+            ],
+        ) as luna, patch(
+            "features.feature_agent.image_search.locate_image",
+            return_value=located,
+        ), patch(
+            "services.tool_outcome.Path.is_file", return_value=True,
+        ), patch(
+            "features.feature_agent.Path.stat",
+            return_value=SimpleNamespace(st_size=2048),
+        ), patch(
+            "features.feature_agent.collaborative_agent.consult_gemini",
+            return_value="The visual confirms the inductor-current path.",
+        ) as gemini, patch(
+            "features.feature_agent.collaborative_agent.consult_claude",
+            return_value="SKIP",
+        ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app,
+                message,
+                "explain a buck converter",
+                "Main explanation.",
+                "No tool result yet.",
+                [],
+                [],
+                [],
+                None,
+                None,
+                [],
+                task,
+            )
+
+        shared_image = luna.call_args_list[1].args[1][0]
+        self.assertEqual(shared_image["path"], located.path)
+        self.assertEqual(gemini.call_args.args[1][0]["path"], located.path)
+        image_response = next(response for response in responses if response.attachment is not None)
+        self.assertTrue(image_response.metadata["supplementary_image"])
+        self.assertEqual(image_response.metadata["sources"][0]["url"], located.source_url)
+
+    async def test_supplementary_image_attachment_continues_to_synthesis(self):
+        message = self._message("$agent explain with a useful diagram")
+        task = AgentTask("explain with a useful diagram", capabilities=self.agent.registry.schemas())
+        image_response = BotResponse(
+            text="Located diagram.",
+            attachment=BotAttachment("/tmp/reference.png", "reference.png", True),
+            metadata={"supplementary_image": True},
+        )
+
+        with patch.object(self.agent, "_execute_plan", return_value=[image_response]), \
+                patch(
+                    "features.feature_agent.unified_chat.review_agent_progress",
+                    return_value={
+                        "status": "complete",
+                        "summary": "The useful diagram is ready for synthesis.",
+                        "actions": [],
+                        "question": "",
+                    },
+                ):
+            responses, stop = await self.agent._execute_goal_plan(
+                self.app,
+                message,
+                "explain with a useful diagram",
+                [{"tool": "image_search", "arguments": {"query": "diagram"}}],
+                "channel:user",
+                task=task,
+            )
+
+        self.assertFalse(stop)
+        self.assertEqual(responses, [image_response])
+
+    async def test_room_member_write_tool_uses_confirmation_gate(self):
+        message = self._message("$agent remind me in one hour")
+        task = AgentTask(
+            "remind me in one hour",
+            capabilities=self.agent.registry.schemas(),
+        )
+        tool_call = (
+            '<tool_calls>[{"tool":"create_reminder","arguments":'
+            '{"message":"microwave","schedule_type":"relative",'
+            '"delay_value":1,"delay_unit":"hours"}}]</tool_calls>'
+        )
+
+        with patch(
+            "features.feature_agent.collaborative_agent.consult_luna",
+            return_value=tool_call,
+        ), patch(
+            "features.feature_agent.collaborative_agent.compose_deepseek_handoff",
+            return_value="Luna, please create the reminder.",
+        ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app,
+                message,
+                "remind me in one hour",
+                "Luna, please handle the reminder.",
+                "No tool result yet.",
+                [{"name": "Luna", "request": "create the reminder"}],
+                [],
+                [],
+                None,
+                None,
+                [],
+                task,
+            )
+
+        self.assertIn("need your approval", responses[-1].text)
+        self.assertIn("create_reminder", responses[-1].text)
+        self.assertIn("channel:user", self.agent.pending_plans)
+        self.assertEqual(task.status, "awaiting_confirmation")
+        self.assertEqual(self.agent.time_feature.reminder_requests, [])
+
     async def test_live_room_sends_opening_before_low_effort_discussion(self):
         platform = StubLiveRoomPlatform()
         self.app.platform = platform
         message = self._message("$agent discuss whether this claim is correct")
 
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
-                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=AgentPlan([], response_mode="deliverable", participants=["Luna", "Gemini"])), \
                 patch(
                     "features.feature_agent.unified_chat.query_chat",
                     return_value="Here is my considered answer.",
@@ -1015,14 +1561,14 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     side_effect=["I agree with most of that.", "Gemini, I still disagree with your correction.", "SKIP"],
                 ) as luna, patch(
                     "features.feature_agent.collaborative_agent.consult_gemini",
-                    side_effect=["Luna, that detail is not correct.", "SKIP", "SKIP"],
+                    side_effect=["Luna, that detail is not correct. <<REPLY:DeepSeek>>", "SKIP", "SKIP"],
                 ) as gemini, patch(
                     "features.feature_agent.collaborative_agent.consult_deepseek",
-                    side_effect=["Gemini's correction changes one part of my answer.", "SKIP", "SKIP"],
+                    side_effect=["Gemini's correction changes one part of my answer. <<REPLY:Luna>>", "SKIP", "SKIP"],
                 ) as deepseek, patch(
                     "features.feature_agent.collaborative_agent.save_team_exchange"
                 ) as save_exchange:
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([content for _, content in platform.sent], [
             "**DeepSeek**\nHere is my considered answer.",
@@ -1039,7 +1585,114 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
             "DeepSeek: Gemini's correction changes one part of my answer.",
             luna.call_args_list[1].args[0],
         )
+        self.assertNotIn("<<REPLY:", "\n".join(content for _, content in platform.sent))
         save_exchange.assert_called_once()
+
+    async def test_semantic_response_depth_reaches_every_visible_room_provider(self):
+        message = self._message("$agent provide a detailed technical explanation")
+        plan = AgentPlan([], response_depth="detailed", response_mode="deliverable", participants=["Luna", "Gemini", "Claude"])
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch(
+                    "features.feature_agent.unified_chat.query_chat",
+                    return_value="Detailed opening.",
+                ) as opening, patch(
+                    "features.feature_agent.collaborative_agent.consult_luna",
+                    return_value="SKIP",
+                ) as luna, patch(
+                    "features.feature_agent.collaborative_agent.consult_gemini",
+                    return_value="SKIP",
+                ) as gemini, patch(
+                    "features.feature_agent.collaborative_agent.consult_claude",
+                    return_value="SKIP",
+                ) as claude, patch(
+                    "features.feature_agent.collaborative_agent.consult_deepseek",
+                    return_value="SKIP",
+                ) as deepseek, patch(
+                    "features.feature_agent.collaborative_agent.save_team_exchange"
+                ):
+            await self.agent._handle_legacy(self.app, message)
+            await self.agent._consult_room_member(
+                "DeepSeek",
+                "Continue the discussion",
+                response_depth="concise",
+            )
+
+        self.assertEqual(opening.call_args.kwargs["response_depth"], "detailed")
+        self.assertIn("Response depth: detailed", opening.call_args.args[4])
+        for provider in (luna, gemini, claude, deepseek):
+            self.assertEqual(provider.call_args.kwargs["response_depth"], "concise")
+        for provider in (luna, gemini, claude):
+            request = provider.call_args.args[0]
+            self.assertNotIn("本轮是否必须贡献一个独立观点：是", request)
+            self.assertNotIn("若本轮标记为必须贡献，则不得返回 SKIP", request)
+
+    async def test_deliverable_room_uses_selected_perspectives(self):
+        message = self._message("$agent analyze this difficult circuit")
+        plan = AgentPlan([], response_depth="detailed", response_mode="deliverable", participants=["Gemini", "Claude"])
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch(
+                    "features.feature_agent.unified_chat.query_chat",
+                    return_value="Main circuit analysis.",
+                ), patch(
+                    "features.feature_agent.collaborative_agent.consult_luna",
+                    side_effect=["One coordination point.", "SKIP"],
+                ) as luna, patch(
+                    "features.feature_agent.collaborative_agent.consult_gemini",
+                    side_effect=["One evidence point.", "SKIP"],
+                ) as gemini, patch(
+                    "features.feature_agent.collaborative_agent.consult_claude",
+                    side_effect=["One assumption to check.", "SKIP"],
+                ) as claude, patch(
+                    "features.feature_agent.collaborative_agent.consult_deepseek",
+                    return_value="SKIP",
+                ), patch(
+                    "features.feature_agent.collaborative_agent.save_team_exchange"
+                ):
+            responses = await self.agent._handle_legacy(self.app, message)
+
+        visible = "\n".join(response.text or "" for response in responses)
+        self.assertIn("**Gemini**\nOne evidence point.", visible)
+        self.assertIn("**Claude**\nOne assumption to check.", visible)
+        luna.assert_not_called()
+        self.assertEqual(gemini.call_count, 1)
+        self.assertEqual(claude.call_count, 1)
+
+    async def test_complexity_and_approach_do_not_force_specialist_pass(self):
+        message = self._message("$agent compare the interacting causes")
+        plan = AgentPlan(
+            [],
+            response_depth="standard",
+            approach="Compare the interacting mechanisms and practical limits.",
+        )
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch("features.feature_agent.unified_chat.query_chat", return_value="Main answer."), \
+                patch("features.feature_agent.collaborative_agent.consult_luna", return_value="Luna review."), \
+                patch(
+                    "features.feature_agent.collaborative_agent.consult_gemini",
+                    return_value="Gemini review.",
+                ) as gemini, patch(
+                    "features.feature_agent.collaborative_agent.consult_claude",
+                    return_value="Claude review.",
+                ) as claude, patch(
+                    "features.feature_agent.collaborative_agent.consult_deepseek",
+                    return_value="SKIP",
+                ) as deepseek, patch(
+                    "features.feature_agent.collaborative_agent.save_team_exchange"
+                ):
+            responses = await self.agent._handle_legacy(self.app, message)
+
+        visible = "\n".join(response.text or "" for response in responses)
+        self.assertEqual(visible, "**DeepSeek**\nMain answer.")
+        self.assertNotIn("review.", visible)
+        gemini.assert_not_called()
+        claude.assert_not_called()
+        deepseek.assert_not_called()
 
     async def test_passive_listener_failure_stays_out_of_visible_reply(self):
         message = self._message("$agent hello")
@@ -1052,20 +1705,19 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_gemini",
                     side_effect=RuntimeError("quota"),
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([item.text for item in responses], ["**DeepSeek**\nHello, Master."])
 
-    async def test_deepseek_announces_then_asks_luna_in_separate_message(self):
+    async def test_deepseek_asks_luna_in_the_opening_without_redundant_handoff(self):
         platform = StubLiveRoomPlatform()
         self.app.platform = platform
         message = self._message("$agent explain this unfamiliar topic")
 
-        def luna_reply(_request, _images=None):
+        def luna_reply(_request, _images=None, _runtime_context=None, response_depth="standard", **options):
             if any(content.startswith("**Luna**") for _, content in platform.sent):
                 return "SKIP"
             self.assertEqual([content for _, content in platform.sent], [
-                "**DeepSeek**\nI have not heard of this. Let me ask Luna about it.",
                 "**DeepSeek**\nLuna, can you explain this topic to us?",
             ])
             return "Of course. Here is what it means."
@@ -1074,7 +1726,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
                 patch(
                     "features.feature_agent.unified_chat.query_chat",
-                    return_value="I have not heard of this. Let me ask Luna about it. <<ASK:Luna>>",
+                    return_value="Luna, can you explain this topic to us? <<ASK:Luna>>",
                 ), patch(
                     "features.feature_agent.collaborative_agent.compose_deepseek_handoff",
                     return_value="Luna, can you explain this topic to us?",
@@ -1088,27 +1740,26 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
-        self.assertEqual(len(responses), 3)
+        self.assertEqual(len(responses), 2)
         self.assertEqual(
             responses[0].text,
-            "**DeepSeek**\nI have not heard of this. Let me ask Luna about it.",
+            "**DeepSeek**\nLuna, can you explain this topic to us?",
         )
-        self.assertEqual(responses[1].text, "**DeepSeek**\nLuna, can you explain this topic to us?")
-        self.assertEqual(responses[2].text, "**Luna**\nOf course. Here is what it means.")
+        self.assertEqual(responses[1].text, "**Luna**\nOf course. Here is what it means.")
         self.assertTrue(all(response.metadata.get("sent_live") for response in responses))
         self.assertNotIn("<<ASK:", "\n".join(response.text or "" for response in responses))
         self.assertIn("直接点名你", luna.call_args.args[0])
 
-    async def test_deepseek_announces_then_asks_claude_in_separate_message(self):
+    async def test_deepseek_asks_claude_in_the_opening_without_redundant_handoff(self):
         message = self._message("$agent compare these interpretations")
 
         with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
                 patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
                 patch(
                     "features.feature_agent.unified_chat.query_chat",
-                    return_value="There are competing assumptions here. Let me ask Claude. <<ASK:Claude>>",
+                    return_value="Claude, which assumption changes the conclusion? <<ASK:Claude>>",
                 ), patch(
                     "features.feature_agent.collaborative_agent.compose_deepseek_handoff",
                     return_value="Claude, which assumption changes the conclusion?",
@@ -1121,10 +1772,9 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.collaborative_agent.consult_deepseek",
                     return_value="SKIP",
                 ), patch("features.feature_agent.collaborative_agent.save_team_exchange"):
-            responses = await self.agent.handle(self.app, message)
+            responses = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual([response.text for response in responses], [
-            "**DeepSeek**\nThere are competing assumptions here. Let me ask Claude.",
             "**DeepSeek**\nClaude, which assumption changes the conclusion?",
             "**Claude**\nThe second assumption changes it.",
         ])
@@ -1142,7 +1792,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_agent.unified_chat.generate_process_summary",
                     return_value="我先检查了提醒列表。\n等等，结果为空，所以不需要继续查。",
                 ) as generate:
-            response = await self.agent.handle(self.app, message)
+            response = await self.agent._handle_legacy(self.app, message)
 
         self.assertEqual(len(response), 1)
         self.assertIn("pending reminders", response[0].text)
@@ -1164,7 +1814,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "system_status", "arguments": {}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await self.agent.handle(self.app, self._message("$agent show status"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent show status"))
 
         self.assertIn("$system", response[0].text)
 
@@ -1175,7 +1825,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "web_search", "arguments": {"query": "DeepSeek latest changes"}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await agent.handle(self.app, message)
+            response = await agent._handle_legacy(self.app, message)
 
         self.assertEqual(
             response[0].text,
@@ -1197,7 +1847,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await agent.handle(self.app, message)
+            response = await agent._handle_legacy(self.app, message)
 
         self.assertEqual(len(response), 1)
         self.assertEqual(response[0].text.count("Synthesized current answer"), 1)
@@ -1219,7 +1869,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await agent.handle(self.app, message)
+            response = await agent._handle_legacy(self.app, message)
 
         self.assertEqual(len(response), 1)
         self.assertEqual(response[0].text, "Combined page summary [1][2].")
@@ -1263,33 +1913,155 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                 patch("features.feature_agent.collaborative_agent.consult_gemini", return_value="SKIP"), \
                 patch("features.feature_agent.collaborative_agent.save_team_exchange"), \
                 patch("features.feature_agent.unified_chat.query_chat", return_value="Whale final [1].") as query:
-            responses = await agent.handle(self.app, message)
+            responses = await agent._handle_legacy(self.app, message)
 
         self.assertEqual(query.call_count, 1)
-        self.assertEqual(query.call_args.args[-1], "high")
+        self.assertEqual(query.call_args.args[-1], "medium")
         self.assertEqual(query.call_args.args[6], [])
         self.assertEqual(responses[0].text, "**DeepSeek**\nWhale final [1].")
-        self.assertEqual(responses[1].text, "**Luna**\n来源与结论一致，完整清单紧随其后。")
-        self.assertIn("Google Search: Source", responses[2].text)
-        self.assertTrue(responses[2].metadata["suppress_embeds"])
-        self.assertIn("最终来源审计回合", luna.call_args_list[1].args[0])
-        self.assertIn("https://example.com", luna.call_args_list[1].args[0])
+        self.assertIn("Google Search: Source", responses[1].text)
+        self.assertTrue(responses[1].metadata["suppress_embeds"])
+        luna.assert_not_called()
 
     async def test_write_plan_requires_confirmation(self):
-        plan = [{"tool": "create_reminder", "arguments": {"request": "tomorrow at 8 PM to call Alex"}}]
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "call Alex",
+                "schedule_type": "absolute",
+                "remind_at": "2026-09-10T20:00:00+00:00",
+            },
+        }]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            preview = await self.agent.handle(self.app, self._message("$agent schedule something for tomorrow"))
+            preview = await self.agent._handle_legacy(self.app, self._message("$agent schedule something for tomorrow"))
 
         self.assertIn("$agent confirm", preview[0].text)
-        confirmed = await self.agent.handle(self.app, self._message("$agent confirm"))
+        confirmed = await self.agent._handle_legacy(self.app, self._message("$agent confirm"))
         self.assertIn("scheduled", confirmed[0].text)
+
+    async def test_relative_reminder_confirmation_keeps_original_request_time(self):
+        time_feature = StubTimeFeature()
+        feature = StubFeature()
+        agent = AgentFeature(time_feature, feature, feature, feature)
+        request_time = datetime(2026, 9, 14, 20, 41, tzinfo=timezone.utc)
+        confirmation_time = datetime(2026, 9, 14, 20, 42, tzinfo=timezone.utc)
+        request_message = IncomingMessage(**{
+            **self.message.__dict__,
+            "content": "$agent 两个小时之后提醒微波炉",
+            "created_at": request_time,
+        })
+        confirmation_message = IncomingMessage(**{
+            **self.message.__dict__,
+            "content": "$agent confirm",
+            "created_at": confirmation_time,
+        })
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "微波炉",
+                "schedule_type": "relative",
+                "delay_value": 2,
+                "delay_unit": "hours",
+            },
+        }]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
+            preview = await agent._handle_legacy(self.app, request_message)
+            await agent._handle_legacy(self.app, confirmation_message)
+
+        self.assertIn('"delay_value": 2', preview[0].text)
+        self.assertNotIn("\\u", preview[0].text)
+        reminder_message, reminder_schedule = time_feature.reminder_requests[0]
+        self.assertEqual(reminder_message.created_at, request_time)
+        self.assertEqual(reminder_schedule["reminder_text"], "微波炉")
+        self.assertEqual(reminder_schedule["delay_value"], 2)
+        self.assertEqual(reminder_schedule["delay_unit"], "hours")
+
+    async def test_relative_reminder_uses_configured_local_request_time(self):
+        time_feature = TimeFeature()
+        feature = StubFeature()
+        agent = AgentFeature(time_feature, feature, feature, feature)
+        self.app.config["TIMEZONE"] = "America/Los_Angeles"
+        request_time = datetime(2026, 9, 14, 20, 41, tzinfo=timezone.utc)
+        confirmation_time = datetime(2026, 9, 14, 20, 42, tzinfo=timezone.utc)
+        request_message = IncomingMessage(**{
+            **self.message.__dict__,
+            "content": "$agent 两个小时之后提醒微波炉",
+            "created_at": request_time,
+        })
+        confirmation_message = IncomingMessage(**{
+            **self.message.__dict__,
+            "content": "$agent confirm",
+            "created_at": confirmation_time,
+        })
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "微波炉",
+                "schedule_type": "relative",
+                "delay_value": 2,
+                "delay_unit": "hours",
+            },
+        }]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch.object(time_feature, "_save_reminder", return_value=42) as save_reminder:
+            await agent._handle_legacy(self.app, request_message)
+            response = await agent._handle_legacy(self.app, confirmation_message)
+
+        remind_at = save_reminder.call_args.args[1]
+        self.assertEqual(remind_at.strftime("%Y-%m-%d %H:%M %Z"), "2026-09-14 15:41 PDT")
+        self.assertEqual(save_reminder.call_args.args[2], "微波炉")
+        self.assertIn("2026-09-14 15:41:00 PDT", response[0].text)
+
+    async def test_absolute_reminder_uses_agent_resolved_timestamp(self):
+        time_feature = TimeFeature()
+        feature = StubFeature()
+        agent = AgentFeature(time_feature, feature, feature, feature)
+        self.app.config["TIMEZONE"] = "America/Los_Angeles"
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "join the meeting",
+                "schedule_type": "absolute",
+                "remind_at": "2026-09-10T09:15:00-07:00",
+            },
+        }]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch.object(time_feature, "_save_reminder", return_value=43) as save_reminder:
+            await agent._handle_legacy(self.app, self._message("$agent remind me at quarter past nine tomorrow"))
+            response = await agent._handle_legacy(self.app, self._message("$agent confirm"))
+
+        remind_at = save_reminder.call_args.args[1]
+        self.assertEqual(remind_at.strftime("%Y-%m-%d %H:%M %Z"), "2026-09-10 09:15 PDT")
+        self.assertEqual(save_reminder.call_args.args[2], "join the meeting")
+        self.assertIn("2026-09-10 09:15:00 PDT", response[0].text)
+
+    async def test_rejects_mixed_reminder_schedule_before_confirmation(self):
+        plan = [{
+            "tool": "create_reminder",
+            "arguments": {
+                "message": "invalid schedule",
+                "schedule_type": "relative",
+                "delay_value": 2,
+                "delay_unit": "hours",
+                "remind_at": "2026-09-10T09:15:00-07:00",
+            },
+        }]
+
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
+            response = await self.agent._handle_legacy(self.app, self._message("$agent remind me later"))
+
+        self.assertIn("relative reminder cannot include remind_at", response[0].text)
+        self.assertNotIn("$agent confirm", response[0].text)
 
     async def test_rejects_unregistered_planner_tool(self):
         plan = [{"tool": "run_shell", "arguments": {"command": "date"}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            response = await self.agent.handle(self.app, self._message("$agent run a command"))
+            response = await self.agent._handle_legacy(self.app, self._message("$agent run a command"))
 
         self.assertIn("Unknown tool", response[0].text)
 
@@ -1299,10 +2071,10 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         plan = [{"tool": "queue_music", "arguments": {"url": "https://youtu.be/example"}}]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            preview = await agent.handle(self.app, self._message("$agent add that music to the playlist"))
+            preview = await agent._handle_legacy(self.app, self._message("$agent add that music to the playlist"))
 
         self.assertIn("$agent confirm", preview[0].text)
-        result = await agent.handle(self.app, self._message("$agent confirm"))
+        result = await agent._handle_legacy(self.app, self._message("$agent confirm"))
         self.assertIn("added to queue", result[0].text)
         self.assertEqual(music.messages[0].content, '$music --youtube "https://youtu.be/example" --queue')
 
@@ -1312,7 +2084,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]) as planner, \
                 patch("features.feature_agent.unified_chat.query_chat", return_value="okay"):
-            await self.agent.handle(self.app, message)
+            await self.agent._handle_legacy(self.app, message)
 
         planning_request = planner.call_args.args[0]
         self.assertIn("add that music", planning_request)
@@ -1328,7 +2100,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         }]
 
         with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan):
-            result = await agent.handle(self.app, self._message("$agent clip this video for me"))
+            result = await agent._handle_legacy(self.app, self._message("$agent clip this video for me"))
 
         self.assertIs(result[0].attachment, attachment)
         self.assertEqual(
@@ -1347,7 +2119,7 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
                     "features.feature_clip.clipQuery.get_video_info",
                     return_value=("Example", "Youtube", 301),
                 ):
-            result = await agent.handle(self.app, self._message("$agent process this video"))
+            result = await agent._handle_legacy(self.app, self._message("$agent process this video"))
 
         self.assertIn("96.56MB", result[-1].text)
         self.assertIn("截取哪一段", result[-1].text)
@@ -1382,6 +2154,369 @@ class AgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIsNone(response)
+
+    async def test_ordinary_room_queries_only_selected_participant(self):
+        plan = AgentPlan([], response_depth="detailed", participants=["Gemini"])
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=plan), \
+                patch("features.feature_agent.unified_chat.query_chat", return_value="Getting started is rough.") as opening, \
+                patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock,
+                             return_value="The phone is suspiciously interesting when a textbook opens.") as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._handle_legacy(self.app, self._message("$agent I keep procrastinating"))
+
+        self.assertEqual(opening.call_args.kwargs["response_depth"], "concise")
+        self.assertEqual(opening.call_args.args[-1], "medium")
+        self.assertEqual([call.args[0] for call in member.await_args_list], ["Gemini"])
+        self.assertEqual(len(responses), 2)
+
+    async def test_homemade_food_photo_reaches_all_invited_voices_without_planning_or_review(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        message = self._message("$agent 烧卖你们觉得好吃吗？这个是我做的")
+        image = {
+            "url": "https://cdn.discordapp.com/food.jpg", "filename": "food.jpg",
+            "content_type": "image/jpeg", "size": 1024,
+        }
+        record = {**image, "id": 42, "channel_id": "channel"}
+        cached_image = {**image, "path": "/tmp/food.jpg"}
+        message.metadata["attachments"] = [image]
+
+        async def reaction(name, request, images, runtime_context, **options):
+            # All explicitly invited openings use the same inspected photo.
+            self.assertIn("同时开始生成", request)
+            self.assertEqual(images, [cached_image])
+            self.assertEqual(options["effort"], "low")
+            self.assertEqual(options["request_timeout"], 35.0)
+            return {"Luna": "自己做的很用心呢。", "Gemini": "给我留一颗！", "Claude": "摆盘也挺整齐。"}[name]
+
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.db.list_conversation_attachments", return_value=[record]), \
+                patch("features.feature_agent.db.find_conversation_attachment", return_value=record), \
+                patch("features.feature_agent.attachment_store.read_attachment", return_value={
+                    "id": 42, "filename": "food.jpg", "content_type": "image/jpeg", "size": 1024,
+                    "cached_path": cached_image["path"], "text": "", "image": cached_image,
+                }) as fetch, patch("features.feature_agent.collaborative_agent.query_room_route", return_value=
+                    '{"route":"conversation","participants":[],"effort":"low"}') as router, \
+                patch("features.feature_agent.collaborative_agent.query_luna_control") as full_planner, \
+                patch("features.feature_agent.unified_chat.review_agent_progress") as reviewer, \
+                patch("features.feature_agent.unified_chat.query_chat", return_value="主人自己做的？看着很香！") as opening, \
+                patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock, side_effect=reaction) as members, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save:
+            responses = await self.agent._handle_legacy(self.app, message)
+
+        router.assert_called_once()
+        full_planner.assert_not_called()
+        reviewer.assert_not_called()
+        fetch.assert_called_once_with(record)
+        opening.assert_called_once()
+        self.assertEqual(opening.call_args.args[6], [cached_image])
+        self.assertEqual(opening.call_args.args[-1], "low")
+        self.assertEqual(opening.call_args.kwargs["request_timeout"], 35.0)
+        self.assertCountEqual([call.args[0] for call in members.await_args_list], ["Luna", "Gemini", "Claude"])
+        self.assertEqual(len(responses), 4)
+        self.assertTrue(all(response.metadata["sent_live"] for response in responses))
+        self.assertIn("**Claude**", save.call_args.args[1])
+
+    async def test_invited_participant_skip_is_reported_instead_of_silently_dropped(self):
+        task = AgentTask("Luna学姐，你怎么看？")
+        with patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock, return_value="SKIP") as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "Luna也说说吧。", "", [], [], [], None, None, [], task,
+            )
+        member.assert_awaited_once()
+        self.assertIn("Luna could not join", responses[-1].text)
+
+    async def test_group_openings_arrive_before_slow_deepseek_and_in_completion_order(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        names = ["DeepSeek", "Luna", "Gemini", "Claude"]
+        started = {name: asyncio.Event() for name in names}
+        release = {name: asyncio.Event() for name in names}
+        delivered = {name: asyncio.Event() for name in names}
+        release["Gemini"].set()
+        original_send = platform.send_channel_response
+
+        async def send(channel, response):
+            await original_send(channel, response)
+            for name in names:
+                if response.text.startswith(f"**{name}**"):
+                    delivered[name].set()
+
+        platform.send_channel_response = send
+        async def reply(name):
+            started[name].set()
+            await release[name].wait()
+            return f"{name}在呢。"
+
+        async def opening(function, *args, **kwargs):
+            self.assertIs(function, unified_chat.query_chat)
+            return await reply("DeepSeek")
+
+        async def member(name, request, images, context, **kwargs):
+            self.assertIn("尚未听到", request)
+            self.assertNotIn("Gemini在呢", request)
+            return await reply(name)
+
+        task = AgentTask("你们在吗？", conversation_only=True, participants=names[1:])
+        with patch("features.feature_agent.asyncio.to_thread", side_effect=opening), \
+                patch.object(self.agent, "_consult_room_member", side_effect=member), \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save:
+            work = asyncio.create_task(self.agent._parallel_conversation(
+                self.app, self.message, task.goal, "", [], task, None, None))
+            try:
+                await asyncio.wait_for(delivered["Gemini"].wait(), 1)
+                await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), 1)
+                self.assertFalse(delivered["DeepSeek"].is_set())
+                for name in ["Claude", "DeepSeek", "Luna"]:
+                    release[name].set()
+                    await asyncio.wait_for(delivered[name].wait(), 1)
+                answers = await asyncio.wait_for(work, 1)
+            finally:
+                for event in release.values():
+                    event.set()
+                if not work.done():
+                    work.cancel()
+                await asyncio.gather(work, return_exceptions=True)
+        self.assertEqual([answer.text.split("\n", 1)[0] for answer in answers],
+                         ["**Gemini**", "**Claude**", "**DeepSeek**", "**Luna**"])
+        self.assertTrue(all(answer.metadata["sent_live"] for answer in answers))
+        transcript = save.call_args.args[1]
+        self.assertLess(transcript.index("**Gemini**"), transcript.index("**DeepSeek**"))
+
+    async def test_parallel_member_failure_does_not_prevent_other_replies(self):
+        self.app.platform = StubLiveRoomPlatform()
+        task = AgentTask("你们在吗？", conversation_only=True, participants=["Luna", "Gemini", "Claude"])
+        async def member(name, *args, **kwargs):
+            if name == "Gemini":
+                raise TimeoutError("test failure")
+            return f"{name}在呢。"
+        with patch("features.feature_agent.unified_chat.query_chat", return_value="在呢。"), \
+                patch.object(self.agent, "_consult_room_member", side_effect=member), \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save:
+            answers = await self.agent._parallel_conversation(
+                self.app, self.message, task.goal, "", [], task, None, None)
+        text = "\n".join(answer.text for answer in answers)
+        self.assertIn("Gemini could not join", text)
+        for name in ["DeepSeek", "Luna", "Claude"]:
+            self.assertIn(f"**{name}**", text)
+        self.assertNotIn("test failure", save.call_args.args[1])
+
+    async def test_parallel_write_request_still_pauses_for_approval(self):
+        self.app.platform = StubLiveRoomPlatform()
+        task = AgentTask("你们在吗？", conversation_only=True, participants=["Luna", "Gemini", "Claude"],
+                         capabilities=self.agent.registry.schemas())
+        async def member(name, *args, **kwargs):
+            if name == "Luna":
+                return '我可以提醒你。<tool_calls>[{"tool":"create_reminder","arguments":{"message":"study","schedule_type":"relative","delay_value":2,"delay_unit":"hours"}}]</tool_calls>'
+            await asyncio.Event().wait()
+        with patch("features.feature_agent.unified_chat.query_chat", return_value="在呢。"), \
+                patch.object(self.agent, "_consult_room_member", side_effect=member), \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            answers = await asyncio.wait_for(self.agent._parallel_conversation(
+                self.app, self.message, task.goal, "", [], task, None, None), 1)
+        self.assertEqual(self.agent.time_feature.reminder_requests, [])
+        self.assertIn("$agent confirm", answers[-1].text)
+        self.assertIn("channel:user", self.agent.pending_plans)
+        self.assertNotIn("tool_calls", "\n".join(answer.text for answer in answers))
+
+    async def test_work_owner_speaks_before_tool_without_full_planner_or_reviewer(self):
+        platform = StubLiveRoomPlatform()
+        self.app.platform = platform
+        async def system_status(app, message):
+            self.assertIn("I'll inspect the server.", platform.sent[0][1])
+            return [BotResponse(text="CPU 5%; service healthy")]
+        self.agent.system_feature.handle = system_status
+        decisions = [
+            json.dumps({"status": "continue", "message": "I'll inspect the server.",
+                        "actions": [{"tool": "system_status", "arguments": {}}]}),
+            json.dumps({"status": "complete", "message": "The server is healthy: CPU 5%.", "actions": []}),
+        ]
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.collaborative_agent.query_room_route", return_value=
+                      '{"route":"task","participants":[],"effort":"medium"}'), \
+                patch("features.feature_agent.collaborative_agent.query_luna_control") as planner, \
+                patch("features.feature_agent.unified_chat.review_agent_progress") as reviewer, \
+                patch("features.feature_agent.unified_chat.generate_process_summary") as summary, \
+                patch("features.feature_agent.unified_chat.query_chat", side_effect=decisions) as owner:
+            answers = await self.agent._handle_legacy(self.app, self._message("$agent inspect my server"))
+        self.assertEqual(owner.call_count, 2)
+        self.assertIn('"status": "success"', owner.call_args.args[0])
+        planner.assert_not_called()
+        reviewer.assert_not_called()
+        summary.assert_not_called()
+        self.assertTrue(all(answer.metadata["sent_live"] for answer in answers))
+
+    async def test_download_source_failure_is_reported_without_preview_or_compression_detour(self):
+        self.agent = AgentFeature(self.agent.time_feature, self.agent.system_feature,
+                                  self.agent.search_feature, self.agent.help_feature, clip_feature=ClipFeature())
+        decisions = [
+            json.dumps({"status": "continue", "message": "I'll download the full video.",
+                        "actions": [{"tool": "download_video", "arguments": {"url": "https://www.bilibili.com/video/example"}}]}),
+            json.dumps({"status": "blocked", "message": "The source returned no video formats; changing bitrate cannot fix source access.",
+                        "actions": []}),
+        ]
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.collaborative_agent.query_room_route", return_value=
+                      '{"route":"task","participants":[],"effort":"medium"}'), \
+                patch("features.feature_agent.unified_chat.query_chat", side_effect=decisions) as owner, \
+                patch("features.feature_clip.clipQuery.get_video_info", side_effect=clip_query.VideoSourceError("No video formats found")), \
+                patch("features.feature_clip.clipQuery.create_clip") as encode:
+            answers = await self.agent._handle_legacy(self.app, self._message("$agent download this video"))
+        encode.assert_not_called()
+        self.assertIn('"error_code": "source_unavailable"', owner.call_args.args[0])
+        self.assertIn('"status": "failed"', owner.call_args.args[0])
+        task = self.agent.task_sessions["channel:user"]
+        self.assertEqual(task.status, "blocked")
+        self.assertIn("tool.failed", [event.event_type for event in task.events])
+        self.assertNotIn("tool.succeeded", [event.event_type for event in task.events])
+        self.assertIn("source returned no video formats", answers[-1].text)
+
+    async def test_work_confirmation_resumes_once_with_original_schedule_anchor(self):
+        decisions = [
+            json.dumps({"status": "continue", "message": "I'll set the reminder.", "actions": [{
+                "tool": "create_reminder", "arguments": {"message": "study", "schedule_type": "relative",
+                                                            "delay_value": 2, "delay_unit": "hours"}}]}),
+            json.dumps({"status": "complete", "message": "The reminder is scheduled.", "actions": []}),
+        ]
+        message = self._message("$agent remind me in two hours to study")
+        with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                patch("features.feature_agent.collaborative_agent.query_room_route", return_value=
+                      '{"route":"task","participants":[],"effort":"medium"}') as route, \
+                patch("features.feature_agent.unified_chat.query_chat", side_effect=decisions):
+            await self.agent._handle_legacy(self.app, message)
+            self.assertEqual(self.agent.time_feature.reminder_requests, [])
+            await self.agent._handle_legacy(self.app, self._message("$agent confirm"))
+        route.assert_called_once()
+        self.assertEqual(len(self.agent.time_feature.reminder_requests), 1)
+        self.assertEqual(self.agent.time_feature.reminder_requests[0][0].created_at, message.created_at)
+        self.assertNotIn("channel:user", self.agent.work_runs)
+
+    async def test_characters_keep_separate_diaries_and_recall_them_without_extra_generation(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(db, "DATABASE_PATH", str(Path(directory) / "diary.db")):
+            db.init_database()
+            message = self._message("$agent 你们，我现在在学粤语。")
+            notes = {
+                "DeepSeek": "DeepSeek-private: 主人在学粤语，下次可以陪她练一句。",
+                "Luna": "Luna-private: 我想温柔地支持主人的粤语学习。",
+                "Gemini": "Gemini-private: 我有点好奇主人会先学哪些粤语词。",
+                "Claude": "Claude-private: 主人在学粤语，我会留意她喜欢的表达。",
+            }
+
+            def with_note(name, spoken):
+                return spoken + "\n<diary_updates>" + json.dumps([{
+                    "key": "study.language", "kind": "fact", "note": notes[name], "importance": 4,
+                }], ensure_ascii=False) + "</diary_updates>"
+
+            async def teammate(name, request, images, runtime_context, **options):
+                self.assertIn(f"You are {name}. This is your own diary", runtime_context)
+                self.assertNotIn("DeepSeek-private", request + runtime_context)
+                return with_note(name, f"{name}的简短回应。")
+
+            plans = [AgentPlan([], participants=["Luna", "Gemini", "Claude"], conversation_only=True), AgentPlan([])]
+            with patch("features.feature_agent.db.get_channel_settings", return_value={"mode": "agent"}), \
+                    patch("features.feature_agent.unified_chat.plan_agent_actions", side_effect=plans), \
+                    patch("features.feature_agent.unified_chat.query_chat",
+                          side_effect=[with_note("DeepSeek", "那我们来练一句吧。"), "你在学粤语呀。"]) as opening, \
+                    patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock, side_effect=teammate) as members:
+                responses = await self.agent._handle_legacy(self.app, message)
+                self.assertNotIn("diary_updates", "\n".join(response.text for response in responses))
+                self.assertEqual(opening.call_count, 1)
+                self.assertEqual(members.await_count, 3)
+                for name in notes:
+                    stored = db.list_diary_notes(diary_scope(message), name)
+                    self.assertEqual([note["note"] for note in stored], [notes[name]])
+
+                history = db.load_chat_history(message.channel_id, "agent")
+                self.assertNotIn("private:", str(history))
+                db.clear_chat_history(message.channel_id, "agent")
+                await self.agent._handle_legacy(self.app, self._message("$agent 你还记得我在学什么吗？"))
+                self.assertIn(notes["DeepSeek"], opening.call_args.args[4])
+                self.assertNotIn(notes["Luna"], opening.call_args.args[4])
+                self.assertEqual(opening.call_count, 2)
+                self.assertEqual(members.await_count, 3)
+
+    async def test_opening_question_waits_for_user_without_querying_optional_teammates(self):
+        task = AgentTask("I keep procrastinating", participants=["Gemini"])
+        with patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock) as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save:
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal,
+                "Is starting or staying focused harder? <wait_for_user/>", "", [], [], [], None, None, [], task,
+            )
+        member.assert_not_awaited()
+        self.assertEqual(responses[0].text, "**DeepSeek**\nIs starting or staying focused harder?")
+        self.assertNotIn("wait_for_user", save.call_args.args[1])
+
+    async def test_teammate_question_stops_a_followup_invitation(self):
+        task = AgentTask("I keep procrastinating", participants=["Gemini"])
+        with patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock,
+                          return_value="Which subject? <wait_for_user/> <<REPLY:DeepSeek>>") as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange") as save:
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "Getting started is rough.", "", [], [], [], None, None, [], task,
+            )
+        self.assertEqual(member.await_count, 1)
+        self.assertEqual(responses[-1].text, "**Gemini**\nWhich subject?")
+        self.assertNotIn("wait_for_user", save.call_args.args[1])
+        self.assertNotIn("<<REPLY:", save.call_args.args[1])
+
+    async def test_conversation_turn_budget_stops_teammate_ping_pong(self):
+        task = AgentTask("talk about studying", participants=["Gemini"])
+        with patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock, side_effect=[
+            "Maybe a small first step? <<REPLY:DeepSeek>>",
+            "Just open the book. <<REPLY:Gemini>>",
+        ]) as member, patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "Starting feels hard.", "", [], [], [], None, None, [], task,
+            )
+        self.assertEqual(member.await_count, 2)
+        self.assertEqual(len(responses), 3)
+
+    async def test_explicit_group_invitation_keeps_all_requested_voices(self):
+        task = AgentTask("Everyone, how was your day?", participants=["Luna", "Gemini", "Claude"])
+        with patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock,
+                          side_effect=["Busy!", "I survived.", "Quite pleasant."]) as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "Mine was sleepy.", "", [], [], [], None, None, [], task,
+            )
+        self.assertEqual([call.args[0] for call in member.await_args_list], ["Luna", "Gemini", "Claude"])
+        self.assertEqual(len(responses), 4)
+
+    async def test_teammate_receives_recent_user_answer(self):
+        task = AgentTask("yes, that one", participants=["Luna"])
+        with patch("features.feature_agent.conversation_context", return_value="[User]: I study physics."), \
+                patch.object(self.agent, "_consult_room_member", new_callable=AsyncMock, return_value="Physics, got it.") as member, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "Let's start there.", "", [], [], [], None, None, [], task,
+            )
+        self.assertIn("[User]: I study physics.", member.await_args.args[3])
+
+    async def test_explicit_roleplay_chat_persists_exchange(self):
+        with patch("features.feature_agent.unified_chat.plan_agent_actions", return_value=[]), \
+                patch("features.feature_agent.unified_chat.query_chat", return_value="Hello again!") as query:
+            responses = await self.agent._handle_legacy(self.app, self._message("$agent hello"))
+        self.assertTrue(query.call_args.args[5])
+        self.assertEqual(responses[0].text, "Hello again!")
+
+    async def test_requested_deliverable_retains_source_audit(self):
+        task = AgentTask("Write a sourced report", response_mode="deliverable", response_depth="detailed")
+        sources = [{"provider": "Web", "title": "Evidence", "url": "https://example.com/evidence"}]
+        with patch("features.feature_agent.collaborative_agent.consult_luna",
+                   return_value="The report matches the provided evidence.") as audit, \
+                patch("features.feature_agent.collaborative_agent.save_team_exchange"):
+            responses = await self.agent._continue_room_conversation(
+                self.app, self.message, task.goal, "The report [1].", "Verified evidence.",
+                [], sources, [], None, None, [], task,
+            )
+        audit.assert_called_once()
+        self.assertIn("最终来源审计回合", audit.call_args.args[0])
+        self.assertEqual(responses[1].text, "**Luna**\nThe report matches the provided evidence.")
+        self.assertIn("https://example.com/evidence", responses[2].text)
 
     def _message(self, content):
         return IncomingMessage(**{**self.message.__dict__, "content": content})

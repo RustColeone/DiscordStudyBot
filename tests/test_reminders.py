@@ -53,6 +53,17 @@ class ReminderParserTests(unittest.TestCase):
         self.assertEqual(parsed.remind_at.minute, 0)
         self.assertEqual(parsed.message, "看射雕英雄传")
 
+    def test_parses_english_relative_duration(self):
+        parsed = parse_natural_reminder(
+            "two hours later to check the microwave",
+            self.now,
+            "America/Los_Angeles",
+        )
+
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.remind_at, self.now + timedelta(hours=2))
+        self.assertEqual(parsed.message, "check the microwave")
+
     def test_rejects_missing_action(self):
         self.assertIsNone(parse_natural_reminder("remind me tomorrow", self.now, "UTC"))
 

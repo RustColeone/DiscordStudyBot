@@ -14,6 +14,12 @@ IMAGE_MODEL = os.getenv(
     "DRAW_GEMINI_MODEL",
     os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image"),
 ).strip()
+KNOWN_IMAGE_MODELS = (
+    "gemini-2.5-flash-image",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image",
+)
 OUTPUT_DIR = Path(os.getenv(
     "DRAW_OUTPUT_DIR",
     os.getenv("GENERATED_IMAGE_DIR", "temp/generated_images"),
@@ -27,13 +33,15 @@ def list_image_models() -> list[str]:
     if client is None:
         raise RuntimeError("Gemini image generation is not configured")
 
-    models = []
+    models = set(KNOWN_IMAGE_MODELS)
+    if IMAGE_MODEL:
+        models.add(IMAGE_MODEL)
     for item in client.models.list():
         name = str(getattr(item, "name", "")).removeprefix("models/")
         actions = getattr(item, "supported_actions", None) or []
         if name and ("-image" in name.lower() or name.lower().startswith("imagen-") or "generateImages" in actions):
-            models.append(name)
-    return sorted(set(models))
+            models.add(name)
+    return sorted(models)
 
 
 def generate_image(

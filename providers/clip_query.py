@@ -39,6 +39,10 @@ pending_clips: Dict[str, List[ClipSpec]] = {}
 CLIP_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "temp" / "clips"
 
 
+class VideoSourceError(RuntimeError):
+    """Source retrieval failed before output encoding settings could matter."""
+
+
 def ensure_clip_output_dir() -> Path:
     CLIP_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     return CLIP_OUTPUT_DIR
@@ -179,13 +183,17 @@ async def get_video_info(url: str) -> Tuple[str, str, float]:
     Returns:
         (title, site_name, duration)
     """
-    try:
+    def extract():
         import yt_dlp
         
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
+            'noplaylist': True,
+            'socket_timeout': 15,
+            'retries': 1,
+            'extractor_retries': 1,
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -194,12 +202,16 @@ async def get_video_info(url: str) -> Tuple[str, str, float]:
             site = info.get('extractor_key', 'Unknown')
             duration = info.get('duration', 0)
             
+            if not duration or duration <= 0:
+                raise VideoSourceError("The source did not provide a usable video duration")
             return title, site, duration
+    try:
+        return await asyncio.to_thread(extract)
     except Exception as e:
         print(f"Error getting video info: {e}")
-        return "Unknown", "Unknown", 0
+        raise VideoSourceError(f"Unable to inspect the video source: {e}") from e
 
-async def create_clip(clip: ClipSpec, output_path: str) -> bool:
+async def create_clip(clip: ClipSpec, output_path: str, progress=None) -> bool:
     """
     Download and process clip using yt-dlp and FFmpeg
     
@@ -221,14 +233,26 @@ async def create_clip(clip: ClipSpec, output_path: str) -> bool:
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
-            'format': 'bestaudio' if is_audio else 'bestvideo+bestaudio',
+            'noprogress': True,
+            'format': 'bestaudio/best' if is_audio else 'bestvideo+bestaudio/best',
             'outtmpl': output_path.replace(f'.{clip.output_format}', '.temp.%(ext)s'),
+            'noplaylist': True,
+            'socket_timeout': 15,
+            'retries': 1,
+            'extractor_retries': 1,
         }
         
         # Download video
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clip.url, download=True)
-            temp_file = ydl.prepare_filename(info).replace('.%(ext)s', f'.temp.{info["ext"]}')
+        if progress is not None:
+            await progress("Downloading source media...")
+        def download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(clip.url, download=True)
+                    return ydl.prepare_filename(info)
+                except Exception as error:
+                    raise VideoSourceError(f"Unable to download the video source: {error}") from error
+        temp_file = await asyncio.to_thread(download)
         
         # Build FFmpeg command for clipping and processing
         duration = clip.end - clip.start
@@ -258,6 +282,8 @@ async def create_clip(clip: ClipSpec, output_path: str) -> bool:
         else:
             # Video clipping
             filters = []
+            if clip.output_format == 'mp4':
+                ffmpeg_cmd.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-b:a', '128k'])
             
             # Resolution scaling
             if clip.resolution:
@@ -282,13 +308,15 @@ async def create_clip(clip: ClipSpec, output_path: str) -> bool:
         ])
         
         # Run FFmpeg
+        if progress is not None:
+            await progress(f"Encoding {duration:g}s at {clip.resolution or 'source resolution'} / {clip.bitrate or 'default bitrate'}...")
         process = await asyncio.create_subprocess_exec(
             *ffmpeg_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         
-        await process.communicate()
+        _, stderr = await process.communicate()
         
         # Clean up temp file
         try:
@@ -296,11 +324,13 @@ async def create_clip(clip: ClipSpec, output_path: str) -> bool:
         except:
             pass
         
-        return process.returncode == 0
+        if process.returncode:
+            raise RuntimeError("FFmpeg processing failed: " + stderr.decode(errors="replace")[-600:])
+        return True
         
     except Exception as e:
         print(f"Error creating clip: {e}")
-        return False
+        raise
 
 def get_discord_size_limit(premium_tier: int) -> float:
     """

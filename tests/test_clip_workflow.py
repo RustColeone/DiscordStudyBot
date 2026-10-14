@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
 from app.bot_types import IncomingMessage
 from features.feature_clip import ClipFeature
@@ -97,6 +99,50 @@ class ClipWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(clip_query.get_pending_clips("channel")[0].keep_file)
         self.assertIn("too large for Discord", responses[0].text)
+
+    async def test_direct_download_uses_full_duration_and_upload_fit_without_preview(self):
+        with tempfile.TemporaryDirectory() as directory:
+            seen = []
+            async def render(clip, output):
+                seen.append(clip)
+                Path(output).write_bytes(b"video fixture")
+                return True
+            with patch.object(clip_query, "CLIP_OUTPUT_DIR", Path(directory)), \
+                    patch.object(clip_query, "get_video_info", return_value=("Example", "BiliBili", 120.8)), \
+                    patch.object(clip_query, "create_clip", side_effect=render):
+                answers = await self.feature.download_for_agent(self.message, {"url": "https://example.com/video"})
+            self.assertEqual((seen[0].start, seen[0].end), (0, 120.8))
+            self.assertLessEqual(clip_query.estimate_clip_size(120.8, seen[0].resolution, seen[0].bitrate, seen[0].fps), 10)
+            self.assertIsNotNone(answers[0].attachment)
+            self.assertIsNone(clip_query.get_pending_clips("channel"))
+
+    async def test_source_failure_never_creates_a_preview_or_claims_success(self):
+        with patch.object(clip_query, "get_video_info", side_effect=clip_query.VideoSourceError("No video formats found")):
+            answers = await self.feature.download_for_agent(self.message, {"url": "https://example.com/video"})
+        self.assertEqual(answers[0].metadata["tool_status"], "failed")
+        self.assertEqual(answers[0].metadata["error_code"], "source_unavailable")
+        self.assertIn("No video formats found", answers[0].text)
+        self.assertIsNone(clip_query.get_pending_clips("channel"))
+
+    async def test_explicit_30fps_keeps_full_duration_and_exposes_encoding_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            seen = []
+            async def render(clip, output):
+                seen.append(clip)
+                Path(output).write_bytes(b"video fixture")
+                return True
+            with patch.object(clip_query, "CLIP_OUTPUT_DIR", Path(directory)), \
+                    patch.object(clip_query, "get_video_info", return_value=("Example", "BiliBili", 120.8)), \
+                    patch.object(clip_query, "create_clip", side_effect=render):
+                answers = await self.feature.download_for_agent(self.message, {
+                    "url": "https://example.com/video", "fps": 30})
+            self.assertEqual((seen[0].start, seen[0].end, seen[0].fps), (0, 120.8, 30))
+            evidence = answers[0].metadata["video_encoding"]
+            self.assertEqual(evidence["duration_seconds"], 120.8)
+            self.assertEqual(evidence["fps"], 30)
+            self.assertEqual(evidence["video_bitrate"], seen[0].bitrate)
+            self.assertLess(evidence["estimated_size_mb"], evidence["upload_limit_mb"])
+            self.assertIn("30 fps", answers[0].text)
 
 
 if __name__ == "__main__":

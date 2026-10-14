@@ -200,6 +200,7 @@ to the bounded agent.
 DISCORD_ALLOWED_CHANNELS=123456789012345678
 DISCORD_REQUIRE_MENTION=false
 TIMEZONE=America/Los_Angeles
+AGENT_LOCALE=en-US
 ```
 
 ## Agent and persistent reminders
@@ -220,7 +221,12 @@ confirmation.
 
 Reminders are stored in `bot_data.db`, survive restarts, and are delivered to
 the channel where they were created. When `TIMEZONE` is omitted, the host's
-local timezone is used.
+local timezone is used. All four room members receive an authoritative
+request-time context containing UTC, the configured local date and time, weekday, offset, IANA timezone,
+and optional `AGENT_LOCALE`. Luna interprets reminder wording in the user's language into a typed relative
+duration or timezone-aware timestamp; scheduling code validates that structure without parsing language-specific
+phrases. Relative schedules are anchored to the original request time, so a later `$agent confirm` does not move
+that reference time.
 
 ### Command queue and creator controls
 
@@ -268,13 +274,10 @@ $help db                # Detailed help for database management
 
 The bot uses a **single `$chat` command** with two separate modes:
 
-- **Agent mode (default)**: DeepSeek sends a high-effort opening first. GPT-5.6 Luna, Gemini 3.5
-    Flash-Lite, and Claude Haiku 4.5
-    then overhear the visible answer and join a high-effort room discussion. DeepSeek can respond
-    again after them. Each turn is sent immediately as its own Discord message, and participants can agree,
-    correct, disagree, or stay quiet. For operational requests, a persistent process note shows the concise
-    plan, each typed action, and the observable review decision. The agent can continue with another safe action
-    or ask one focused question when blocked. Typed state-changing actions remain permissioned.
+- **Agent mode (default)**: four characters share one conversation and work board. GPT-6 Luna,
+  Gemini 3.8 Flash, Claude Haiku 5.5, and DeepSeek Flash can speak, use tools, or assign teammates
+  focused steps. Explicit group invitations start independent replies concurrently. Work continues
+  through the same loop, with visible updates and central approval for writes.
 - **Role-play mode**: preserves the existing ChatGPT, Gemini, and DeepSeek providers, model
     selection, effort controls, prompt presets, and custom personas. Its histories remain separate
     from collaborative agent history.
@@ -287,59 +290,44 @@ Agent team models, effort, and personalities are server-admin configured through
 $chat                              # Show current configuration
 $chat -s <message>                 # Send message to active LLM
 $chat --send "Your message here"   # Long form
-$chat --trace -s <message>         # Preserve live process notes and add a generated recap
+$chat --trace -s <message>         # Show observable room progress
 ```
 
-Planning, typed-tool, and result-review progress is transient by default and is removed when the request finishes.
-Use `--trace` to preserve those milestones in a separate process-notes message and add a generated high-level recap.
-These notes describe observable work rather than private chain-of-thought or hidden prompts. The operational loop is
-limited to three rounds and five total actions. It stops when the goal is met, asks one focused question when user
-input is required, and pauses for `$agent confirm` whenever a next step would change persistent state.
-Internal planning, progress review, and process-summary calls are stateless and do not receive the persistent room
-transcript or character prompts. This keeps long discussions from contaminating typed JSON control output. If the
-planner still returns malformed output after its retries, the bot uses the safe empty plan and continues as ordinary
-conversation; it never executes an unvalidated action or exposes the internal schema failure to the user.
+Characters usually speak in one to three sentences. A greeting and a server task use the same room loop:
+there is no separate classifier, planner, task owner, reviewer, or model-generated recap. Each character
+sees shared dialogue and verified results, while her diary remains private. Naming characters chooses the
+initial speakers; `你们` or `you all` invites all four. Otherwise the initial speaker rotates. Independent
+replies are sent as they finish, so a slow provider does not gate the other characters.
 
-The four assistants share a persistent room identity. After DeepSeek's opening, the discussion runs for
-up to three rounds in `Luna → Gemini → Claude → DeepSeek` order and stops early after a silent round. Every participant
-sees the transcript accumulated before their turn, so a correction can receive a visible reply or disagreement.
-All four participants follow the user's most recently used language. Their collaborative personality and room-turn
-system prompts are authored in Chinese for denser, more consistent characterization; that does not force Chinese output.
-Discord attachment metadata is indexed persistently per channel, independently of compressed chat text. The planner
-sees recent attachment IDs and uses the read-only `read_attachment` tool only when file contents are relevant. The tool
-accepts one ID, comma-separated IDs for a batch, an exact filename, or `latest`. It caches fetched bytes for up to two
-hours, with a 100 MiB limit per channel conversation; when space is needed, the oldest cached files are removed first.
-Metadata remains available after cache eviction or a bot restart, and an expired Discord CDN URL is refreshed from the
-original message when Discord still retains it. Stale cache files are checked every five minutes. Explicitly clearing
-chat history also clears its attachment index/cache.
+A character can assign a teammate a focused job. Independent jobs run concurrently; jobs with prerequisites
+wait for those specific results. Tool failures stop dependent work, while independent jobs can continue.
+The room retains pending work for a user answer or `$agent confirm`; `$agent cancel` drops it. Writes
+require approval of concrete arguments. Duplicate successful preparations/writes are not executed twice.
+Local handlers and allowed MCP capabilities use the same execution path.
 
-Images support JPEG, PNG, GIF, and WebP and are passed to DeepSeek, Luna, Gemini, and Claude after the tool fetches them.
-Text, source, JSON, CSV, XML, Markdown, DOCX, and text-bearing PDFs are extracted as untrusted evidence, capped at
-120,000 characters per file. Other binary formats can be cached but are reported as unsupported for content extraction.
-A focused clarification pauses the original task, so an answer with an attachment resumes that goal instead of starting
-another clarification loop. Similar-item research uses vision-derived descriptive terms followed by grounded web search;
-it does not claim pixel-level reverse-image matching or upload the picture to Google Lens.
-Naming a teammate, addressing the whole team, or having DeepSeek call one directly requires that teammate to answer.
-When DeepSeek decides it needs a teammate, its opening only tells the user that the handoff is coming. After that
-opening is visible, DeepSeek sends a separate high-effort but concise message asking Luna, Gemini, or Claude the concrete question;
-the teammate then responds. Luna, Gemini, and Claude may still volunteer a correction without a handoff when they overhear
-something materially wrong or incomplete.
-Current, volatile, obscure, or source-dependent factual requests favor grounded search during initial planning. If
-planning misses the need, DeepSeek may request one factual lookup before its opening is shown. Luna, Gemini, Claude,
-or DeepSeek may also identify a material factual gap during discussion; the bot then performs a hidden grounded search
-and asks that member to answer again from the retrieved evidence. Teammate-triggered lookups are capped at two per room
-conversation, and models must not claim a search succeeded before evidence is returned.
-Fenced `text` thought bubbles are displayed separately from spoken dialogue. A bubble followed by `SKIP` is shown by
-itself, and names inside a bubble do not count as direct address. DeepSeek includes a short bubble on normal visible
-turns; direct handoff questions omit it. For grounded answers, Luna performs a final source audit and the bot then sends
-the actual source links from tool metadata. Sources are never invented when no external retrieval occurred.
-`$agent 报数` (or `$agent roll call`) returns a deterministic four-message `1` through `4` check-in without
-spending API calls.
+Work updates show observable steps and results and remain visible without `--trace`. Short character-voiced work notes explain the relevant facts or constraints before an action. These are public explanations, not private chain-of-thought; ordinary chat can omit them. Tools can publish
+stage and elapsed-time updates. Startup notes for ordinary conversation are removed. The defaults are
+24 character steps and 24 tool actions across all characters and resumes; reaching a limit reports unfinished
+work. First turns use low effort, follow-ups with results/dependencies use medium. Each native request has
+a 35-second timeout and no transport retries; these limits do not guarantee total response time.
+`[chat timing]` logs in rotating `chat_latency.log` measure queue wait, SDK attempts, token usage, tools,
+and first visible delivery. See [architecture and diagram](docs/ARCHITECTURE.md),
+[model defaults and prices](docs/MODELS.md), and [debugging](docs/BOT_DEBUGGING.md).
+
+Attachments are persistently indexed per channel, separately from chat text. Newly shared files are fetched
+once and passed to the characters as common input preparation. Older files can be inspected with
+`read_attachment` by ID, comma-separated IDs, filename, or `latest`. Cached bytes expire after two hours,
+with a 100 MiB per-channel limit. Supported images are passed to every participating character. Text,
+source, JSON, CSV, Markdown, DOCX, and text-bearing PDFs are extracted as untrusted evidence. Explicitly
+clearing history also clears the attachment index/cache. Source-dependent requests use registered retrieval
+tools and verified evidence; the room must not claim a tool ran before it actually did.
 
 Public webpage links sent through `$chat -s`, `$agent`, a bot mention, or listen mode are read as
 untrusted evidence. A bare link is summarized; a link with a question is used to answer that
-question. Multiple links are fetched together and produce one answer with sources. Local/private-
-network URLs, oversized pages, and binary downloads are blocked.
+question. Multiple links are fetched together and produce one answer with sources. Text-bearing public PDFs are
+downloaded with a 20 MB limit and extracted locally. Links discovered in search results or document index pages remain
+available on the shared work board, allowing source-specific tasks to continue from search to the actual document
+or section before the team answers. Local/private-network URLs, oversized pages, and unsupported binaries are blocked.
 
 Tool use is conservative: ordinary conversation, writing, advice, coding help, and stable facts are
 answered directly. Web search is reserved for current information, explicit research/source requests,
@@ -347,10 +335,34 @@ or facts too obscure to answer responsibly without retrieval. A URL used only as
 is not automatically fetched. Sourced answers keep clickable citations while suppressing Discord's
 large link-preview cards.
 
-Gemini grounding is selected only when the planner determines it is useful. Google Maps grounding
+Gemini grounding is selected when a character requests a registered grounding capability. Google Maps grounding
 is currently English-only, so location queries are translated for grounding while the final answer
 follows the user's language. If Google Search grounding is unavailable or quota-limited, the agent
 falls back to keyless web retrieval and still asks Luna to synthesize the final answer.
+
+### Character diaries
+
+Each character keeps selective diary notes about the current user: explicitly shared facts, preferences, goals,
+meaningful episodes, and personal reflections on actual exchanges. Notes are short paraphrases in the character's
+own voice rather than copied messages. Characters normally save nothing unless a detail could help a future
+conversation. Stable keys let a corrected fact replace an older note, while separate episode/reflection entries
+preserve meaningful moments. Relevant notes and important facts are recalled before the character's next turn.
+
+Diaries live in the `character_diary` table in `bot_data.db`, keyed by platform, room, user ID, character, and memory
+key. Each character receives only her own notes about that user in that room. Participating characters decide on
+updates during normal response generation; there is no additional planner, summarizer, or background AI request.
+Validated hidden updates are removed before chat delivery and conversation-history persistence. Existing recent
+chat history and compressed context remain separate from the diaries; `$chat --clear` does not erase diary notes.
+The WeChat adapter currently identifies an author by chat, so its diary scope follows that chat identity.
+
+```text
+$memory DeepSeek
+$memory Luna
+$memory forget DeepSeek 12
+$memory clear Luna
+```
+
+These commands only access the caller's notes in the current room. See [diary behavior and checks](docs/DIARY_MEMORY.md).
 
 ### Switch Mode
 ```bash
@@ -379,21 +391,35 @@ $chat --models                     # List all available models
 
 Provider, model, and effort changes are available to everyone in role-play mode and are rejected in
 agent mode. DeepSeek uses the unified `deepseek-flash` model. Luna, Gemini, and Claude can be overridden with
-`AGENT_LUNA_MODEL`, `AGENT_GEMINI_MODEL`, and `AGENT_CLAUDE_MODEL` in the service environment. `AGENT_OPENING_EFFORT` defaults to `high`, while
-`AGENT_PLANNING_EFFORT` defaults to `max`; Luna owns the stateless typed-tool planner and progress reviewer so
-DeepSeek content filtering cannot erase the action plan. `low`, `medium`, `high`, and `max` are valid efforts.
-`AGENT_DEEPSEEK_EFFORT`, `AGENT_LUNA_EFFORT`, `AGENT_GEMINI_EFFORT`, and `AGENT_CLAUDE_EFFORT`
-independently configure room discussion and consultation effort. Each defaults to `high`; DeepSeek and Luna use
-provider reasoning effort, Gemini maps `max` to its highest native thinking level, and high/max Claude uses extended
-thinking. The legacy `AGENT_DISCUSSION_EFFORT` and `AGENT_EFFORT` settings remain shared
-fallbacks when a per-agent value is absent. `AGENT_GEMINI_MIN_INTERVAL_SECONDS` controls process-wide
-Gemini request pacing and defaults to `1.1` seconds.
+`AGENT_LUNA_MODEL`, `AGENT_GEMINI_MODEL`, and `AGENT_CLAUDE_MODEL` in the service environment.
+The defaults are GPT-6 Luna, Gemini 3.8 Flash, and Claude Haiku 5.5. Existing explicit
+overrides remain authoritative. See [model choices and official pricing](docs/MODELS.md).
+
+`AGENT_CONVERSATION_EFFORT` overrides room effort for all characters. Leave it unset for low initial
+turns and medium turns inspecting tool results/dependencies. `AGENT_WORK_MAX_STEPS` and
+`AGENT_WORK_MAX_ACTIONS` bound the shared run. `AGENT_GEMINI_MIN_INTERVAL_SECONDS` defaults to 1.1
+seconds. The phase/per-character effort settings retained in `.env.example` apply to legacy helper calls.
+Haiku 5.5 uses adaptive thinking with native effort settings; an explicitly pinned older Haiku continues
+using its legacy request format. Provider thinking reserves are separate from the visible response budget.
+Live answers are split at natural boundaries before Discord's 2,000-character message limit.
+
+Discord output includes a rich math presentation pass. Short `$...$` or `\(...\)` expressions are converted to
+readable Unicode where possible, while `$$...$$` and `\[...\]` display equations are rendered locally as embedded
+PNG images with Matplotlib MathText. This does not require a system LaTeX installation, and code fences are left
+untouched. Every equation uses the same fixed-width canvas, DPI, and font size so Discord applies a consistent visual
+scale; only the height grows for explicit multiline equations. Configure these with `RICH_CONTENT_MATH_WIDTH_PX`,
+`RICH_CONTENT_MATH_DPI`, `RICH_CONTENT_MATH_FONT_SIZE_PT`, and `RICH_CONTENT_MATH_MIN_HEIGHT_PX`. Discord Components
+v2 does not expose author-controlled media dimensions or DPI, so this consistency is enforced in the PNG itself.
+The original LaTeX remains in the shared transcript so later agents retain the exact mathematical form.
+The team can also request one relevant supplementary visual: `image_search` locates and attributes an existing image,
+while `generate_image` creates a new illustration. Downloaded or generated images are normalized, embedded in response
+order, and added to the active shared vision context before later teammates speak.
 
 `$draw <description>` uses the independent draw configuration. Gemini is the default provider with
 `gemini-2.5-flash-image` (Nano Banana), while OpenAI defaults to `gpt-image-2.5-sunburst`. Select a request explicitly
 with `$draw -p openai -m gpt-image-2.5-flare <description>` or `$draw -p gemini -m <model> <description>`. Use
-`$draw --models` for live catalogs and `$draw --status` for configured defaults. Attached images and images on the
-replied-to message are passed as visual references.
+`$draw --models` to merge live provider catalogs with the verified current model set, and `$draw --status` for
+configured defaults. Attached images and images on the replied-to message are passed as visual references.
 
 Configure this subsystem with `DRAW_DEFAULT_PROVIDER`, `DRAW_GEMINI_MODEL`, `DRAW_OPENAI_MODEL`, and
 `DRAW_OUTPUT_DIR`. OpenAI output can also use `DRAW_OPENAI_OUTPUT_FORMAT`, `DRAW_OPENAI_QUALITY`, and
@@ -435,6 +461,31 @@ $chat -c                           # Clear chat history
 ```
 
 ## Configuration Files
+
+### MCP tool servers
+
+Optional MCP servers extend the same governed tool registry used by native bot actions. Both `stdio` and Streamable
+HTTP transports are supported. Tools are namespaced as `mcp__<server>__<tool>`, preserve their complete JSON Schema,
+and appear in `$agent tools` after startup discovery. Server tools are disabled unless `allow_tools` explicitly lists
+them (or contains `"*"`). Unknown risks default to `write`; set each reviewed tool to `read_only`, `prepare`, or
+`write`. `write` tools always require Discord confirmation.
+
+```yaml
+MCP_SERVERS:
+    records:
+        transport: streamable_http
+        url: http://127.0.0.1:9000/mcp
+        allow_tools: [lookup]
+        risk:
+            lookup: read_only
+        connect_timeout_seconds: 15
+        timeout_seconds: 30
+```
+
+For a local subprocess, use `transport: stdio` with `command` and `args`. The subprocess receives only basic process
+variables by default, not the bot's API keys. Add individual names to `env_passthrough` only when that trusted server
+requires them. The equivalent environment override is `MCP_SERVERS_JSON`; keep credentials in the uncommitted runtime
+environment rather than checked-in YAML. Restart the service after changing MCP configuration.
 
 ### llm_config.json
 Contains AI prompts and fallback model lists:

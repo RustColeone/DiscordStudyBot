@@ -1,16 +1,22 @@
+from io import BytesIO
 import ipaddress
 from html.parser import HTMLParser
 import socket
 from urllib.parse import urljoin, urlparse
 
+from pypdf import PdfReader
 import requests
 
 
 MAX_PAGE_BYTES = 1_000_000
+MAX_PDF_BYTES = 20_000_000
 MAX_PAGE_CHARS = 30_000
+MAX_PDF_CHARS = 60_000
+MAX_PAGE_LINKS = 100
 MAX_REDIRECTS = 3
 SUPPORTED_CONTENT_TYPES = {
     "application/json",
+    "application/pdf",
     "application/xhtml+xml",
     "text/html",
     "text/plain",
@@ -26,20 +32,31 @@ class _ReadableHTMLParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._ignored_depth = 0
         self._title_depth = 0
+        self._link_href = None
+        self._link_parts = []
         self.title_parts = []
         self.text_parts = []
+        self.links = []
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style", "noscript", "svg", "template"}:
             self._ignored_depth += 1
         if tag == "title":
             self._title_depth += 1
+        if tag == "a":
+            self._link_href = dict(attrs).get("href")
+            self._link_parts = []
 
     def handle_endtag(self, tag):
         if tag in {"script", "style", "noscript", "svg", "template"} and self._ignored_depth:
             self._ignored_depth -= 1
         if tag == "title" and self._title_depth:
             self._title_depth -= 1
+        if tag == "a" and self._link_href:
+            label = " ".join(self._link_parts).strip()
+            self.links.append((label, self._link_href))
+            self._link_href = None
+            self._link_parts = []
 
     def handle_data(self, data):
         if self._ignored_depth:
@@ -50,6 +67,8 @@ class _ReadableHTMLParser(HTMLParser):
         self.text_parts.append(text)
         if self._title_depth:
             self.title_parts.append(text)
+        if self._link_href:
+            self._link_parts.append(text)
 
 
 def _validated_url(url: str) -> str:
@@ -106,37 +125,59 @@ def fetch_web_page(url: str) -> dict:
 
             response.raise_for_status()
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-            if content_type not in SUPPORTED_CONTENT_TYPES:
+            is_pdf = content_type == "application/pdf" or urlparse(current_url).path.lower().endswith(".pdf")
+            if content_type not in SUPPORTED_CONTENT_TYPES and not is_pdf:
                 raise WebPageUnavailable(
                     f"Unsupported page type: {content_type or 'unknown'}"
                 )
+            max_bytes = MAX_PDF_BYTES if is_pdf else MAX_PAGE_BYTES
             content_length = response.headers.get("Content-Length")
-            if content_length and int(content_length) > MAX_PAGE_BYTES:
+            if content_length and int(content_length) > max_bytes:
                 raise WebPageUnavailable("The page is too large to read")
 
             body = bytearray()
             for chunk in response.iter_content(8192):
                 body.extend(chunk)
-                if len(body) > MAX_PAGE_BYTES:
+                if len(body) > max_bytes:
                     raise WebPageUnavailable("The page is too large to read")
-            encoding = response.encoding or "utf-8"
-            decoded = bytes(body).decode(encoding, errors="replace")
-            if content_type in {"text/html", "application/xhtml+xml"}:
+            if is_pdf:
+                try:
+                    reader = PdfReader(BytesIO(body))
+                    title = str((reader.metadata or {}).get("/Title") or "").strip()
+                    parts = []
+                    extracted_chars = 0
+                    for page in reader.pages:
+                        page_text = page.extract_text() or ""
+                        parts.append(page_text)
+                        extracted_chars += len(page_text)
+                        if extracted_chars >= MAX_PDF_CHARS:
+                            break
+                    text = "\n\n".join(parts)[:MAX_PDF_CHARS]
+                    links = []
+                except Exception as error:
+                    raise WebPageUnavailable(f"The PDF could not be read: {error}") from error
+            else:
+                encoding = response.encoding or "utf-8"
+                decoded = bytes(body).decode(encoding, errors="replace")
+                title = ""
+            if not is_pdf and content_type in {"text/html", "application/xhtml+xml"}:
                 parser = _ReadableHTMLParser()
                 parser.feed(decoded)
                 title = " ".join(parser.title_parts).strip()
                 text = "\n".join(parser.text_parts)
-            else:
-                title = ""
+                links = _public_page_links(parser.links, current_url)
+            elif not is_pdf:
                 text = decoded
+                links = []
             text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
             if not text:
                 raise WebPageUnavailable("The page did not contain readable text")
             return {
                 "url": current_url,
                 "title": title or parsed_page_title(current_url),
-                "text": text[:MAX_PAGE_CHARS],
+                "text": text[:MAX_PDF_CHARS if is_pdf else MAX_PAGE_CHARS],
                 "content_type": content_type,
+                "links": links,
             }
         finally:
             response.close()
@@ -147,3 +188,18 @@ def fetch_web_page(url: str) -> dict:
 def parsed_page_title(url: str) -> str:
     parsed = urlparse(url)
     return parsed.hostname or "Linked page"
+
+
+def _public_page_links(raw_links, page_url: str) -> list[dict]:
+    links = []
+    seen_urls = set()
+    for label, href in raw_links:
+        absolute_url = urljoin(page_url, href)
+        parsed = urlparse(absolute_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or absolute_url in seen_urls:
+            continue
+        seen_urls.add(absolute_url)
+        links.append({"title": label or absolute_url, "url": absolute_url})
+        if len(links) >= MAX_PAGE_LINKS:
+            break
+    return links

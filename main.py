@@ -1,10 +1,16 @@
 import argparse
+import sys
 
 from app.bot_app import BotApplication
 from services.config_service import load_config
 
 
 def main() -> None:
+    # systemd captures pipes, so Python otherwise buffers chat/debug prints for long periods.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(description="Run the bot with a selected platform adapter.")
     parser.add_argument("--mode", choices=["discord", "wechat"], default="discord", help="Adapter mode to run")
     args = parser.parse_args()

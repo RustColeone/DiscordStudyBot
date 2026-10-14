@@ -18,6 +18,22 @@ CREATOR_ONLY_MODE: false
 # Private context injected only for authenticated creator chat requests.
 CREATOR_PROMPT:
 TIMEZONE: America/Los_Angeles
+# Optional BCP-47 regional label for agent date/number interpretation; replies still follow the user.
+AGENT_LOCALE: en-US
+AGENT_WORK_MAX_STEPS: 24
+AGENT_WORK_MAX_ACTIONS: 24
+
+# Optional MCP servers. No tool is exposed unless it is explicitly allowlisted.
+MCP_SERVERS: {}
+# Example:
+# MCP_SERVERS:
+#   local_tools:
+#     transport: stdio
+#     command: /absolute/path/to/python
+#     args: [/absolute/path/to/server.py]
+#     allow_tools: [lookup]
+#     risk:
+#       lookup: read_only
 
 # AI API Keys
 OPENAI_API_KEY: your_openai_api_key_here

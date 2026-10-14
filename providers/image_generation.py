@@ -63,6 +63,10 @@ def discover_models(provider: str | None = None) -> tuple[dict[str, list[str]], 
             catalogs[name] = implementation.list_image_models()
         except Exception as error:
             print(f"{name.title()} image model discovery failed: {error}")
+            fallback_models = set(implementation.KNOWN_IMAGE_MODELS)
+            if implementation.IMAGE_MODEL:
+                fallback_models.add(implementation.IMAGE_MODEL)
+            catalogs[name] = sorted(fallback_models)
             detail = str(error).lower()
             errors[name] = "not configured" if "not configured" in detail else "provider query failed; check bot logs"
     return catalogs, errors

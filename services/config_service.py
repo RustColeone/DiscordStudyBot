@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Dict
 
@@ -22,6 +23,10 @@ ENV_OVERRIDE_KEYS = [
     "CREATOR_ONLY_MODE",
     "CREATOR_PROMPT",
     "TIMEZONE",
+    "AGENT_LOCALE",
+    "AGENT_WORK_MAX_STEPS",
+    "AGENT_WORK_MAX_ACTIONS",
+    "MCP_SERVERS_JSON",
     "WECHAT_CHAT",
     "WECHAT_IDLE_CHAT",
     "WECHAT_BROADCAST_CHAT",
@@ -38,6 +43,9 @@ def load_config(config_path: str = "config.yml") -> Dict:
         env_value = os.getenv(key)
         if env_value:
             config[key] = env_value
+
+    if config.get("MCP_SERVERS_JSON"):
+        config["MCP_SERVERS"] = json.loads(config["MCP_SERVERS_JSON"])
 
     return config
 

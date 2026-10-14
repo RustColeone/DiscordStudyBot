@@ -180,6 +180,30 @@ class DiscordAccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([len(chunk) for chunk in chunks], [2000, 2000, 500])
         self.assertEqual("".join(chunks), content)
 
+    def test_prefers_paragraph_boundaries_for_long_responses(self):
+        content = "a" * 1200 + "\n\n" + "b" * 1200
+
+        chunks = self.adapter._split_message(content)
+
+        self.assertEqual([len(chunk) for chunk in chunks], [1202, 1200])
+        self.assertEqual("".join(chunks), content)
+
+    async def test_live_channel_send_splits_long_room_turns(self):
+        first_message = object()
+        channel = SimpleNamespace(send=AsyncMock(side_effect=[first_message, object()]))
+        self.adapter.client = SimpleNamespace(
+            user=self.bot_user,
+            get_channel=lambda _channel_id: channel,
+        )
+
+        result = await self.adapter.send_channel_message("100", "x" * 2500)
+
+        self.assertIs(result, first_message)
+        self.assertEqual(
+            [len(call.args[0]) for call in channel.send.await_args_list],
+            [2000, 500],
+        )
+
     async def test_source_response_suppresses_discord_embeds(self):
         channel = SimpleNamespace(send=AsyncMock())
 
@@ -192,6 +216,43 @@ class DiscordAccessTests(unittest.IsolatedAsyncioTestCase):
             "Answer\nhttps://example.com",
             suppress_embeds=True,
         )
+
+    async def test_live_progress_uses_incoming_dm_even_when_discord_cache_misses(self):
+        native = SimpleNamespace(
+            content="$chat -s hello", guild=None,
+            channel=SimpleNamespace(id="100", send=AsyncMock(return_value=object())),
+            author=SimpleNamespace(id=7, name="User", display_name="User", bot=False),
+            created_at=None, mentions=[], attachments=[],
+        )
+        self.adapter.client.get_channel = lambda _: None
+        self.adapter.client.fetch_channel = AsyncMock()
+        self.adapter._to_incoming_message(native)
+        await self.adapter.send_channel_message("100", "Working...")
+        await self.adapter.send_channel_response("100", BotResponse(text="**Luna**\nHello"))
+        self.assertEqual(native.channel.send.await_count, 2)
+        self.adapter.client.fetch_channel.assert_not_awaited()
+
+    async def test_uncached_channel_is_fetched_once_for_later_updates(self):
+        channel = SimpleNamespace(send=AsyncMock(return_value=object()))
+        self.adapter.client.get_channel = lambda _: None
+        self.adapter.client.fetch_channel = AsyncMock(return_value=channel)
+        await self.adapter.send_channel_message("100", "Working...")
+        await self.adapter.send_channel_message("100", "Finished.")
+        self.adapter.client.fetch_channel.assert_awaited_once_with(100)
+
+    async def test_display_math_is_delivered_between_surrounding_text(self):
+        channel = SimpleNamespace(send=AsyncMock(side_effect=[object(), object(), object()]))
+
+        with patch("adapters.discord_adapter.discord.File", return_value=object()):
+            await self.adapter._send_responses(channel, [
+                BotResponse(text="Description.\n\n$$Z_L = Z_S^*$$\n\nMore description."),
+            ])
+
+        calls = channel.send.await_args_list
+        self.assertEqual(calls[0].args[0], "Description.\n\n")
+        self.assertIsNone(calls[1].args[0])
+        self.assertIn("file", calls[1].kwargs)
+        self.assertEqual(calls[2].args[0], "\n\nMore description.")
 
     async def test_successful_attachment_upload_deletes_temporary_file(self):
         descriptor, path = tempfile.mkstemp(suffix=".mp4")

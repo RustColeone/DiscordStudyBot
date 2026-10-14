@@ -34,6 +34,31 @@ EFFORT_PROFILES: Dict[str, Dict[str, object]] = {
     },
 }
 
+RESPONSE_DEPTH_PROFILES: Dict[str, Dict[str, object]] = {
+    "concise": {
+        "max_tokens": 1000,
+        "instruction": "Keep the answer deliberately concise while still completing the request.",
+    },
+    "standard": {
+        "max_tokens": 3000,
+        "instruction": "Use the natural amount of detail needed for a complete ordinary answer.",
+    },
+    "detailed": {
+        "max_tokens": 8000,
+        "instruction": (
+            "Develop the answer thoroughly with the structure, explanation, examples, and edge cases "
+            "needed by the request. Do not compress it into a few sentences."
+        ),
+    },
+    "exhaustive": {
+        "max_tokens": 16000,
+        "instruction": (
+            "Provide the explicitly requested comprehensive treatment. Preserve useful detail and organize "
+            "the response for navigation rather than shortening it to fit an ordinary chat reply."
+        ),
+    },
+}
+
 
 def normalize_effort(value: str) -> str:
     normalized = str(value or "").lower()
@@ -54,3 +79,16 @@ def planning_attempts_for_effort(value: str) -> int:
 
 def instruction_for_effort(value: str) -> str:
     return str(EFFORT_PROFILES[normalize_effort(value)]["instruction"])
+
+
+def normalize_response_depth(value: str) -> str:
+    normalized = str(value or "").lower()
+    return normalized if normalized in RESPONSE_DEPTH_PROFILES else "standard"
+
+
+def max_tokens_for_response_depth(value: str) -> int:
+    return int(RESPONSE_DEPTH_PROFILES[normalize_response_depth(value)]["max_tokens"])
+
+
+def instruction_for_response_depth(value: str) -> str:
+    return str(RESPONSE_DEPTH_PROFILES[normalize_response_depth(value)]["instruction"])

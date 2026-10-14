@@ -13,7 +13,6 @@ class ParsedReminder:
     remind_at: datetime
     message: str
 
-
 def resolve_timezone_name(configured_name: Optional[str]) -> str:
     return configured_name or get_localzone_name()
 

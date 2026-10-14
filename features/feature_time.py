@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+import math
 
 from assets import ascii
 import pytz
@@ -87,6 +88,62 @@ class TimeFeature:
 
         reminder_id = self._save_reminder(message, parsed.remind_at, parsed.message)
         return [BotResponse(text=self._confirmation(reminder_id, parsed.remind_at))]
+
+    def create_structured_reminder(
+        self,
+        app,
+        message: IncomingMessage,
+        *,
+        reminder_text: str,
+        schedule_type: str,
+        delay_value: float = None,
+        delay_unit: str = None,
+        remind_at: str = None,
+    ) -> HandlerResult:
+        timezone_name = resolve_timezone_name(app.config.get("TIMEZONE"))
+        local_timezone = pytz.timezone(timezone_name)
+        request_time = message.created_at
+        if request_time.tzinfo is None:
+            request_time = request_time.replace(tzinfo=timezone.utc)
+
+        if schedule_type == "relative":
+            multipliers = {
+                "seconds": 1,
+                "minutes": 60,
+                "hours": 3600,
+                "days": 86400,
+                "weeks": 604800,
+            }
+            if (
+                isinstance(delay_value, bool)
+                or not isinstance(delay_value, (int, float))
+                or not math.isfinite(delay_value)
+                or delay_value <= 0
+                or delay_unit not in multipliers
+                or remind_at is not None
+            ):
+                raise ValueError("invalid relative reminder schedule")
+            remind_time = (
+                request_time.astimezone(timezone.utc)
+                + timedelta(seconds=delay_value * multipliers[delay_unit])
+            ).astimezone(local_timezone)
+        elif schedule_type == "absolute":
+            if delay_value is not None or delay_unit is not None or not remind_at:
+                raise ValueError("invalid absolute reminder schedule")
+            try:
+                parsed_time = datetime.fromisoformat(remind_at.replace("Z", "+00:00"))
+            except ValueError as error:
+                raise ValueError("remind_at must be an ISO 8601 datetime") from error
+            if parsed_time.tzinfo is None or parsed_time.utcoffset() is None:
+                raise ValueError("remind_at must include a timezone offset")
+            remind_time = parsed_time.astimezone(local_timezone)
+        else:
+            raise ValueError("unknown reminder schedule type")
+
+        if remind_time <= request_time.astimezone(local_timezone):
+            raise ValueError("reminder time must be after the request time")
+        reminder_id = self._save_reminder(message, remind_time, reminder_text.strip())
+        return [BotResponse(text=self._confirmation(reminder_id, remind_time))]
 
     def _save_reminder(self, message: IncomingMessage, remind_at: datetime, reminder_text: str) -> int:
         platform = "wechat" if message.guild_name == "WeChat" else "discord"

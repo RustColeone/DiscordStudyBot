@@ -24,7 +24,10 @@ class GeminiImageTests(unittest.TestCase):
         with patch.object(gemini_image, "client", api_client):
             models = gemini_image.list_image_models()
 
-        self.assertEqual(models, ["gemini-2.5-flash-image", "imagen-4.0-generate-001"])
+        self.assertIn("gemini-2.5-flash-image", models)
+        self.assertIn("gemini-3.1-flash-image", models)
+        self.assertIn("imagen-4.0-generate-001", models)
+        self.assertNotIn("gemini-3.8-flash-lite", models)
 
     def test_generates_image_file_with_configured_model(self):
         api_client = Mock()
@@ -205,6 +208,8 @@ class DrawFeatureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(responses[0].attachment.path, "/tmp/generated.png")
         self.assertTrue(responses[0].attachment.delete_after_send)
         self.assertEqual(responses[0].metadata["generated_by"], "Gemini")
+        self.assertEqual(responses[0].metadata["tool_images"][0]["path"], "/tmp/generated.png")
+        self.assertEqual(responses[0].metadata["tool_images"][0]["origin"], "generated")
 
     async def test_draw_requires_a_description(self):
         self.message.content = "$draw"
@@ -244,6 +249,25 @@ class DrawFeatureTests(unittest.IsolatedAsyncioTestCase):
         discover.assert_called_once_with(None)
         self.assertIn("gemini-2.5-flash-image", responses[0].text)
         self.assertIn("gpt-image-2.5-flare", responses[0].text)
+
+    async def test_draw_lists_known_models_when_live_lookup_fails(self):
+        self.message.content = "$draw --models"
+        with patch.object(
+            gemini_image,
+            "list_image_models",
+            side_effect=RuntimeError("Gemini image generation is not configured"),
+        ), patch.object(
+            openai_image,
+            "list_image_models",
+            side_effect=RuntimeError("OpenAI image generation is not configured"),
+        ):
+            responses = await self.feature.handle(None, self.message)
+
+        self.assertIn("gemini-2.5-flash-image", responses[0].text)
+        self.assertIn("gemini-3.1-flash-image", responses[0].text)
+        self.assertIn("gpt-image-2.5-sunburst", responses[0].text)
+        self.assertIn("gpt-image-2.5-flare", responses[0].text)
+        self.assertIn("Live lookup unavailable: not configured.", responses[0].text)
 
     async def test_direct_draw_reports_generation_failure(self):
         with patch.object(

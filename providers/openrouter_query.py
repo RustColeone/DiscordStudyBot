@@ -4,6 +4,7 @@ from openai import OpenAI
 
 from services.config_service import optional_secret
 from services.effort import normalize_effort
+from services.request_timing import trace_provider
 
 
 BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
@@ -52,6 +53,7 @@ def create_completion(
     effort: str = "high",
     max_tokens: int = 2000,
     plugins: list[dict] | None = None,
+    request_timeout: float | None = None,
 ):
     extra_body = {
         "reasoning": {
@@ -61,11 +63,16 @@ def create_completion(
     }
     if plugins:
         extra_body["plugins"] = plugins
-    return _require_client().chat.completions.create(
+    request_client = _require_client()
+    if request_timeout is not None:
+        request_client = request_client.with_options(timeout=request_timeout, max_retries=0)
+    from services.room_protocol import structured_room
+    return trace_provider("OpenRouter")(request_client.chat.completions.create)(
         model=_require_model(model),
         messages=messages,
         max_tokens=max_tokens,
         extra_body=extra_body,
+        **({"response_format": {"type": "json_object"}} if structured_room.get() else {}),
     )
 
 
