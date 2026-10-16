@@ -200,6 +200,18 @@ class LegacyAgentFeatureTests(unittest.IsolatedAsyncioTestCase):
         save_exchange.assert_called_once()
         self.assertIn("Gemini", save_exchange.call_args.args[1])
 
+    async def test_generate_image_tool_can_select_openai_when_user_asks_for_gpt(self):
+        draw = StubDrawFeature()
+        agent = AgentFeature(StubTimeFeature(), StubFeature(), StubSearchFeature(), StubFeature(), draw_feature=draw)
+        tool = agent.registry.get("generate_image")
+        self.assertEqual(tool.parameters["provider"]["enum"], ["gemini", "openai"])
+        agent.registry.validate_arguments(tool, {"prompt": "dragon girl", "provider": "openai"})
+        with self.assertRaises(ValueError):
+            agent.registry.validate_arguments(tool, {"prompt": "dragon girl", "provider": "midjourney"})
+        await agent._generate_image(self.app, self._message("draw"), {"prompt": "dragon girl", "provider": "openai"})
+        await agent._generate_image(self.app, self._message("draw"), {"prompt": "dragon girl"})
+        self.assertEqual([request[2] for request in draw.requests[-2:]], [{"provider": "openai"}, {"provider": "gemini"}])
+
     async def test_lists_reminders_from_multilingual_plan(self):
         message = self._message("$agent 查看所有提醒")
         plan = [{"tool": "list_reminders", "arguments": {}}]
