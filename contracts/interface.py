@@ -13,10 +13,12 @@ from contracts.stores import Store
 
 @dataclass(frozen=True)
 class Operation:
-    """A platform-specific admin action (for example `login`) the owner can run through the core.
+    """A platform-specific action (for example `login`, or playing music) run through the core.
 
-    It becomes the owner-only capability `<interface>.<name>`; `command`, if set, also makes it
-    available as `$<command> <text>` with the text passed as `command_argument`.
+    It becomes the capability `<interface>.<name>`; `command`, if set, also makes it available as
+    `$<command> <text>` with the text passed as `command_argument`. Operations are owner-only unless
+    `owner_only=False`; a public operation must act only on the calling conversation
+    (`context.address`), never on others.
     """
 
     name: str
@@ -27,6 +29,7 @@ class Operation:
     command: str | None = None
     command_argument: str | None = None
     timeout_s: float = 120.0
+    owner_only: bool = True
 
 
 class InterfacePort(Protocol):

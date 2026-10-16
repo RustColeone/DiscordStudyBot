@@ -271,8 +271,9 @@ conversation carry `data["origin_address"]`.
 ### Operations
 
 `operate(operation, arguments, context)` receives the same `ToolContext` as a capability: who asked
-(`address`, `sender`), `run_id`, a `workspace` and `progress`. `operations` are platform-specific admin actions (login QR, account status, list chats). Each becomes
-an owner-only capability named `<interface name>.<operation>`; if your extension also declares a
+(`address`, `sender`), `run_id`, a `workspace` and `progress`. `operations` are platform-specific actions (login QR, account status, list chats, playing music). Each becomes
+a capability named `<interface name>.<operation>`, owner-only unless `owner_only=False`; a public
+operation must only act on the calling conversation (`context.address`); if your extension also declares a
 capability with that exact name, loading fails. `risk` works as for capabilities (`write` needs
 approval unless pre-approved); `command`/`command_argument` add a `$command`; `timeout_s` defaults to
 120. `operate` returns a `ToolResult` (attach a QR image in `files`). For results that arrive later

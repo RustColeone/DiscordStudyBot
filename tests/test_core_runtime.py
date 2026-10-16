@@ -470,6 +470,14 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hey", iface(core, "owner").texts("dm"))
         self.assertIn(("out", "hey"), [(item.direction, item.text) for item in core.tank.recent_messages("owner:dm")])
 
+    async def test_public_interface_operations_are_open_to_everyone(self):
+        core = await self.core()
+        await iface(core).say("$where", conversation="guest")
+        await iface(core).say("$echoop x", conversation="guest2")
+        await settle(core)
+        self.assertEqual(iface(core).texts("guest"), ["here: chat:guest"])
+        self.assertIn("only to the owner", iface(core).texts("guest2")[0])
+
     async def test_core_rule_capability_validates_and_changes_admission(self):
         core = await self.core({"assignments": {"*": {"preapprove": ["core.*"]}}})
         chat = iface(core)

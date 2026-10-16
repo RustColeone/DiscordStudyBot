@@ -137,5 +137,6 @@ def _operation_capability(gateway: "GatewayLink", interface: str, operation) -> 
     async def run(arguments, context) -> ToolResult:
         return await gateway.operate(interface, operation.name, arguments, context)
     return Capability(f"{interface}.{operation.name}", operation.description, run, dict(operation.parameters),
-                      tuple(operation.required), operation.risk, owner_only=True, command=operation.command,
+                      tuple(operation.required), operation.risk, owner_only=operation.owner_only,
+                      command=operation.command,
                       command_argument=operation.command_argument, timeout_s=operation.timeout_s)
