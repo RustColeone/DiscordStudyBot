@@ -18,6 +18,7 @@ import time
 import uuid
 
 from .database_pages import DatabaseSnapshotError
+from .images import ImageUnavailable, extract as extract_image, find_image, load_image_key
 from .native import NativeSchemaError, WeChatNativeReader
 
 HELPER = Path(__file__).resolve().parent / 'desktop_helper.py'
@@ -68,6 +69,7 @@ class WeChatTransport:
         self.own_message_ids = deque(maxlen=200)
         self._receipt_before = {}
         self._quote_targets = {}
+        self._image_key = False  # loaded on first use; None when no key file exists
 
     @property
     def account_id(self):
@@ -240,6 +242,21 @@ class WeChatTransport:
             items = await self._read(self.reader.read_chat, chat, limit)
             self.log('native_read', duration_s=round(time.monotonic()-started, 4), messages=len(items))
             return items
+
+    async def image(self, chat_id, md5):
+        """A decrypted local copy of one received image, or None when it is unavailable."""
+        def extract():
+            source = find_image(self.reader.root.parent, chat_id.removeprefix('native:'), md5)
+            if source is None:
+                return None
+            if self._image_key is False:
+                self._image_key = load_image_key(self.settings['image_key'])
+            return extract_image(source, Path(self.settings['images_dir']), self._image_key)
+        try:
+            return await self._read(extract)
+        except (ImageUnavailable, OSError, ValueError) as error:
+            self.log('image_unavailable', error=str(error)[:200])
+            return None
 
     def chat_busy(self, chat_id):
         """True while this chat's send/receipt correlation holds its lock; polling should skip it, not wait.

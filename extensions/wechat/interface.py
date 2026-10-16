@@ -20,6 +20,7 @@ from contracts import (Address, Delivery, Display, FileRef, Interface, Operation
                        ToolResult)
 
 from .handover import legacy_cursors
+from .images import mime_for
 from .native import strip_mention
 from .transport import SendFailed, WeChatTransport
 
@@ -324,10 +325,16 @@ class WeChatInterface(Interface):
             kind = "other"
         mentioned = True if not group else item.get("mentions_me")
         sender = Sender(item.get("sender_id") or "unknown", item.get("sender_name") or "")
+        files = ()
+        if kind == "image" and item.get("image_md5") and self._admitted(address):
+            path = await self.transport.image(chat["id"], item["image_md5"])
+            if path is not None:
+                files = (FileRef(str(path), Path(path).name, mime_for(Path(path)), Path(path).stat().st_size),)
         if kind != "text" and not self.settings["submit_media"]:
-            if self._admitted(address) and (not group or mentioned or self.settings["observe_chatter"]):
+            # Images are kept even unaddressed: people send a picture first and ask about it next.
+            if self._admitted(address) and (not group or mentioned or files or self.settings["observe_chatter"]):
                 await self.port.observe(address, text, direction="in", sender=sender, kind=kind,
-                                        message_id=item["id"], at=item.get("timestamp"))
+                                        message_id=item["id"], at=item.get("timestamp"), files=files)
             return True
         if not text.strip():
             return False
@@ -338,6 +345,7 @@ class WeChatInterface(Interface):
             id=item["id"], address=address, sender=sender, text=text, received_at=float(item.get("timestamp") or 0),
             is_direct=not group, mentions_me=mentioned, reply_to=quoted["id"] if quoted else None,
             quoted_text=(quoted.get("text") or "")[:1000] if quoted else "", kind=kind, display=self._display(group),
+            files=files,
             extra={"chat_name": chat["name"], "server_id": str(item.get("server_id") or "")})
         result = await self.port.submit(request)
         if result and group:
