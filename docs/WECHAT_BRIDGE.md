@@ -552,3 +552,23 @@ completes inline uploads of this size remains unverified.
 - WeChat itself re-compresses inline videos before uploading (`wxutility`, about 3 minutes at 1.5
   cores for 385 s of 1280x548 video), then uploads at roughly 1.6 Mbit/s. The 80.8 MiB stream-copied
   file reached a server ID about 9.5 minutes after Send.
+
+### Long requests and image tools (October 15, 01:03)
+
+`@⚡BeastIX 那你用gpt画一下这个：…` (2,159 characters, 33 lines) was accepted, but its quoted reply
+failed with `The recipient could not be scrolled into view`. The click helper required a list item to
+fit entirely inside the visible list, which a bubble taller than the chat viewport never can. A failed
+spoken update stops the worker, so the drawing tool never ran. Tall items are now accepted once a
+clear slice is visible, and the click point is clamped into that visible slice of the same bubble.
+
+`generate_image` was fixed to Gemini. It now takes an optional `provider` (`gemini` default,
+`openai` when the user explicitly asks for GPT/ChatGPT/OpenAI/DALL-E), the same choice as
+`$draw -p`. The resent request quoted the long trigger, drew through OpenAI and delivered the image.
+
+That run exposed two follow-on faults. A delivered tool file still carried `Retained artifact ID` in
+its summary, so the model tried `deliver_prepared_file`, got "not retained", and wrongly told the
+group the image had failed. The ID now appears only when delivery did not succeed. Repeating a
+completed write or preparation then stopped the loop and posted the fixed English sentence "That
+state-changing action already succeeded" to the group. Like the shared room, the loop now reports
+the earlier success to the model (`already_completed`) without re-running it; a second repeat ends
+the run quietly. Other `AgentLoop` stop messages are still fixed English text.
