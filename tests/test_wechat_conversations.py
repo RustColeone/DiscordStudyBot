@@ -217,6 +217,19 @@ class WeChatReplySupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.generator.assert_not_awaited()
         self.transport.send.assert_not_awaited()
 
+    async def test_transport_verified_media_is_own_echo_not_unsupported_activity(self):
+        await self.supervisor.configure('owner', 'alice', agent_enabled=True, whitelisted=True,
+                                        chat_kind='group', notify_channel='discord-room')
+        await self.supervisor.baseline('owner', 'alice', [])
+        self.transport.own_message_ids = ['native:own-video']
+        own = {**message('native:own-video', '[Video]', outgoing=True, kind='video'), 'position': [5, 5]}
+        await self.supervisor.observe('owner', 'alice', [own])
+        self.assertNotIn('unsupported_activity', [e['code'] for e in self.supervisor.status()['errors']])
+        self.assertFalse([c for c in self.notify.await_args_list if c.args[0]['type'] == 'reply_skipped'])
+        foreign = {**message('native:manual-video', '[Video]', outgoing=True, kind='video'), 'position': [6, 6]}
+        await self.supervisor.observe('owner', 'alice', [own, foreign])
+        self.assertTrue([c for c in self.notify.await_args_list if c.args[0]['type'] == 'reply_skipped'])
+
     async def test_real_new_manual_reply_still_cancels_with_native_cursor(self):
         await self.enable()
         baseline={**message('native:old'),'position':[10,10]}

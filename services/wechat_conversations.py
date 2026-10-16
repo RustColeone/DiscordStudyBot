@@ -431,7 +431,8 @@ class WeChatReplySupervisor:
                 if floor is not None and position <= floor:
                     continue
                 self._positions[key] = max(position,self._positions.get(key,position))
-            echo = self.store.is_agent_echo(*key, message)
+            echo = (self.store.is_agent_echo(*key, message)
+                    or (message.get('outgoing') is True and message.get('id') in getattr(self.transport, 'own_message_ids', ())))
             if not self.store.record(*key, message):
                 continue
             if echo:

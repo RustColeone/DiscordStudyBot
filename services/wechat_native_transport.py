@@ -1,10 +1,11 @@
 """Native database reads with the existing serialized, checked desktop writer."""
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 import time
 
 from services.wechat_desktop import WeChatDesktopTransport
+from services.wechat_database_pages import DatabaseSnapshotError
 from services.wechat_native import NativeSchemaError, WeChatNativeReader
 from services.request_timing import record
 
@@ -21,6 +22,8 @@ class WeChatNativeTransport(WeChatDesktopTransport):
         self._account_cache = None
         self._account_checked = -1e9
         self._chat_locks = defaultdict(asyncio.Lock)
+        # Receipts verified by this transport, so observation never mistakes them for manual activity.
+        self.own_message_ids = deque(maxlen=200)
         self._receipt_before = {}
         self._quote_targets = {}
         self._bindings_loaded = False
@@ -77,6 +80,14 @@ class WeChatNativeTransport(WeChatDesktopTransport):
             record('wechat_native_read', duration_s=round(time.monotonic()-started,4), messages=len(items))
             return items
 
+    def chat_busy(self, chat_id):
+        """True while this chat's send/receipt correlation holds its lock; polling should skip it, not wait."""
+        try:
+            chat = self.reader.resolve(chat_id)
+        except NativeSchemaError:
+            return False
+        return self._chat_locks[chat['native_id']].locked()
+
     def _desktop_target(self, target):
         chat = self.reader.resolve(target)
         # UI selection still uses names. Refuse a duplicate visible label even
@@ -114,8 +125,19 @@ class WeChatNativeTransport(WeChatDesktopTransport):
         before = self._receipt_before[chat['native_id']]
         # Never retry Send. Wait only for its committed native outgoing row.
         deadline = time.monotonic()+(600 if text is None else 3)
+        interval = 1 if text is None else .1
+        transient_errors = 0
         while True:
-            latest = self.reader.read_messages(chat['id'],100,fresh=True)
+            try:
+                latest = self.reader.read_messages(chat['id'],100,fresh=True)
+            except DatabaseSnapshotError:
+                # WeChat rewrites its WAL continuously while uploading; one busy
+                # snapshot must not abandon an upload that is still progressing.
+                transient_errors += 1
+                if time.monotonic() >= deadline:
+                    return {'verified':False,'reason':'native_receipt_unreadable','desktop_verified':bool(receipt.get('verified'))}
+                await asyncio.sleep(interval)
+                continue
             candidates = [item for item in latest if item['id'] not in before and item['outgoing'] is True
                           and (item['text']==text if text is not None else item['kind']!='text')]
             if text is None:
@@ -127,10 +149,13 @@ class WeChatNativeTransport(WeChatDesktopTransport):
             if quoted:
                 candidates = [item for item in candidates if item.get('reply_to_server_id')==quoted['server_id']]
             if len(candidates) == 1:
+                if transient_errors:
+                    record('wechat_receipt_transient_reads', count=transient_errors)
+                self.own_message_ids.append(candidates[0]['id'])
                 return {**receipt,'verified':True,'message_id':candidates[0]['id'],'read_backend':self.read_backend}
             if len(candidates)>1 or time.monotonic() >= deadline:
                 return {'verified':False,'reason':'native_outgoing_receipt_ambiguous','desktop_verified':bool(receipt.get('verified'))}
-            await asyncio.sleep(.1)
+            await asyncio.sleep(interval)
 
     async def send_checked(self, chat_id, text, expected_account, prepare, authorize, on_commit, reply_to=None):
         chat = self.reader.resolve(chat_id)
