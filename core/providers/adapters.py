@@ -2,10 +2,41 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+               ".webp": "image/webp"}
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGES = 6
+
+
+@dataclass(frozen=True)
+class Image:
+    mime: str
+    data: bytes
+
+    @property
+    def base64(self) -> str:
+        return base64.b64encode(self.data).decode("ascii")
+
+
+def load_images(files) -> list[Image]:
+    """Readable supported images, at most MAX_IMAGES; others are skipped."""
+    images = []
+    for file in list(files)[-MAX_IMAGES:]:
+        path = Path(file.path)
+        mime = file.mime if file.mime in IMAGE_TYPES.values() else IMAGE_TYPES.get(path.suffix.lower(), "")
+        try:
+            if mime and path.is_file() and path.stat().st_size <= MAX_IMAGE_BYTES:
+                images.append(Image(mime, path.read_bytes()))
+        except OSError:
+            continue
+    return images
 
 
 @dataclass(frozen=True)
@@ -63,7 +94,7 @@ class OpenAICompatible:
         return self._client
 
     async def complete(self, model: str, messages, schema, schema_name: str, effort: str,
-                       max_tokens: int, timeout_s: float) -> AdapterResult:
+                       max_tokens: int, timeout_s: float, images: Sequence[Image] = ()) -> AdapterResult:
         mode = self.settings.get("schema_mode", "json_object") if schema else ""
         params: dict[str, Any] = {"model": model, "messages": list(messages),
                                   self.settings.get("token_param", "max_tokens"): max_tokens}
@@ -73,6 +104,12 @@ class OpenAICompatible:
         elif schema:
             params["messages"] = with_schema_instruction(messages, schema)
             params["response_format"] = {"type": "json_object"}
+        if images and params["messages"][-1]["role"] == "user":
+            last = dict(params["messages"][-1])
+            last["content"] = [{"type": "text", "text": last["content"]}, *(
+                {"type": "image_url", "image_url": {"url": f"data:{image.mime};base64,{image.base64}"}}
+                for image in images)]
+            params["messages"] = [*params["messages"][:-1], last]
         if self._effort_supported:
             params["reasoning_effort"] = effort
         client = self.client().with_options(timeout=timeout_s, max_retries=0)
@@ -103,12 +140,15 @@ class Gemini:
             self._client = genai.Client(api_key=api_key(self.settings))
         return self._client
 
-    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s) -> AdapterResult:
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s,
+                       images: Sequence[Image] = ()) -> AdapterResult:
         from google.genai import types
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = [types.Content(role="model" if m["role"] == "assistant" else "user",
                                   parts=[types.Part(text=m["content"])])
                     for m in messages if m["role"] != "system"]
+        if images and contents and contents[-1].role == "user":
+            contents[-1].parts.extend(types.Part.from_bytes(data=image.data, mime_type=image.mime) for image in images)
         config: dict[str, Any] = {"max_output_tokens": max_tokens,
                                   "http_options": types.HttpOptions(timeout=int(timeout_s * 1000)),
                                   # The core never passes Python functions; this also silences the SDK's AFC warning.
@@ -138,11 +178,17 @@ class Anthropic:
             self._client = AsyncAnthropic(api_key=api_key(self.settings), max_retries=0)
         return self._client
 
-    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s) -> AdapterResult:
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s,
+                       images: Sequence[Image] = ()) -> AdapterResult:
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         params: dict[str, Any] = {
             "model": model, "max_tokens": max_tokens,
             "messages": [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system"]}
+        if images and params["messages"] and params["messages"][-1]["role"] == "user":
+            last = params["messages"][-1]
+            last["content"] = [*({"type": "image", "source": {"type": "base64", "media_type": image.mime,
+                                                              "data": image.base64}} for image in images),
+                               {"type": "text", "text": last["content"]}]
         if system:
             params["system"] = system
         if self.settings.get("adaptive_thinking"):

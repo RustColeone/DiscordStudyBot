@@ -39,7 +39,14 @@
 # Where approvals, failure details and interface events go. Default: the Discord owner's DM.
 # control: "discord:dm:123456789012345678"
 
+# Provider settings merge over the defaults, e.g. a provider whose models cannot see images
+# (tried last when a request has images) or a minimum gap between requests:
+# providers:
+#   openrouter: {vision: false}
+#   gemini: {min_interval_s: 1.1}
+
 # Model profiles: ordered candidates; candidates without an API key are skipped.
+# A candidate may override `vision`, `effort` or `max_tokens`.
 # profiles:
 #   default:
 #     - {provider: deepseek, model: deepseek-flash}

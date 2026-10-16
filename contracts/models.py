@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
+from contracts.messages import FileRef
+
 Effort = Literal["low", "medium", "high"]
 
 
@@ -16,6 +18,8 @@ class ModelRequest:
     `profile` names a configured profile (an ordered list of provider/model candidates);
     `None` uses the session persona's profile, or `default`.
     With `output_schema`, the result's `data` is the parsed, schema-validated JSON object.
+    `images` (local JPEG, PNG, GIF or WebP files, at most 6) are shown with the last user message.
+    Candidates that cannot see images are tried last and are told images were attached instead.
     """
 
     messages: Sequence[Mapping[str, str]]
@@ -25,6 +29,7 @@ class ModelRequest:
     effort: Effort = "low"
     max_tokens: int = 1500
     timeout_s: float = 35.0
+    images: Sequence[FileRef] = ()
 
 
 @dataclass(frozen=True)

@@ -23,8 +23,9 @@ class FakeAdapter:
         self.handler = handler
         self.calls: list[dict] = []
 
-    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s):
-        self.calls.append({"model": model, "messages": messages, "schema": schema, "effort": effort})
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=()):
+        self.calls.append({"model": model, "messages": messages, "schema": schema, "effort": effort,
+                           "images": list(images)})
         value = self.handler(messages, schema) if self.handler else self.responses.pop(0)
         if isinstance(value, Exception):
             raise value
