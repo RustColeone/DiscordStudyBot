@@ -7,6 +7,7 @@ carries a stable call_id, so a restart resumes without repeating work.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from typing import Any
 
@@ -160,7 +161,9 @@ class AssistantEngine(Engine):
         tools = [{key: tool[key] for key in ("name", "description", "parameters", "risk")}
                  for tool in session.tools.list()]
         instructions = str(session.options.get("instructions") or "").strip()
-        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}.\n\n"
+        now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
+        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}. "
+                  f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')}).\n\n"
                   + (f"Instructions for this conversation:\n{instructions}\n\n" if instructions else "")
                   + CONTRACT.format(display=f"{style} Keep each message under {display.max_text_chars} characters.",
                                     tools=json.dumps(tools, ensure_ascii=False) if tools else "(none)"))
