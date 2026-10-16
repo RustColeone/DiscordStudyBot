@@ -19,7 +19,8 @@ def default_config() -> dict:
     owner = (os.getenv("DISCORD_OWNER_ID") or os.getenv("CREATOR_USER_ID") or "").strip()
     config = {
         "data_dir": str(ROOT / "data" / "core"),
-        "extensions": [str(ROOT / "extensions" / name) for name in ("discord", "assistant", "basic")],
+        "extensions": [str(ROOT / "extensions" / name)
+                       for name in ("discord", "assistant", "basic", "media", "images", "system")],
         "extension_config": {},
         "providers": {
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",

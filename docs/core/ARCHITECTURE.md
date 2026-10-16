@@ -169,7 +169,7 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Extension loading and assembly |
-| [`extensions/`](../../extensions) | Included: `discord` interface, `cli` interface, `assistant` engine, `basic` capabilities |
+| [`extensions/`](../../extensions) | Included: `discord` and `cli` interfaces, `assistant` engine; capabilities `basic` (time, notes), `media` (video downloads), `images` (Gemini/OpenAI), `system` (host status) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 
 Run with `python -m core` (`--check` validates extensions and exits). Without a `core.yml` the

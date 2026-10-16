@@ -9,18 +9,22 @@
 # env_files: [.env]            # KEY=VALUE files; never override variables already set
 # audit_echo: false            # also print audit events to stdout
 
-# Replaces the default list (discord, assistant, basic). Add the CLI for local testing,
-# or external extensions from other repositories.
+# Replaces the default list (discord, assistant, basic, media, images, system). Add the CLI for
+# local testing, or external extensions from other repositories.
 # extensions:
 #   - extensions/discord
 #   - extensions/assistant
 #   - extensions/basic
+#   - extensions/media           # $video: downloads fitted to the upload limit (yt-dlp + ffmpeg)
+#   - extensions/images          # $draw: Gemini or OpenAI images
+#   - extensions/system          # $status: host status
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
 
 # extension_config:
 #   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25}
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
+#   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
 #   cli: {conversation: local, user: local, user_name: you}
 
 # Owners per interface (sender IDs). Default: DISCORD_OWNER_ID, else the Discord application owner.
