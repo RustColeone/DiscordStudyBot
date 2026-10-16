@@ -47,6 +47,26 @@ WOLFRAM_APPID: your_wolfram_app_id_here
 # Local Paths
 WOLFRAM_PATH: C:/Program Files/Wolfram Research/Wolfram Engine/13.2/WolframKernel.exe
 
+# Discord-to-WeChat account bridge (native Linux desktop, separate from adapter mode)
+BRIDGE_DEFAULT: example
+# Defaults to CREATOR_USER_ID. Only this Discord user can inspect or control the account.
+WECHAT_BRIDGE_OWNER_ID:
+WECHAT_BRIDGE_DISPLAY: ':0'
+WECHAT_BRIDGE_WAYLAND_DISPLAY: wayland-0
+WECHAT_BRIDGE_PYTHON: /usr/bin/python3
+WECHAT_BRIDGE_POLL_SECONDS: 5
+# Local file budget, not a measured WeChat server limit.
+WECHAT_BRIDGE_MAX_UPLOAD_MB: 100
+# Model engine is independent of the DeepSeek character prompt. Use luna during an outage.
+WECHAT_BRIDGE_REPLY_PROVIDER: deepseek
+WECHAT_BRIDGE_REPLY_MODEL:
+# Gather incoming bursts briefly; generation overlaps the outbound send cooldown.
+WECHAT_BRIDGE_COALESCE_SECONDS: 1
+# Native reads require validated local database keys; desktop still sends.
+WECHAT_BRIDGE_READ_BACKEND: desktop
+WECHAT_BRIDGE_DATABASE_ROOT:
+WECHAT_BRIDGE_DATABASE_KEYS:
+
 # WeChat Adapter Settings (Windows + local pywechat clone)
 # WECHAT_CHAT is optional. If set, the adapter monitors that one chat directly.
 # If omitted, the adapter scans unread chats globally.

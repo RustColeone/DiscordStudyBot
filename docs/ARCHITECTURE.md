@@ -1,5 +1,13 @@
 # Shared room architecture
 
+The external account integrations use a separate [named bridge registry and WeChat account controller](WECHAT_BRIDGE.md).
+The room can invoke its owner-gated tools. Enabled WeChat conversations reuse the agent loop and shared
+registry with platform capabilities, bounded context, owner approvals for privileged operations and delivery restricted to
+their current chat. A durable account whitelist gates all automatic replies; group assistants additionally
+require an exact configured @mention. Notification subscriptions and owner reply routing are independent.
+Their settings and histories remain separate from the room and its character diaries. The bridge parser
+and both help entry points share one command catalogue; group names and aliases live in SQLite.
+
 Agent mode uses one room loop for conversation and work. There is no initial chat/task classifier,
 permanent task owner, or separate planner/reviewer. A character can respond, use registered tools,
 or give a teammate a focused job. The room owns every outstanding job until completion, missing
@@ -167,3 +175,11 @@ Provider format references: [OpenAI](https://developers.openai.com/api/docs/guid
 [Claude](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
 [Gemini](https://ai.google.dev/gemini-api/docs/generate-content/structured-output),
 [DeepSeek](https://api-docs.deepseek.com/guides/json_mode/).
+
+The WeChat bridge can read authenticated native SQLCipher/WAL snapshots through
+`services/wechat_native.py` and `services/wechat_native_transport.py`. Native polling
+runs independently of the desktop writer; exact native mention targets and message
+IDs feed the same whitelist, conversation workers, tool registry and notification
+routes. Delivery retains the account/recipient/draft checks and prepare/commit gate,
+with native outgoing receipt correlation. See [WECHAT_BRIDGE.md](WECHAT_BRIDGE.md)
+for the current data flow, private key setup and measured read latency.

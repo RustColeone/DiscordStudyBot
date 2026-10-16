@@ -23,6 +23,7 @@ jsonschema>=4.26.0
 matplotlib>=3.10.0
 pylatexenc>=2.11
 pillow>=10.4.0
+cryptography>=41.0.0
 
 # WeChat adapter support (Windows)
 emoji>=2.14.1; sys_platform == "win32"

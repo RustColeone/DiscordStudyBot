@@ -9,7 +9,9 @@ pywechat/
 bridges/bridge_parser.py
 bridges/meiju_bridge.py
 bridges/*_bridge.py
-!bridges/example_bridge.py  # Keep example for reference
+# Maintained implementations. Personal integrations remain ignored.
+!bridges/example_bridge.py
+!bridges/wechat_bridge.py
 
 # Database files
 bot_data.db
@@ -52,3 +54,4 @@ desktop.ini
 
 # Generated clip outputs
 temp/
+

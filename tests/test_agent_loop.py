@@ -95,6 +95,7 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         loop = self.loop(generate, execute)
         await loop.run(self.state)
         await loop.run(self.state, confirm=True)
+        await loop.run(self.state, 'confirm', confirm=True)
         execute.assert_awaited_once()
         self.assertEqual(self.state.status, "blocked")
 
@@ -142,6 +143,66 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         await self.loop(generate, execute, max_steps=2).run(self.state)
         self.assertEqual(self.state.status, "blocked")
         self.assertIn("unfinished", self.timeline[-1][1])
+
+    async def test_tool_needing_input_cannot_run_more_actions_before_an_answer(self):
+        generate = AsyncMock(side_effect=[
+            AgentStep('continue', 'I’ll download it.', [self.action('recover')]),
+            AgentStep('continue', 'I’ll try the download again.', [self.action('recover')]),
+            AgentStep('needs_input', 'Would you prefer a larger file or a shorter clip?'),
+        ])
+        execute = AsyncMock(return_value=ToolOutcome('needs_input', [], 'A user size choice is required'))
+        loop = self.loop(generate, execute)
+        await loop.run(self.state)
+        execute.assert_awaited_once()
+        self.assertEqual(self.state.status, 'needs_input')
+        self.assertTrue(self.state.input_required)
+        self.assertNotIn(('say', 'I’ll try the download again.'), self.timeline)
+        self.assertIn('new user answer', generate.await_args.args[2])
+        self.assertEqual(self.state.context()['visible_turns'], [
+            'I’ll download it.', 'Would you prefer a larger file or a shorter clip?'])
+
+        # Polling or an approval event is not an answer to that question.
+        await loop.run(self.state)
+        await loop.run(self.state, confirm=True)
+        self.assertEqual(generate.await_count, 3)
+
+        generate.side_effect = [AgentStep('continue', 'Using the larger budget.', [self.action('recover')]),
+                                AgentStep('complete', 'Verified.')]
+        execute.return_value = ToolOutcome('success', [], 'Delivered')
+        await loop.run(self.state, 'Use a larger file')
+        self.assertEqual(execute.await_count, 2)
+        self.assertEqual(self.state.status, 'complete')
+        self.assertFalse(self.state.input_required)
+
+    async def test_input_required_stops_dependent_actions_and_false_completion(self):
+        generate = AsyncMock(side_effect=[
+            AgentStep('continue', 'Inspecting.', [self.action(), self.action('recover')]),
+            AgentStep('complete', 'Done.'),
+            AgentStep('needs_input', 'Which account should I use?'),
+        ])
+        execute = AsyncMock(return_value=ToolOutcome('needs_input', [], 'An account choice is needed'))
+        await self.loop(generate, execute).run(self.state)
+        execute.assert_awaited_once_with(self.action())
+        self.assertNotIn(('say', 'Done.'), self.timeline)
+        self.assertEqual(self.state.status, 'needs_input')
+
+    async def test_registered_input_tool_is_one_question_and_a_pause_not_an_action(self):
+        handler=AsyncMock()
+        self.registry.register(CommandTool('choose_account', 'Ask for the account',
+            {'prompt':{'type':'string'}}, ['prompt'], 'read_only', handler, input_prompt_argument='prompt'))
+        generate=AsyncMock(side_effect=[AgentStep('continue', 'Let me ask you something.', [
+            {'tool':'choose_account','arguments':{'prompt':'Which account should I use?'}}])])
+        execute=AsyncMock()
+        loop=self.loop(generate,execute)
+        await loop.run(self.state)
+        execute.assert_not_awaited()
+        handler.assert_not_awaited()
+        self.assertEqual(self.timeline,[('say','Which account should I use?')])
+        self.assertEqual(self.state.status,'needs_input')
+        self.assertEqual(self.state.actions_taken,0)
+        self.assertEqual(self.state.context()['pending_question'],'Which account should I use?')
+        await loop.run(self.state)
+        self.assertEqual(generate.await_count,1)
 
     def test_parser_rejects_invalid_control_states(self):
         for text in ['{"status":"continue","message":"Working","actions":[]}',

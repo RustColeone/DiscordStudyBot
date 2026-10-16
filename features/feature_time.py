@@ -146,7 +146,7 @@ class TimeFeature:
         return [BotResponse(text=self._confirmation(reminder_id, remind_time))]
 
     def _save_reminder(self, message: IncomingMessage, remind_at: datetime, reminder_text: str) -> int:
-        platform = "wechat" if message.guild_name == "WeChat" else "discord"
+        platform = "wechat" if message.guild_name == "WeChat" or message.metadata.get('platform') == 'wechat' else "discord"
         return db.create_reminder(
             message.channel_id,
             message.author_id,
@@ -214,7 +214,8 @@ class TimeFeature:
                     if reminder["platform"] == "discord"
                     else reminder["author_name"]
                 )
-                await app.platform.send_channel_message(
+                deliver = getattr(app, 'send_channel_message', app.platform.send_channel_message)
+                await deliver(
                     channel_id,
                     f"{recipient} Reminder: {reminder['message']}",
                 )

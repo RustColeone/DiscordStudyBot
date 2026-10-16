@@ -29,7 +29,12 @@ class HelpFeature:
             if len(parts) == 3:
                 page = int(parts[2])
 
-            detailed_text = self._get_topic_section(help_content, topic)
+            if topic == 'bridge':
+                from parsers.bridge_commands import bridge_help
+                feature = getattr(app, 'bridge_feature', None)
+                detailed_text = feature.help_text() if feature is not None else bridge_help()
+            else:
+                detailed_text = self._get_topic_section(help_content, topic)
             if detailed_text is not None:
                 pages = self._paginate(detailed_text)
                 if page < 1 or page > len(pages):

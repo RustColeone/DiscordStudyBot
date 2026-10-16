@@ -93,11 +93,11 @@ The project is now organized around a small app core plus adapter-driven feature
 - Persistent state across bot restarts
 
 ### 🌉 Bridge System (External App Integration)
-- **Extensible plugin architecture** for connecting Discord to external apps
-- **Listen mode**: Auto-forward messages to bridged applications
-- **Built-in examples**: Game chat automation, API webhooks
-- **Easy customization**: Inherit base class and define your commands
-- **Per-channel bridges**: Each channel can have its own bridge instance
+- Named example and Linux WeChat account bridges
+- Owner-only QR login, messages, explicit recipient sends and notifications
+- Live reply whitelist, explicit group mentions, and independent notification subscriptions
+- Independent per-chat assistants with a stable persona and configurable DeepSeek/Luna engine
+- Extensible factories and persistent channel selection
 
 ### 🎬 Video Clip Extraction
 - **Extract clips from 1000+ sites**: YouTube, Bilibili, Vimeo, TikTok, Twitter, Twitch, etc.
@@ -695,120 +695,44 @@ $music -y --queue "url1" "url2" # Inserts as #3,#4, continues playing #2
 
 ## 🌉 Bridge System (External App Integration)
 
-The bridge system allows you to connect Discord to external applications like games, APIs, webhooks, or any other service.
+Named bridges connect a Discord channel to an external application. The runnable `example` bridge
+is a local echo demo; the Linux `wechat` bridge provides owner-only account status, QR login,
+conversation reads, explicit recipient sends, notifications, and independently configured DeepSeek
+reply agents.
 
-### Basic Usage
+Every enabled WeChat assistant uses compatible registered tools through the shared agent loop. It speaks
+before acting, reports progress in the Discord control channel, and verifies attachment delivery. Writes
+require exact owner approval; contacts cannot approve them.
 
-```bash
-$bridge --init                     # Initialize bridge connection
-$bridge --send "Hello game!"       # Send message to bridged app
-$bridge -s "Quick message"         # Short form
-
-$bridge --listen on/off            # Enable/disable auto-forward mode
-                                   # When ON: all non-command messages forwarded
-
-$bridge --status                   # Show connection status
-$bridge -st                        # Short form
-
-$bridge --disconnect               # Close bridge connection
+```text
+$bridge example --init
+$bridge example --send "hello"
+$bridge wechat --status
+$bridge wechat --login
+$bridge wechat --chats
+$bridge wechat --messages "Alice" --limit 10
+$bridge wechat --send "Hello!" --to "Alice"
+$bridge wechat --notify on --chat all --destination dm
+$bridge wechat --whitelist list
+$bridge wechat --whitelist add --chat "Alice" --kind direct
+$bridge wechat --forward on --chat "Alice"
+$bridge wechat --agent on --chat "Alice" --delay 20 --instructions "Keep replies brief."
+$bridge wechat --agent off --chat "Alice"
+$bridge wechat --disconnect
 ```
 
-### Listen Mode
+WeChat account commands require `WECHAT_BRIDGE_OWNER_ID` or `CREATOR_USER_ID`. Reply agents stay
+off until a chat is whitelisted and explicitly enabled; groups additionally require an exact @mention.
+Notifications are configured separately. Reply to a forwarded notification to reach its recorded origin.
+`$bridge --help` and `$help bridge` share the parser’s live command catalogue. The Linux bridge supports
+native database/WAL reads with stable message IDs and exact mention targets, plus the desktop accessibility
+reader. Both use checked desktop sends for text and prepared attachments. Native setup requires private,
+locally validated keys; it is separate from the Windows `--mode wechat` adapter.
 
-When listen mode is enabled, all messages in the channel (except commands starting with `$`) are automatically forwarded to the bridged application:
-
-```
-[Discord] User: "attack goblin"
-          → Forwarded to game via bridge
-[Game]    → "You attacked goblin for 50 damage"
-          → Sent back to Discord
-```
-
-### Creating Custom Bridges
-
-The bot includes an **extensible plugin architecture** for custom bridges:
-
-#### 1. Inherit from `BridgedObject`
-
-```python
-# bridges/my_game_bridge.py
-from bridges.bridge_base import BridgedObject
-
-class GameBridge(BridgedObject):
-    async def initialize(self):
-        """Connect to game API/window"""
-        # Your connection logic
-        return True
-    
-    async def send_message(self, message):
-        """Send message to game and return response"""
-        # Your send logic
-        return "Game response"
-    
-    async def disconnect(self):
-        """Cleanup and disconnect"""
-        # Your cleanup logic
-        return True
-    
-    def get_status(self):
-        """Return status string"""
-        return "🟢 Connected to Game"
-```
-
-#### 2. Define Commands in `bridges/bridge_parser.py`
-
-```python
-# bridges/bridge_parser.py
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class BridgeCommand:
-    action: str = None          # "init", "send", "disconnect"
-    message: str = None         # Message to send
-    listen_mode: Optional[str] = None  # 'on', 'off', or None
-    show_status: bool = False   # Show status
-    errors: list = None         # Parse errors
-
-def parse_bridge_command(text):
-    # Your command parsing logic
-    # See bridges/bridge_parser.py.example for template
-    pass
-```
-
-#### 3. Update `features/feature_bridge.py`
-
-```python
-# features/feature_bridge.py
-try:
-    from bridges.bridge_parser import parse_bridge_command
-    from bridges.my_game_bridge import GameBridge as ExampleBridge  # Replace this
-    BRIDGE_AVAILABLE = True
-except ImportError:
-    BRIDGE_AVAILABLE = False
-```
-
-### Example: Game Chat Bridge
-
-The bot includes `bridges/meiju_bridge.py` as a reference implementation showing:
-- Window activation (bring game to foreground)
-- Clipboard automation (paste text into game chat)
-- Keyboard simulation (send Enter key)
-- Response polling (read game chat output)
-
-This demonstrates how to integrate with any desktop application using pyautogui.
-
-### File Structure
-
-```
-bridges/bridge_base.py            # Abstract base class (DO NOT EDIT)
-bridges/bridge_parser.py.example  # Template for command parser
-bridges/example_bridge.py         # Reference implementation
-bridges/meiju_bridge.py           # Example: game chat automation (gitignored)
-bridges/my_custom_bridge.py       # Your custom bridges (gitignored)
-```
-
-**Note**: Custom bridge implementations (except `bridges/example_bridge.py`) are automatically gitignored for privacy.
+See [WeChat bridge setup, architecture and limitations](docs/WECHAT_BRIDGE.md) for system packages,
+login handling, per-chat settings, polling behavior and tests. Register additional implementations
+with `BridgeFeature.register(name, factory)` and implement `BridgedObject`; the maintained example
+shows the basic lifecycle. Personal bridge files remain ignored.
 
 ---
 
