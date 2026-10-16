@@ -196,7 +196,11 @@ cannot approve those operations.
 Pending tasks and approvals are in memory and do not survive a restart.
 
 Tool stages and elapsed-time updates go to active Discord control channels, including when ordinary
-message notifications are off. These are observable progress, not private reasoning. Provider/tool timing
+message notifications are off. These are observable progress, not private reasoning. Such unrequested
+status (progress and the outcomes of the bot's own replies: sent, skipped, failed, unverified) is appended
+to one rolling code-block message per channel, edited for up to an hour and then replaced by a new block.
+Subscribed incoming-message notifications, which the owner can answer by replying, and approval requests
+remain separate messages. Provider/tool timing
 is correlated in `chat_latency.log`, without recording raw conversation text. Worker timings distinguish
 the gathering window, generation, delivery queue/cooldown and final checks. Each desktop operation in a
 reply request reports its UI-lock queue time separately from helper execution time. These worker timers

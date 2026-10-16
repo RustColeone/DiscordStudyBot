@@ -206,6 +206,37 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('group',result[0].text)
         self.assertEqual(self.bridge.store.mention_names('account','alice'),['Group Nick'])
 
+    async def test_unrequested_status_shares_one_block_while_subscribed_messages_stay_separate(self):
+        sent = []
+
+        async def send(channel_id, text):
+            message = SimpleNamespace(id=len(sent) + 1, channel=SimpleNamespace(id=channel_id), text=text)
+            sent.append(message)
+            return message
+
+        async def edit(message, text):
+            message.text = text
+        self.app.platform.send_channel_message = AsyncMock(side_effect=send)
+        self.app.platform.edit_message = AsyncMock(side_effect=edit)
+        await self.command('--notify on --chat Alice')
+        before = len(sent)
+        key = ('account', 'alice')
+        await self.bridge.work_notice(key, 'progress', 'downloading')
+        await self.bridge.work_notice(key, 'progress', 'Waiting for the desktop attachment upload and receipt.')
+        await self.bridge._notify({'account_id': 'account', 'chat_id': 'alice', 'type': 'agent_reply',
+                                   'message': {'text': 'Here it is', 'outgoing': True, 'sender_name': 'Me'}})
+        self.assertEqual(len(sent), before + 1)
+        block = sent[-1].text
+        self.assertTrue(block.startswith('```') and block.endswith('```'))
+        self.assertIn('progress: downloading', block)
+        self.assertIn('agent_reply: Me: Here it is', block)
+        await self.bridge._notify({'account_id': 'account', 'chat_id': 'alice', 'type': 'incoming',
+                                   'message': {'text': 'hi there', 'outgoing': False, 'sender_name': 'Alice'}})
+        await self.bridge.work_notice(key, 'approval', 'Owner approval required')
+        self.assertEqual(len(sent), before + 3)
+        self.assertTrue(sent[-2].text.startswith('WeChat · Alice · incoming'))
+        self.assertTrue(sent[-1].text.startswith('**WeChat · Alice** · approval'))
+
     async def test_owner_dm_notifications_are_independent_of_whitelist(self):
         self.app.platform.send_direct_message=AsyncMock()
         await self.command('--notify on --chat all --destination dm')

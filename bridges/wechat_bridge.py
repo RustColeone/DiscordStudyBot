@@ -6,11 +6,15 @@ from contextlib import suppress
 from app.bot_types import BotAttachment, BotResponse
 from bridges.bridge_base import BridgedObject
 from services import database as db
+from services.status_log import StatusLog
 from services.wechat_conversations import WeChatConversationStore, WeChatReplySupervisor
 from services.wechat_desktop import WeChatDesktopTransport
 
 
 class WeChatBridge(BridgedObject):
+    # Notifications the owner subscribed to and can answer by replying to them.
+    REPLYABLE_EVENTS = frozenset({'incoming', 'activity_preview', 'unread_preview'})
+
     def __init__(self, config=None, transport=None, store=None, generator=None):
         super().__init__("wechat-account")
         self.config = config or {}
@@ -38,6 +42,8 @@ class WeChatBridge(BridgedObject):
         self._login_until = 0
         self._baselined = set()
         self.upload_limit_mb = max(1, min(100, float(self.config.get('WECHAT_BRIDGE_MAX_UPLOAD_MB', 100))))
+        # Progress and outcome notices the owner did not ask for share one rolling code block.
+        self.status_log = StatusLog(self._send_notice, self._edit_notice)
 
     def attach(self, app):
         self.app = app
@@ -64,7 +70,10 @@ class WeChatBridge(BridgedObject):
         label = self._chat_names.get(key[1], key[1])
         for channel in self._control_channels():
             try:
-                await self._send_notice(channel, f'WeChat · {label} · {kind}\n{text}')
+                if kind == 'approval':
+                    await self._send_notice(channel, f'**WeChat · {label}** · approval\n{text}')
+                else:
+                    await self.status_log.append(channel, f'WeChat · {label} · {kind}: {text}')
             except Exception as error:
                 print(f'[wechat work] owner notice failed: {type(error).__name__}')
 
@@ -206,6 +215,9 @@ class WeChatBridge(BridgedObject):
         else:
             return await self.app.platform.send_channel_message(channel_id,text)
 
+    async def _edit_notice(self, message, text):
+        await self.app.platform.edit_message(message, text.replace('@', '@\u200b'))
+
     async def _notify(self, event):
         destination = self._destination(event["account_id"], event["chat_id"])
         if not destination:
@@ -213,6 +225,10 @@ class WeChatBridge(BridgedObject):
         item = event["message"]
         body = f"{item.get('sender_name') or ('Me' if item.get('outgoing') else 'Participant')}: {item.get('text', '')}" if isinstance(item, dict) else str(item)
         label = self._chat_names.get(event["chat_id"], event["chat_id"])
+        if event['type'] not in self.REPLYABLE_EVENTS:
+            # Outcomes of the bot's own work (its replies, skips, failures) were not requested.
+            await self.status_log.append(destination, f"WeChat · {label} · {event['type']}: {body[:600]}")
+            return
         sent=await self._send_notice(destination, f"WeChat · {label} · {event['type']}\n{body[:1200]}")
         identifier=getattr(sent,'id',None)
         channel_id=getattr(getattr(sent,'channel',None),'id',None)
