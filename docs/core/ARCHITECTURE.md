@@ -176,6 +176,7 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Extension loading and assembly |
+| [`plugins/`](../../plugins) | Drop-in extensions, loaded without being listed; `scholar` is the example (second Discord bot, `deliberate` engine) |
 | [`extensions/`](../../extensions) | Included: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram); optional `wechat` (account interface and persona, see [WECHAT_BRIDGE.md](../WECHAT_BRIDGE.md)) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 
