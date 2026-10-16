@@ -9,7 +9,7 @@
 # env_files: [.env]            # KEY=VALUE files; never override variables already set
 # audit_echo: false            # also print audit events to stdout
 
-# Replaces the default list (discord, assistant, basic, media, images, system, reminders, web). Add the CLI for
+# Replaces the default list (discord, assistant, basic, media, images, system, reminders, web, room). Add the CLI for
 # local testing, or external extensions from other repositories.
 # extensions:
 #   - extensions/discord
@@ -20,6 +20,7 @@
 #   - extensions/system          # $status: host status
 #   - extensions/reminders       # $remind 10m drink water, $reminders, $unremind <id>
 #   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>
+#   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
 
@@ -66,6 +67,10 @@
 #     engine: assistant
 #     persona: assistant
 #     enabled: false          # record messages, never answer
+#   "discord:234567890123456789":   # the shared room: four characters on one work board
+#     engine: room
+#     personas: [luna, gemini, claude, deepseek]   # this order is also the rotation order
+#     budget: {model_calls: 40, tool_calls: 24, seconds: 900}
 
 # Gateway admission rules. In servers the bot answers mentions and replies to its messages.
 # admission:

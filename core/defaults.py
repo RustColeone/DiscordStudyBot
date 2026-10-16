@@ -15,13 +15,32 @@ DEFAULT_PROMPT = ("You are a helpful, friendly assistant in a Discord server. An
                   "the person writes in. Use tools when they help, and say plainly when you cannot do something.")
 
 
+DEFAULT_CHAIN = [
+    {"provider": "deepseek", "model": "deepseek-flash"},
+    {"provider": "openai", "model": "gpt-6-luna"},
+    {"provider": "gemini", "model": "gemini-3.8-flash"},
+    {"provider": "claude", "model": "claude-haiku-5-5"},
+]
+CHARACTER_MODELS = {
+    "deepseek": [{"provider": "deepseek", "model": "deepseek-flash"}],
+    "luna": [{"provider": "openai", "model": "gpt-6-luna"}],
+    "gemini": [{"provider": "gemini", "model": "gemini-3.8-flash"}, {"provider": "gemini", "model": "gemini-3.6-flash"}],
+    "claude": [{"provider": "claude", "model": "claude-haiku-5-5"}],
+}
+
+
+def character_chain(name: str) -> list[dict]:
+    own = CHARACTER_MODELS[name]
+    return [dict(item) for item in own] + [dict(item) for item in DEFAULT_CHAIN if item not in own]
+
+
 def default_config() -> dict:
     owner = (os.getenv("DISCORD_OWNER_ID") or os.getenv("CREATOR_USER_ID") or "").strip()
     config = {
         "data_dir": str(ROOT / "data" / "core"),
         "extensions": [str(ROOT / "extensions" / name)
                        for name in ("discord", "assistant", "basic", "media", "images", "system", "reminders",
-                                    "web")],
+                                    "web", "room")],
         "extension_config": {},
         "providers": {
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",
@@ -34,12 +53,9 @@ def default_config() -> dict:
                            "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object"},
         },
         # Candidates without an API key are skipped, so any one configured provider works.
-        "profiles": {"default": [
-            {"provider": "deepseek", "model": "deepseek-flash"},
-            {"provider": "openai", "model": "gpt-6-luna"},
-            {"provider": "gemini", "model": "gemini-3.8-flash"},
-            {"provider": "claude", "model": "claude-haiku-5-5"},
-        ]},
+        "profiles": {"default": DEFAULT_CHAIN,
+                     # The room's characters each prefer their own model, then fall back to the others.
+                     **{name: character_chain(name) for name in ("deepseek", "luna", "gemini", "claude")}},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
             # Reminders only post back into the requester's own conversation, so they need no approval.
