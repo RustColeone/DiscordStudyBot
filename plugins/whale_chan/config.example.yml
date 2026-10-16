@@ -23,9 +23,10 @@ max_tokens: 8000
 history_limit: 60               # messages of the current thread sent as context
 history_chars: 40000            # and at most this many characters of them
 
-# Models tried in order (candidates whose provider has no API key are skipped).
+# Models tried in order (candidates whose provider has no API key are skipped). `vision: false` marks a
+# model that cannot see images: requests with images try the others first.
 models:
-  - {provider: deepseek, model: deepseek-v4-pro}
+  - {provider: deepseek, model: deepseek-v4-pro, vision: false}
   - {provider: deepseek, model: deepseek-flash}
 
 # Math rendering ($$…$$ as images): math, math_width_px, math_dpi, math_font_size_pt, math_max_images.

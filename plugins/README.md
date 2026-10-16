@@ -33,7 +33,8 @@ for its own interfaces. See [docs/core/EXTENSIONS.md](../docs/core/EXTENSIONS.md
 ## The example: `whale_chan` (鲸酱)
 
 Her own Discord bot that chats like a personal AI web client (ChatGPT, Claude), with the DeepSeek
-whale-girl personality, on DeepSeek V4 Pro (DeepSeek Flash as fallback):
+whale-girl personality, on DeepSeek V4 Pro (DeepSeek Flash for images, which V4 Pro cannot see, and as
+fallback):
 
 * each DM or channel is one ongoing thread; send `/new` to start a fresh one;
 * full Markdown answers, math rendered as images, image attachments understood;
