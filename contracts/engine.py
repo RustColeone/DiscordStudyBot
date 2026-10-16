@@ -108,6 +108,40 @@ class History(Protocol):
     def recent(self, limit: int = 30) -> Sequence[HistoryItem]: ...
 
 
+DIARY_KINDS = ("fact", "episode", "reflection")
+
+
+@dataclass(frozen=True)
+class DiaryNote:
+    """One note a persona keeps about one person in one conversation. Times are Unix seconds."""
+
+    id: int
+    key: str
+    kind: str
+    note: str
+    importance: int
+    created_at: float
+    updated_at: float
+
+
+class Diary(Protocol):
+    """One persona's notes about the person who sent the run's trigger, in this conversation only.
+
+    People can read and delete what is kept about them with `$memory`. Routine runs have no person,
+    so their diary is empty and refuses writes.
+    """
+
+    persona: str
+    available: bool
+
+    def recall(self, text: str = "", limit: int = 8) -> list[DiaryNote]:
+        """Notes matching words in `text` first, then the most important and recent ones."""
+
+    def write(self, key: str, kind: str, note: str, importance: int) -> bool:
+        """Create or replace the note under `key`. Raises ValueError for an invalid note, one that copies
+        the message instead of paraphrasing it, or past the per-run limit. Returns False when unchanged."""
+
+
 class Session(Protocol):
     """Everything an engine may use for one run. All access goes through these handles."""
 
@@ -125,7 +159,11 @@ class Session(Protocol):
     history: History
     options: Mapping[str, Any]
 
-    def memory(self, persona: str) -> Store: ...
+    def memory(self, persona: str) -> Store:
+        """The persona's private key-value store, shared by all its conversations."""
+
+    def diary(self, persona: str) -> Diary:
+        """The persona's notes about the trigger's sender in this conversation."""
 
     def inbox(self) -> list[Request]:
         """Requests for this run's lane that arrived while this run was thinking. Each is returned once.

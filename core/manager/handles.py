@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, ModelError, ModelRequest,
                        ModelResult, Persona, Request, Sender, ToolResult)
+from core.manager.diary import DiaryHandle
 from core.serialize import request_from_dict
 from core.storage.tank import RunRecord
 
@@ -68,6 +69,12 @@ class SessionHandle:
         if persona not in {item.name for item in self.personas}:
             raise ValueError("A session can only open memory for its own personas")
         return self._manager.tank.store("persona:" + persona)
+
+    def diary(self, persona: str) -> DiaryHandle:
+        if persona not in {item.name for item in self.personas}:
+            raise ValueError("A session can only open the diary of its own personas")
+        record = self._manager.tank.run(self.run_id)
+        return DiaryHandle(self._manager, record, persona, self.trigger.text, self.trigger.sender.id)
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)

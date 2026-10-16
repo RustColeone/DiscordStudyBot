@@ -37,7 +37,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | Interfaces | Platform I/O; convert events to `Request`; render `Reply`; report `Delivery` | Platform connection; its section of the bottle | Decide replies, call capabilities, read the tank |
 | Gateway | Single entry; per-conversation order; duplicate drop; admission rules; `$command` detection; reply routing; routines; scheduled messages | `gateway.db` (interface sections, seen IDs, rules, routes, routines, scheduled messages) | Feature logic, model calls, tank access, formatting |
-| Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; applies policy on every call; durable runs and approvals | `tank.db` (history, runs, events, actions, approvals, stores) | Feature logic, prompts, platform formatting |
+| Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; applies policy on every call; durable runs and approvals | `tank.db` (history, runs, events, actions, approvals, stores, persona diaries) | Feature logic, prompts, platform formatting |
 | Engines | Turn loop through `Session` handles | Their run state (saved through the session) | Import providers, storage or interfaces; bypass policy |
 | Capabilities | One action; returns `ToolResult` | Nothing durable except their extension's store | Call other capabilities or engines; talk to the user |
 | Providers | Model profiles with ordered candidates and fallback; thin SDK adapters | Credentials (from environment) | Prompts, history, storage |
@@ -114,11 +114,14 @@ assignment was set do not start runs under it. The most specific pattern wins
   Without a control route only owners can be asked (in their own conversation).
 * **Owner-only** capabilities require the trigger's sender to be an owner, or a `trusted` routine.
 * **Budgets** cap model calls, tool calls and active seconds per run; exceeding them fails the run.
+* **Diaries.** Engines keep persona notes through `Session.diary`; the core enforces the note format,
+  paraphrasing, a per-run write limit and the subject (only the trigger's sender, never in routines).
 * **Unattended runs.** Routines fire through the gateway as `origin="routine"` requests in
   `routine:<name>`; their assignment and routes decide what they may use and where results go.
   Approvals still go to the control route and the run waits durably.
 * **`$commands`.** `$approve`, `$deny`, `$runs`, `$cancel`, `$tools`, `$help`, `$call` (owner runs any
-  capability with JSON arguments), plus capabilities that
+  capability with JSON arguments), `$memory` (anyone reads, forgets or clears what personas keep about
+  them in this conversation; deliberately not a capability, so models cannot delete notes), plus capabilities that
   declare a `command`. An owner's command counts as approval of that exact action.
 
 ## Owners and control
