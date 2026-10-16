@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from contracts import Event, HistoryItem
+from contracts import DiaryNote, Event, HistoryItem
 from core.storage.sqlite import Database, ScopedStore, dumps, loads
 
 SCHEMA = """
@@ -35,6 +35,11 @@ CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), call_key TEXT NOT NULL,
     name TEXT NOT NULL, arguments TEXT NOT NULL, address TEXT NOT NULL, status TEXT NOT NULL,
     created_at REAL NOT NULL, decided_at REAL, decided_by TEXT);
+CREATE TABLE IF NOT EXISTS diary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, persona TEXT NOT NULL, address TEXT NOT NULL, subject TEXT NOT NULL,
+    key TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, importance INTEGER NOT NULL,
+    created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(persona, address, subject, key));
+CREATE INDEX IF NOT EXISTS diary_scope ON diary(address, subject, persona);
 """
 
 ACTIVE = ("running", "waiting_input")
@@ -92,6 +97,61 @@ class Tank:
                             kind=row["kind"], message_id=row["message_id"], reply_to=row["reply_to"],
                             quoted_text=row["quoted_text"] or "")
                 for row in reversed(rows)]
+
+    # ---- diaries ----------------------------------------------------------------------------------
+    @staticmethod
+    def _note(row) -> DiaryNote:
+        return DiaryNote(row["id"], row["key"], row["kind"], row["note"], row["importance"], row["created_at"],
+                         row["updated_at"])
+
+    def save_note(self, persona: str, address: str, subject: str, key: str, kind: str, note: str,
+                  importance: int, keep: int) -> bool:
+        """Upsert one note; beyond `keep` notes for this person, the least important oldest ones go."""
+        now = time.time()
+        with self.db.transaction() as db:
+            row = db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
+                         (persona, address, subject, key))
+            if row is not None:
+                if (row["kind"], row["note"], row["importance"]) == (kind, note, importance):
+                    return False
+                db.execute("UPDATE diary SET kind=?, note=?, importance=?, updated_at=? WHERE id=?",
+                           (kind, note, importance, now, row["id"]))
+                return True
+            db.execute("INSERT INTO diary(persona,address,subject,key,kind,note,importance,created_at,updated_at) "
+                       "VALUES(?,?,?,?,?,?,?,?,?)", (persona, address, subject, key, kind, note, importance, now, now))
+            db.execute("DELETE FROM diary WHERE id IN (SELECT id FROM diary WHERE persona=? AND address=? AND "
+                       "subject=? ORDER BY importance DESC, updated_at DESC, id DESC LIMIT -1 OFFSET ?)",
+                       (persona, address, subject, keep))
+            return True
+
+    def note(self, persona: str, address: str, subject: str, key: str) -> DiaryNote | None:
+        row = self.db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
+                          (persona, address, subject, key))
+        return self._note(row) if row is not None else None
+
+    def notes(self, persona: str, address: str, subject: str, limit: int = 20, offset: int = 0,
+              terms: list[str] | None = None) -> list[DiaryNote]:
+        sql = "SELECT * FROM diary WHERE persona=? AND address=? AND subject=?"
+        parameters: list[Any] = [persona, address, subject]
+        if terms:
+            sql += " AND (" + " OR ".join("LOWER(note || ' ' || key) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
+            parameters += ["%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                           for term in terms]
+        sql += " ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?"
+        return [self._note(row) for row in self.db.query(sql, [*parameters, limit, offset])]
+
+    def note_counts(self, address: str, subject: str) -> dict[str, int]:
+        return {row["persona"]: row["n"] for row in self.db.query(
+            "SELECT persona, COUNT(*) AS n FROM diary WHERE address=? AND subject=? GROUP BY persona ORDER BY persona",
+            (address, subject))}
+
+    def delete_notes(self, address: str, subject: str, persona: str | None = None, note_id: int | None = None) -> int:
+        sql, parameters = "DELETE FROM diary WHERE address=? AND subject=?", [address, subject]
+        if persona is not None:
+            sql, parameters = sql + " AND persona=?", [*parameters, persona]
+        if note_id is not None:
+            sql, parameters = sql + " AND id=?", [*parameters, note_id]
+        return self.db.execute(sql, parameters).rowcount
 
     def create_run(self, run: RunRecord) -> RunRecord:
         now = time.time()

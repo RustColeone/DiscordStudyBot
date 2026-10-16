@@ -194,6 +194,7 @@ accepted; submit it again later. **Advance a read cursor only
 after `submit` returns.** Submit messages of one conversation in order; different conversations may
 be submitted concurrently. Messages starting with `$` and a letter are commands (subject to the
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
+`$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
 `$help`, `$call <capability> <json arguments>` (owners only: run any capability directly, for example
 `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
 capability and operation commands (`$help` lists them).
@@ -342,6 +343,7 @@ class MyEngine(Engine):
 | `resumed` | `True` when the core restarted during the run. |
 | `options` | The assignment's `options` mapping (per-conversation settings). |
 | `personas`, `memory(name)` | Personas of this conversation; each persona's private persistent store. |
+| `diary(name)` | That persona's notes about the trigger's sender in this conversation (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Filter by `sender_id` yourself if needed. |
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
@@ -398,6 +400,18 @@ to any conversation:
   the original request).
 * Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
   (`low`).
+
+### Diaries
+
+`session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
+only; a DM disclosure never shows up in a server. `recall(text, limit)` returns `DiaryNote`s, those
+matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
+under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses
+(`ValueError`) invalid keys or values, notes over 400 characters, notes that copy the message instead
+of paraphrasing it, and more than 4 changed notes per run; it keeps at most 200 notes per persona and
+person, dropping the least important oldest. Routine runs have no person: `available` is false,
+`recall` is empty and `write` raises. People manage their notes with `$memory`, so engines need no
+commands of their own for this.
 
 ## Core capabilities
 

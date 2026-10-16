@@ -6,6 +6,7 @@ It contains no feature logic; capabilities and engines are opaque objects regist
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import secrets
@@ -772,6 +773,8 @@ class Manager:
             await say("\n".join(lines) or "No open runs.")
         elif name == "cancel":
             await say(await self.cancel(rest or None, request))
+        elif name == "memory":
+            await say(self.memory_command(rest, request))
         elif name == "tools":
             assignment = self.assignment_for(request.address)
             names = [c.name for c in self.capabilities.values()
@@ -796,6 +799,7 @@ class Manager:
         elif name == "help":
             commands = [f"${c.command}" for c in self.capabilities.values() if c.command]
             await say("Commands: " + ", ".join(["$approve <id>", "$deny <id>", "$runs", "$cancel [run|address]", "$tools",
+                                                "$memory",
                                                 "$call <capability> <json>",
                                                 *sorted(commands)]))
         else:
@@ -805,6 +809,63 @@ class Manager:
                                           data={"command": name}))
                 return
             await self._command_run(request, capability, rest, owner)
+
+    def memory_command(self, text: str, request: Request) -> str:
+        """`$memory`: what personas keep about the sender in this conversation; only theirs, only here."""
+        address, subject = str(request.address), request.sender.id
+        code = (lambda value: f"`{value}`") if request.display.markdown else str
+        usage = ("Personas keep short notes about you in this conversation.\n"
+                 f"{code('$memory [persona] [page]')} read them\n"
+                 f"{code('$memory forget <note-id>')} remove one note\n"
+                 f"{code('$memory clear [persona]')} remove all notes about you here, or one persona's")
+        counts = self.tank.note_counts(address, subject)
+
+        def persona_named(name: str) -> str | None:
+            name = name.lower()
+            return next((key for key, persona in self.personas.items()
+                         if name in (key.lower(), persona.display_name.lower())), None)
+
+        def label(persona: str) -> str:
+            return self.personas[persona].display_name if persona in self.personas else persona
+
+        parts = text.split()
+        action = parts[0].lower() if parts else ""
+        if action == "forget":
+            if len(parts) != 2 or not parts[1].lstrip("#").isdecimal() or len(parts[1]) > 18:
+                return usage
+            removed = self.tank.delete_notes(address, subject, note_id=int(parts[1].lstrip("#")))
+            self.audit.record("diary_forget", address=address, removed=removed)
+            return "Note removed." if removed else "No note with that ID about you here."
+        if action == "clear":
+            persona = persona_named(parts[1]) if len(parts) == 2 else None
+            if len(parts) > 2 or (len(parts) == 2 and persona is None):
+                return usage
+            removed = self.tank.delete_notes(address, subject, persona)
+            self.audit.record("diary_clear", address=address, persona=persona or "*", removed=removed)
+            return f"Removed {removed} note(s) about you here" + (f" from {label(persona)}." if persona else ".")
+        page_text = parts[-1] if parts and parts[-1].isdecimal() else "1"
+        names = parts[:-1] if parts and parts[-1].isdecimal() else parts
+        if not names and len(counts) != 1:
+            if not counts:
+                return "Nobody keeps notes about you in this conversation.\n" + usage
+            return "\n".join([*(f"{label(name)}: {count} note(s)" for name, count in counts.items()), usage])
+        persona = persona_named(" ".join(names)) if names else next(iter(counts))
+        if persona is None or len(page_text) > 6:
+            return usage
+        count = counts.get(persona, 0)
+        if not count:
+            return f"{label(persona)} keeps no notes about you in this conversation."
+        pages = (count + 19) // 20
+        page = int(page_text)
+        if not 1 <= page <= pages:
+            return f"Page {page} not found; pages 1-{pages}."
+        lines = [f"{label(persona)}'s notes about you (page {page}/{pages})"]
+        for note in self.tank.notes(persona, address, subject, 20, (page - 1) * 20):
+            day = dt.datetime.fromtimestamp(note.updated_at).astimezone().strftime("%Y-%m-%d")
+            lines.append(f"{code('#' + str(note.id))} {day} · {note.note}")
+        if page < pages:
+            lines.append(f"Next: {code(f'$memory {persona} {page + 1}')}")
+        return "\n".join(lines)
 
     async def _command_run(self, request: Request, capability: Capability, text: str, owner: bool,
                            arguments: dict | None = None) -> None:

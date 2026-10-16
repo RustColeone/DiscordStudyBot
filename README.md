@@ -66,7 +66,8 @@ Quick start from a fresh clone:
 3. `python -m core`. It prints an invite link if the bot is in no server yet; invite it.
 4. DM the bot, or mention it (or reply to it) in a server channel. The application owner is the bot's
    owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands, including `$video <url>`
-   (needs ffmpeg), `$draw <prompt>`, `$status`, `$remind 10m <text>`, `$search <query>` and `$read <url>`;
+   (needs ffmpeg), `$draw <prompt>`, `$status`, `$remind 10m <text>`, `$search <query>`, `$read <url>` and
+   `$memory` (what the bot remembers about you here);
    the assistant also uses them when asked.
 
 `core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
