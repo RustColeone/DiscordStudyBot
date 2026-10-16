@@ -99,6 +99,11 @@ class ToolContextHandle:
         self.sender: Sender = trigger.sender
         self.origin = record.origin
         self.run_id = record.id
+        self.display: Display = trigger.display
+        files = []
+        for event in manager.tank.events(record.id, ("input", "inbox")):
+            files.extend(FileRef(**item) for item in event.data["request"].get("files", ()))
+        self.files: tuple[FileRef, ...] = tuple(files) or tuple(trigger.files)
         self.storage = manager.tank.store("extension:" + extension)
         profile = (manager.personas[record.personas[0]].profile if record.personas else "default")
         self.models = ModelsHandle(manager, record.id, profile)

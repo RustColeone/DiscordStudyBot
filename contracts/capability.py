@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Mapping, Protocol
 
-from contracts.messages import Address, FileRef, Origin, Sender
+from contracts.messages import Address, Display, FileRef, Origin, Sender
 from contracts.models import Models
 from contracts.stores import Store
 
@@ -72,12 +72,18 @@ class ToolResult:
 
 
 class ToolContext(Protocol):
-    """Handles the core gives a capability for one call."""
+    """Handles the core gives a capability for one call.
+
+    `display` is what the calling conversation can show (for example its upload limit).
+    `files` are the files people attached to the run's requests, oldest first.
+    """
 
     address: Address
     sender: Sender
     origin: Origin
     run_id: str
+    display: Display
+    files: tuple[FileRef, ...]
     storage: Store
     models: Models
     workspace: Path

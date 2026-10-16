@@ -303,7 +303,8 @@ Capability("music.find_tracks", "Search the library by artist or title.", find_t
 | `timeout_s` | Hard limit for one call (default 600). |
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
-`run_id`; `storage` (your extension's private store, shared by your capabilities, committed on
+`run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
+`files` (files people attached to the run's requests); `storage` (your extension's private store, shared by your capabilities, committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a
 directory for this run's output files); `await progress(text)`.
 
