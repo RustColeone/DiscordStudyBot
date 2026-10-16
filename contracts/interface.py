@@ -50,9 +50,11 @@ class InterfacePort(Protocol):
 
     async def observe(self, address: Address, text: str, *, direction: Literal["in", "out"] = "in",
                       sender: Sender | None = None, kind: str = "text", message_id: str | None = None,
-                      at: float | None = None, reply_to: str | None = None, quoted_text: str = "") -> None:
+                      at: float | None = None, reply_to: str | None = None, quoted_text: str = "",
+                      files: tuple[FileRef, ...] = ()) -> None:
         """Record activity the core should know about but not act on (for example a reply someone typed
-        on the phone, group chatter not addressed to the bot, or a late receipt) in conversation history.
+        on the phone, group chatter not addressed to the bot, an image sent before the question, or a late
+        receipt) in conversation history. `files` are local copies engines may show to models.
         Idempotent per (address, direction, message_id)."""
 
     async def cancel(self, address: Address, reason: str) -> int:

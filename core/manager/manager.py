@@ -238,7 +238,7 @@ class Manager:
             self.tank.record_message(address, "in", request.text, kind=request.kind, sender_id=request.sender.id,
                                      sender_name=request.sender.name, message_id=request.id,
                                      reply_to=request.reply_to, quoted_text=request.quoted_text,
-                                     at=request.received_at)
+                                     at=request.received_at, files=request.files)
             assignment = self.assignment_for(request.address)
             if assignment is None or not assignment.enabled or request.received_at < assignment.since:
                 self.audit.record("not_assigned", address=address,
@@ -697,7 +697,8 @@ class Manager:
                                                         in_reply_to=trigger.id, run_id=run_id, source=source))
         if delivery.ok:
             self.tank.record_message(record.address, "out", caption or file.name, kind="file",
-                                     message_id=delivery.message_id, run_id=run_id, reply_to=trigger.id)
+                                     message_id=delivery.message_id, run_id=run_id, reply_to=trigger.id,
+                                     files=(file,))
         return delivery
 
     async def progress(self, run_id: str, text: str) -> None:
@@ -709,14 +710,14 @@ class Manager:
     # ---- interface reports --------------------------------------------------------------------------
     def observe(self, address: Address, text: str, direction: str, sender: Sender | None, kind: str,
                 message_id: str | None, at: float | None, reply_to: str | None = None,
-                quoted_text: str = "") -> None:
+                quoted_text: str = "", files: tuple = ()) -> None:
         if direction not in ("in", "out"):
             raise ValueError("direction must be in or out")
         if message_id and self.tank.has_message(str(address), direction, message_id):
             return
         self.tank.record_message(str(address), direction, text, kind=kind, sender_id=sender.id if sender else "",
                                  sender_name=sender.name if sender else "", message_id=message_id,
-                                 reply_to=reply_to, quoted_text=quoted_text, at=at)
+                                 reply_to=reply_to, quoted_text=quoted_text, at=at, files=files)
 
     def check_reply(self, reply: Reply) -> str | None:
         if reply.source != "run" or not reply.run_id:

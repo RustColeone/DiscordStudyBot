@@ -391,6 +391,25 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         latest = core.tank.recent_messages("chat:room")[-1]
         self.assertEqual((latest.sender_name, latest.kind), ("Pat", "note"))
 
+    def test_history_keeps_attachments_and_older_databases_are_upgraded(self):
+        import sqlite3
+        from contracts import FileRef
+        from core.storage.tank import Tank
+        path = self.tmp / "old.db"
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL, "
+                           "direction TEXT NOT NULL, message_id TEXT, sender_id TEXT, sender_name TEXT, text TEXT "
+                           "NOT NULL, kind TEXT NOT NULL, run_id TEXT, reply_to TEXT, quoted_text TEXT, at REAL NOT NULL)")
+        connection.execute("INSERT INTO messages(address,direction,text,kind,at) VALUES('a:b','in','old','text',1)")
+        connection.commit()
+        connection.close()
+        tank = Tank(path)
+        tank.record_message("a:b", "in", "[Image]", kind="image", files=(FileRef("/x/p.png", "p.png", "image/png", 3),))
+        items = tank.recent_messages("a:b")
+        self.assertEqual([(item.text, item.files) for item in items],
+                         [("old", ()), ("[Image]", (FileRef("/x/p.png", "p.png", "image/png", 3),))])
+        tank.close()
+
     # ---- scheduled messages ------------------------------------------------------------------------
     async def test_scheduled_message_fires_once_when_due_and_is_recorded(self):
         now = [time.time()]

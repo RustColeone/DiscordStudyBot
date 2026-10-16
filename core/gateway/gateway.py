@@ -48,9 +48,10 @@ class Port:
 
     async def observe(self, address: Address, text: str, *, direction: str = "in", sender: Sender | None = None,
                       kind: str = "text", message_id: str | None = None, at: float | None = None,
-                      reply_to: str | None = None, quoted_text: str = "") -> None:
+                      reply_to: str | None = None, quoted_text: str = "", files=()) -> None:
         self._own(address)
-        self._gateway.manager.observe(address, text, direction, sender, kind, message_id, at, reply_to, quoted_text)
+        self._gateway.manager.observe(address, text, direction, sender, kind, message_id, at, reply_to, quoted_text,
+                                      tuple(files))
 
     async def cancel(self, address: Address, reason: str) -> int:
         self._own(address)
