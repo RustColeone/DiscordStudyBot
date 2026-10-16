@@ -68,7 +68,7 @@ class WeChatBridge(BridgedObject):
 
     async def work_notice(self, key, kind, text):
         label = self._chat_names.get(key[1], key[1])
-        for channel in self._control_channels():
+        for channel in self._notice_channels():
             try:
                 if kind == 'approval':
                     await self._send_notice(channel, f'**WeChat · {label}** · approval\n{text}')
@@ -141,6 +141,16 @@ class WeChatBridge(BridgedObject):
         self._controls()
         with db.get_db() as conn:
             return [row[0] for row in conn.execute("SELECT channel_id FROM wechat_bridge_controls WHERE enabled=1")]
+
+    def _notice_channels(self):
+        """Owner notices go to one place: the owner's DM if it is a control channel, else one channel.
+
+        Every channel where the owner ran a bridge command becomes a control channel; sending notices
+        to all of them duplicated every log and exposed WeChat activity in shared server channels.
+        """
+        channels = self._control_channels()
+        direct = [channel for channel in channels if str(channel).startswith('dm:')]
+        return (direct or channels)[:1]
 
     def _control(self, channel_id, enabled=True):
         self._controls()
@@ -419,12 +429,12 @@ class WeChatBridge(BridgedObject):
                 await self.supervisor.reset_baseline()
                 self._known_account = None
             if previous == "ready":
-                for channel in self._control_channels():
+                for channel in self._notice_channels():
                     await self._send_notice(channel, "WeChat is no longer ready. Notifications and automatic replies are paused.")
             return
         account_id = account["account_id"]
         if await self._sync_account(account_id):
-            for channel in self._control_channels():
+            for channel in self._notice_channels():
                 await self._send_notice(channel, f"WeChat login confirmed: {account.get('name', account_id)}.")
         chats = await self.transport.list_chats()
         self._chat_names.update({c["id"]: c["name"] for c in chats})

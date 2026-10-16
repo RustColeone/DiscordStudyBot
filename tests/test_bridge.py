@@ -237,6 +237,25 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sent[-2].text.startswith('WeChat · Alice · incoming'))
         self.assertTrue(sent[-1].text.startswith('**WeChat · Alice** · approval'))
 
+    async def test_owner_notices_go_to_one_control_channel_preferring_the_dm(self):
+        sent = []
+
+        async def send(channel_id, text):
+            sent.append(('channel', channel_id))
+            return SimpleNamespace(id=len(sent), channel=SimpleNamespace(id=channel_id))
+
+        async def direct(user, text):
+            sent.append(('dm', user))
+            return SimpleNamespace(id=len(sent), channel=SimpleNamespace(id='dm'))
+        self.app.platform.send_channel_message = AsyncMock(side_effect=send)
+        self.app.platform.send_direct_message = AsyncMock(side_effect=direct)
+        self.bridge._control('server-channel')
+        await self.bridge.work_notice(('account', 'alice'), 'approval', 'needs approval')
+        self.assertEqual(len(sent), 1)
+        self.bridge._control('dm:owner')
+        await self.bridge.work_notice(('account', 'alice'), 'approval', 'needs approval')
+        self.assertEqual(sent[1:], [('dm', 'owner')])
+
     async def test_owner_dm_notifications_are_independent_of_whitelist(self):
         self.app.platform.send_direct_message=AsyncMock()
         await self.command('--notify on --chat all --destination dm')
