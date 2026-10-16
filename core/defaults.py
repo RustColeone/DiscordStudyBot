@@ -20,7 +20,8 @@ def default_config() -> dict:
     config = {
         "data_dir": str(ROOT / "data" / "core"),
         "extensions": [str(ROOT / "extensions" / name)
-                       for name in ("discord", "assistant", "basic", "media", "images", "system")],
+                       for name in ("discord", "assistant", "basic", "media", "images", "system", "reminders",
+                                    "web")],
         "extension_config": {},
         "providers": {
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",
@@ -41,7 +42,9 @@ def default_config() -> dict:
         ]},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
-            "*": {"engine": "assistant", "personas": ["assistant"]},
+            # Reminders only post back into the requester's own conversation, so they need no approval.
+            "*": {"engine": "assistant", "personas": ["assistant"],
+                  "preapprove": ["reminders.create", "reminders.cancel"]},
             "routine:*": {"engine": "assistant", "personas": ["assistant"], "allow": ["basic.*"],
                           "budget": {"model_calls": 8, "tool_calls": 8, "seconds": 300}},
         },

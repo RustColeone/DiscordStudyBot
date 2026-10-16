@@ -9,7 +9,7 @@
 # env_files: [.env]            # KEY=VALUE files; never override variables already set
 # audit_echo: false            # also print audit events to stdout
 
-# Replaces the default list (discord, assistant, basic, media, images, system). Add the CLI for
+# Replaces the default list (discord, assistant, basic, media, images, system, reminders, web). Add the CLI for
 # local testing, or external extensions from other repositories.
 # extensions:
 #   - extensions/discord
@@ -18,6 +18,8 @@
 #   - extensions/media           # $video: downloads fitted to the upload limit (yt-dlp + ffmpeg)
 #   - extensions/images          # $draw: Gemini or OpenAI images
 #   - extensions/system          # $status: host status
+#   - extensions/reminders       # $remind 10m drink water, $reminders, $unremind <id>
+#   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
 
@@ -25,6 +27,7 @@
 #   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25}
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
 #   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
+#   web: {grounding: true, grounding_model: gemini-3.8-flash, searxng_url: ""}   # or SEARXNG_URL in .env
 #   cli: {conversation: local, user: local, user_name: you}
 
 # Owners per interface (sender IDs). Default: DISCORD_OWNER_ID, else the Discord application owner.
@@ -55,7 +58,7 @@
 #     engine: assistant
 #     personas: [assistant]
 #     allow: ["*"]
-#     preapprove: []          # write capabilities that run without asking the owner
+#     preapprove: [reminders.create, reminders.cancel]   # write capabilities that run without asking the owner
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
 #     options: {instructions: "Keep replies short."}
