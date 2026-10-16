@@ -51,6 +51,7 @@ class FakeTransport:
         self.local = itertools.count(1)
         self.busy: set[str] = set()
         self.outcome = "verified"
+        self.images: dict[str, Path] = {}
         self.before_commit = None
         self.confirmed = 0
         self.closed = False
@@ -59,14 +60,15 @@ class FakeTransport:
         self.chats[native] = {"name": name, "kind": kind, "messages": []}
 
     def add(self, native, text, outgoing=False, sender="wxid_friend", name="Friend", mentions=False, count=None,
-            kind="text", at=None, reply_to_server_id=None):
+            kind="text", at=None, reply_to_server_id=None, image_md5=None):
         local = next(self.local)
         message = {"id": f"native:message/message_0.db:Msg_{native}:{local}", "chat_id": "native:" + native,
                    "sender_id": ME if outgoing else sender, "sender_name": "Me" if outgoing else name,
                    "text": text, "outgoing": outgoing, "kind": kind, "timestamp": at or time.time(),
                    "position": [local * 1000, local], "server_id": str(9000 + local),
                    "reply_to_server_id": reply_to_server_id, "chat_kind": self.chats[native]["kind"],
-                   "mentions_me": mentions, "mention_count": count if count is not None else int(mentions)}
+                   "mentions_me": mentions, "mention_count": count if count is not None else int(mentions),
+                   "image_md5": image_md5}
         self.chats[native]["messages"].append(message)
         return message
 
@@ -105,6 +107,9 @@ class FakeTransport:
 
     def chat_busy(self, chat_id):
         return chat_id.removeprefix("native:") in self.busy
+
+    async def image(self, chat_id, md5):
+        return self.images.get(md5)
 
     async def send_checked(self, chat_id, text, prepare, authorize, on_commit, reply_to=None):
         native = chat_id.removeprefix("native:")
@@ -270,6 +275,18 @@ class ReadingTests(WeChatCase):
         await self.poll()
         self.assertEqual(self.texts(), [])
         self.assertEqual([(item.text, item.kind) for item in self.core.tank.recent_messages(FRIEND, 5)], [("[Image]", "image")])
+
+    async def test_images_are_decrypted_into_history_even_before_the_mention(self):
+        await self.start()
+        photo = self.tmp / "abc.jpg"
+        photo.write_bytes(b"\xff\xd8\xffjpeg")
+        self.transport.images["abc"] = photo
+        self.transport.add("room@chatroom", "[Image]", kind="image", image_md5="abc")
+        self.transport.add("quiet@chatroom", "[Image]", kind="image", image_md5="abc")
+        await self.poll()
+        stored = self.core.tank.recent_messages(ROOM, 5)
+        self.assertEqual([(item.kind, item.files[0].mime) for item in stored], [("image", "image/jpeg")])
+        self.assertEqual(self.core.tank.recent_messages(QUIET, 5), [])
 
     async def test_a_burst_is_gathered_into_one_run(self):
         adapter = FakeAdapter([{"message": "收到三条", "status": "complete", "actions": []}])
@@ -592,6 +609,26 @@ class CopiedModuleTests(unittest.TestCase):
         package = __import__("core.loader", fromlist=["import_extension"]).import_extension(
             ROOT / "extensions" / "wechat")[1].__name__.rsplit(".", 1)[0]
         return __import__(f"{package}.{name}", fromlist=["x"])
+
+    def test_v2_images_decrypt_with_the_account_key(self):
+        import struct
+        from cryptography.hazmat.primitives import padding
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        images = self.module("images")
+        jpeg = b"\xff\xd8\xff" + bytes(range(256)) * 8 + b"\xff\xd9"
+        key, xor, head_length = b"0123456789abcdef", 0x50, 1024
+        padder = padding.PKCS7(128).padder()
+        head = padder.update(jpeg[:head_length]) + padder.finalize()
+        encrypted = Cipher(algorithms.AES(key), modes.ECB()).encryptor().update(head)
+        tail = bytes(byte ^ xor for byte in jpeg[head_length:])
+        data = images.V2 + struct.pack("<II", head_length, len(tail)) + b"\x01" + encrypted + tail
+        self.assertEqual(images.decrypt(data, key, xor), jpeg)
+        with self.assertRaises(images.ImageUnavailable):
+            images.decrypt(data, None, xor)
+        old = bytes(byte ^ 0x33 for byte in jpeg)
+        self.assertEqual(images.decrypt(old, None, 0), jpeg)
+        self.assertEqual(images.image_md5(b'\x08\t\x1a"" 5e8f575aab4b1dc27e23a9803009833eX\x00'),
+                         "5e8f575aab4b1dc27e23a9803009833e")
 
     def test_snapshots_decrypt_and_tampering_fails_closed(self):
         pages = self.module("database_pages")

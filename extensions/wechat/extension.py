@@ -16,6 +16,8 @@ core configuration (admission rules and assignments), not interface logic.
   submit_media (false)     submit incoming images/files/stickers as requests instead of only recording them
   observe_chatter (false)  record group messages not addressed to the account in history
   legacy_database          bot_data.db: import the legacy read positions once (switchover)
+  image_key                private 0600 file from image_key.py; without it received images stay "[Image]"
+  images_dir               where decrypted copies of received images are kept
 """
 
 import os
@@ -54,6 +56,8 @@ def settings_from(config, data_dir: Path, environ=os.environ) -> dict:
     settings["database_keys"] = str(settings.get("database_keys") or data_dir / "keys.json")
     settings["outbox_dir"] = str(settings.get("outbox_dir") or data_dir / "outbox")
     settings["login_dir"] = str(settings.get("login_dir") or data_dir / "login")
+    settings["image_key"] = str(settings.get("image_key") or data_dir / "image_key.json")
+    settings["images_dir"] = str(settings.get("images_dir") or data_dir / "images")
     return settings
 
 

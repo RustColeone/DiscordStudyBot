@@ -55,6 +55,14 @@ before; the rest of this document describes that machinery. What changed:
   its first start the extension imports the legacy read positions (`legacy_database`) read-only, then
   answers messages from the gap that are newer than `max_age_s` once. Work in progress in the legacy
   bridge is lost, as on any legacy restart.
+* **Images.** Received images are decrypted from WeChat's `.dat` files into the extension's data
+  directory and recorded in history even without a mention, so a picture followed by "@bot what is
+  this?" is shown to the model with the question. Format-V2 files need the account's image key, read
+  once (like the database keys) with
+  `sudo venv/bin/python -m extensions.wechat.image_key --pid <wechat-pid> --account-dir …/wxid_x
+  --output data/core/extensions/wechat/image_key.json`. WeChat only holds the key in memory while it
+  shows images, so open two or three images in the desktop client first. Without the key, images stay
+  `[Image]`. Usually only the thumbnail exists locally (the original is fetched when opened).
 * **Not ported:** the desktop (accessibility) reader and nickname mentions (the native reader is used),
   replacing a stale direct reply mid-answer (the newer message is answered next), legacy WeChat chat
   history, re-sending a retained file, and owner `$commands` typed from the WeChat account itself.

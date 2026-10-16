@@ -13,6 +13,7 @@ import time
 import xml.etree.ElementTree as ET
 
 from .database_keys import load_keys, target_path
+from .images import image_md5
 from .database_pages import DatabaseSnapshotError, EncryptedDatabase
 
 KINDS = {1: 'text', 3: 'image', 34: 'voice', 43: 'video', 47: 'sticker', 49: 'file'}
@@ -227,6 +228,7 @@ class WeChatNativeReader:
                                'server_id': str(row['server_id']) if 'server_id' in row.keys() else '',
                                'reply_to_server_id': reference_id, 'chat_kind': chat['chat_kind'],
                                'mentions_me': mentioned, 'mention_count': len(targets),
+                               'image_md5': image_md5(row['packed_info_data']) if kind == 'image' and 'packed_info_data' in row.keys() else None,
                                '_sort': (row['sort_seq'], row['local_id'])})
         return sorted(result, key=lambda item: item['_sort'])[-max(1,min(int(limit),100)):]
 
