@@ -185,6 +185,12 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((trigger["reply_to"], trigger["quoted_text"], trigger["display"]["max_upload_mb"]),
                          ("12345", "earlier answer", 25.0))
 
+    async def test_talk_prefixes_address_the_bot_like_a_mention(self):
+        await self.start({"extension_config": {"discord": {"talk_prefixes": ["$agent", "$chat"]}}})
+        await self.say(incoming(self.room, self.alice, "$agent echo hi", self.guild))
+        await self.say(incoming(self.room, self.alice, "$agents echo no", self.guild))
+        self.assertEqual(self.room.texts(), ["hi"])
+
     async def test_long_text_is_split_and_only_the_first_part_quotes(self):
         await self.start()
         reply_text = ("word " * 600).strip()

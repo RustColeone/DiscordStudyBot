@@ -22,13 +22,15 @@
 #   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>,
 #                                #   image search, Google Maps, $wolfram <query> (needs WOLFRAM_APPID in .env)
 #   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
+#   - extensions/wechat          # WeChat account interface (Linux client; see docs/WECHAT_BRIDGE.md)
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
 
 # extension_config:
 #   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25,
 #             music_dir: /path/to/music, music_list: /path/to/musicList.txt,   # $music (needs ffmpeg, libopus)
-#             clock_interval_s: 1, math: true}   # live $start clock; render $$math$$ as images
+#             clock_interval_s: 1, math: true,   # live $start clock; render $$math$$ as images
+#             talk_prefixes: ["$agent", "$chat"]}   # legacy habits: "$agent hi" counts as addressing the bot
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
 #   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
 #   media: {keep_dir: clips}     # --keep-file copies (relative to data/core/extensions/media)
