@@ -191,11 +191,15 @@ class Gateway:
                 command = self.is_command(request) and (
                     owner or self.rule_for(request.address).get("commands", "all") == "all")
                 if owner and not command:
-                    origin = (self.bottle.receipt(f"{request.address.interface}:{request.reply_to}")
-                              if request.reply_to else None) or self.forwards.get(str(request.address))
+                    receipt = (self.bottle.receipt(f"{request.address.interface}:{request.reply_to}")
+                               if request.reply_to else None)
+                    origin = receipt or self.forwards.get(str(request.address))
                     if origin is not None:
                         target = Address.parse(origin)
-                        refused = None if self.rule_for(target).get("enabled", True) else "not_admitted"
+                        # Replying to one notification is the owner's own message to that chat, so it
+                        # goes even where the bot does not answer; standing forwards need admission.
+                        refused = (None if receipt or self.rule_for(target).get("enabled", True)
+                                   else "not_admitted")
                         self.audit.record("admission", address=str(request.address), decision="relayed")
                         self._spawn(self.manager.relay(request, target, refused))
                         return SubmitResult(True, "relayed")
