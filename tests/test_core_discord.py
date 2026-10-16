@@ -326,7 +326,8 @@ class DefaultConfigurationTests(unittest.TestCase):
         with patch.dict(os.environ, {"DISCORD_OWNER_ID": "", "CREATOR_USER_ID": ""}):
             config = CoreConfig.load(None)
         self.assertEqual([Path(path).name for path in config.extensions],
-                         ["discord", "assistant", "basic", "media", "images", "system"])
+                         ["discord", "assistant", "basic", "media", "images", "system", "reminders", "web"])
+        self.assertEqual(config.assignments["*"].preapprove, ("reminders.create", "reminders.cancel"))
         self.assertEqual(config.assignments["*"].engine, "assistant")
         self.assertIsNone(config.control)
         with tempfile.TemporaryDirectory() as directory:
