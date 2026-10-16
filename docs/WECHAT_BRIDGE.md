@@ -29,6 +29,36 @@ flowchart TD
 ```
 
 
+## WeChat in the core
+
+[`extensions/wechat`](../extensions/wechat/extension.py) replaces `$bridge wechat` when the bot runs on
+the new core (`python -m core`). It reads the native database and sends through the desktop helper as
+before; the rest of this document describes that machinery. What changed:
+
+* **Policy is core configuration.** Admission rules decide which chats are answered (the old whitelist,
+  plus `require_mention_in_groups` and `max_age_s`); the `wechat:*` assignment picks the engine
+  (`assistant`), the persona (`wechat`, 本鲸) and options (`lane: sender`, `history_scope: sender`,
+  `quote: trigger`, `max_steps: 12`). The interface only reports facts such as `mentions_me`.
+* **Owner commands** are operations: `$wechat_status [chat]`, `$wechat_login` (QR), `$wechat_chats`,
+  `$wechat_read <chat>`, `$wechat_send chat | text`, `$wechat_notify on|off|inherit <chat|*>`,
+  `$wechat_pause`, `$wechat_resume`, plus `wechat.configure`. Whitelisting and assistant on/off are
+  `core.set_rule` / `core.set_assignment`; approvals and cancelling are `$approve` / `$cancel`.
+* **Notifications.** `$wechat_notify on <chat>` sends a chat's incoming messages to the owner's Discord DM;
+  replying to one relays the reply to that chat, even one the bot does not answer. Status (not ready,
+  reading errors) goes into the rolling status block.
+* **Settings** live in `extension_config.wechat` (see the module docstring), falling back to the old
+  `WECHAT_BRIDGE_*` variables. Key setup and the database check are `python -m extensions.wechat.key_setup`
+  and `python -m extensions.wechat.probe`.
+* **Switchover.** Never run the legacy bridge and the core together. Write `core.yml` and run
+  `python -m core --config core.yml --check` beforehand (it creates the admission rules, so messages
+  arriving during the switch are admissible). Stop the legacy service when idle and start the core: on
+  its first start the extension imports the legacy read positions (`legacy_database`) read-only, then
+  answers messages from the gap that are newer than `max_age_s` once. Work in progress in the legacy
+  bridge is lost, as on any legacy restart.
+* **Not ported:** the desktop (accessibility) reader and nickname mentions (the native reader is used),
+  replacing a stale direct reply mid-answer (the newer message is answered next), legacy WeChat chat
+  history, re-sending a retained file, and owner `$commands` typed from the WeChat account itself.
+
 ## Setup
 
 The Pi integration was checked against WeChat **4.1.13.26**, English UI, default light message bubbles.
