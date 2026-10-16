@@ -45,7 +45,7 @@ def split_text(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     while len(remaining) > limit:
         cut = 0
         for separator in ("\n\n", "\n", " "):
-            boundary = remaining.rfind(separator, 0, limit + 1)
+            boundary = remaining.rfind(separator, 0, limit - len(separator) + 1)
             if boundary >= limit // 2:
                 cut = boundary + len(separator)
                 break
