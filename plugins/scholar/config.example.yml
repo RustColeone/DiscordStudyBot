@@ -1,0 +1,32 @@
+# Copy to config.yml in this folder (git-ignored) and adjust. Secrets belong in .env.
+# Settings under extension_config.scholar in core.yml override this file.
+
+# The Discord bot: create an application at https://discord.com/developers/applications, add a bot,
+# enable "Message Content Intent", put its token in .env and name the variable here.
+token_env: SCHOLAR_DISCORD_TOKEN
+# interface: scholar          # name of the interface; conversations are scholar:dm:<user> or scholar:<channel>
+
+# The persona.
+# display_name: Scholar
+# prompt: |
+#   You are Scholar, a careful study companion. ...
+
+# The engine: plan → work with tools → review the draft → answer.
+effort: high                  # low | medium | high (passed to models that support it)
+max_steps: 12                 # tool steps per request
+max_tokens: 4000
+history_limit: 24
+review: true                  # check the draft before sending it
+
+# Models tried in order; candidates whose provider has no API key are skipped.
+models:
+  - {provider: claude, model: claude-opus-5-5}
+  - {provider: openai, model: gpt-6.1-sol}
+  - {provider: deepseek, model: deepseek-v4-pro}
+  - {provider: gemini, model: gemini-3.8-flash}
+
+# Extra assignment settings for this bot's conversations (core.yml assignments still win):
+# assignment:
+#   preapprove: [reminders.create, reminders.cancel]
+#   deny: ["system.*"]
+#   budget: {model_calls: 40, tool_calls: 24, seconds: 1800}

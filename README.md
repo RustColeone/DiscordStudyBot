@@ -72,7 +72,9 @@ Quick start from a fresh clone:
    assign it the `room` engine in `core.yml` (see the example).
 
 `core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
-channels it answers in, or to add extensions.
+channels it answers in, or to add extensions. Extensions can also be dropped into [`plugins/`](plugins)
+with their own git-ignored `config.yml`; [`plugins/scholar`](plugins/scholar) adds a second Discord bot
+with a plan-work-review engine.
 
 ### WeChat Adapter Notes
 

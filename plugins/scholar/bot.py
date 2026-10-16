@@ -1,0 +1,195 @@
+"""A second Discord bot (its own application and token) for this plugin. Deliberately small: DMs,
+mentions and replies in servers, text, files, image attachments and a progress line. Everything else
+(policy, tools, models) belongs to the core."""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+from collections import OrderedDict
+from pathlib import Path
+
+import discord
+
+from contracts import Address, Delivery, Display, FileRef, Interface, Reply, Request, Sender
+
+LIMIT = 2000
+NOTICES = {
+    "run_failed": "⚠️ Sorry, I couldn't finish that.",
+    "waiting_approval": "⏳ This needs the owner's approval first.",
+    "not_permitted": "I can't do that here.",
+    "unknown_command": "Unknown command `${command}`. Try `$help`.",
+    "budget_exceeded": "⚠️ That took more work than I'm allowed for one request.",
+}
+
+
+def split_text(text: str, limit: int = LIMIT) -> list[str]:
+    chunks, remaining = [], text
+    while len(remaining) > limit:
+        cut = 0
+        for separator in ("\n\n", "\n", " "):
+            boundary = remaining.rfind(separator, 0, limit - len(separator) + 1)
+            if boundary >= limit // 2:
+                cut = boundary + len(separator)
+                break
+        chunks.append(remaining[:cut or limit])
+        remaining = remaining[cut or limit:]
+    return [*chunks, remaining] if remaining or not chunks else chunks
+
+
+class ScholarBot(Interface):
+    def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0):
+        self.name, self.token = name, token
+        self.attachments = Path(data_dir) / "attachments"
+        self.attachment_max = int(attachment_max_mb * 1024 * 1024)
+        self.display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
+                               max_upload_mb=10, max_text_chars=LIMIT)
+        self.operations = ()
+        self.client: discord.Client | None = None
+        self._task: asyncio.Task | None = None
+        self._channels: dict[str, object] = {}
+        self._progress: OrderedDict[str, discord.Message] = OrderedDict()
+
+    async def start(self, port) -> None:
+        self.port = port
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self.client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
+        self.client.event(self.on_ready)
+        self.client.event(self.on_message)
+        self._task = asyncio.create_task(self._run())
+
+    async def _run(self) -> None:
+        try:
+            await self.client.start(self.token)
+        except discord.LoginFailure:
+            self.port.set_ready(False, "The bot token was rejected.")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.port.set_ready(False, f"Discord connection failed: {type(error).__name__}")
+
+    async def stop(self) -> None:
+        if self.client is not None:
+            await self.client.close()
+        if self._task is not None:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+
+    async def on_ready(self) -> None:
+        try:
+            application = await self.client.application_info()
+            team = getattr(application, "team", None)
+            self.port.set_owners([str(member.id) for member in team.members] if team else [str(application.owner.id)])
+        except discord.HTTPException as error:
+            self.port.log("owner_lookup_failed", error=type(error).__name__)
+        self.port.set_ready(True, f"Logged in as {self.client.user}.")
+        print(f"[{self.name}] Logged in as {self.client.user} in {len(self.client.guilds)} server(s).", flush=True)
+
+    # ---- incoming ---------------------------------------------------------------------------------
+    async def on_message(self, message: discord.Message) -> None:
+        me = self.client.user
+        if message.author.bot or (me is not None and message.author.id == me.id):
+            return
+        direct = isinstance(message.channel, discord.DMChannel)
+        conversation = f"dm:{message.author.id}" if direct else str(message.channel.id)
+        self._channels[conversation] = message.channel
+        mentioned = me is not None and any(user.id == me.id for user in message.mentions)
+        reference = message.reference
+        resolved = getattr(reference, "resolved", None) if reference else None
+        replied_to_me = isinstance(resolved, discord.Message) and me is not None and resolved.author.id == me.id
+        text = (message.content or "").replace(f"<@{me.id}>", "").replace(f"<@!{me.id}>", "").strip() if me else message.content
+        files = []
+        if direct or mentioned or replied_to_me:
+            for attachment in message.attachments:
+                if attachment.size <= self.attachment_max:
+                    path = self.attachments / f"{message.id}-{attachment.filename}"
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    await attachment.save(path)
+                    files.append(FileRef(str(path), attachment.filename, attachment.content_type or "", attachment.size))
+        if not text and files:
+            text = " ".join(f"[{file.name}]" for file in files)
+        limit = message.guild.filesize_limit if message.guild else 10 * 1024 * 1024
+        await self.port.submit(Request(
+            id=str(message.id), address=Address(self.name, conversation),
+            sender=Sender(str(message.author.id), message.author.display_name), text=text,
+            received_at=message.created_at.timestamp(), is_direct=direct,
+            mentions_me=True if direct else (mentioned or replied_to_me),
+            reply_to=str(reference.message_id) if reference and reference.message_id else None,
+            quoted_text=(resolved.content or "")[:1000] if isinstance(resolved, discord.Message) else "",
+            files=tuple(files), display=dataclasses.replace(self.display, max_upload_mb=round(limit / 1024 ** 2, 2))))
+
+    # ---- outgoing ---------------------------------------------------------------------------------
+    async def _channel(self, conversation: str):
+        if conversation in self._channels:
+            return self._channels[conversation]
+        try:
+            if conversation.startswith("dm:"):
+                user = await self.client.fetch_user(int(conversation[3:]))
+                channel = user.dm_channel or await user.create_dm()
+            else:
+                channel = self.client.get_channel(int(conversation)) or await self.client.fetch_channel(int(conversation))
+        except (ValueError, discord.HTTPException):
+            return None
+        self._channels[conversation] = channel
+        return channel
+
+    def render(self, reply: Reply) -> str:
+        data = dict(reply.data)
+        if reply.kind == "notice":
+            if reply.code in NOTICES:
+                return NOTICES[reply.code].replace("${command}", data.get("command", ""))
+            return reply.text or f"[{reply.code}]"
+        speaker = f"**{reply.speaker}**\n" if reply.speaker else ""
+        return speaker + (reply.text or "")
+
+    async def deliver(self, reply: Reply) -> Delivery:
+        if self.client is None or not self.client.is_ready():
+            return Delivery(False, detail="not_connected")
+        channel = await self._channel(reply.address.conversation)
+        if channel is None:
+            return Delivery(False, detail="unknown_conversation")
+        try:
+            if reply.kind == "progress":
+                return await self._show_progress(channel, reply)
+            if reply.run_id and reply.kind in ("text", "file", "notice"):
+                await self._clear_progress(reply.run_id)
+            reference = (discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
+                                                  fail_if_not_exists=False)
+                         if reply.quote and str(reply.quote).isdigit() else None)
+            if reply.kind == "file":
+                sent = await channel.send(content=reply.text[:LIMIT] or None, reference=reference,
+                                          file=discord.File(reply.file.path, filename=reply.file.name or None))
+                return Delivery(True, message_id=str(sent.id))
+            text = self.render(reply)
+            if not text.strip():
+                return Delivery(True, detail="suppressed")
+            first = None
+            for index, chunk in enumerate(split_text(text)):
+                sent = await channel.send(content=chunk, reference=reference if index == 0 else None)
+                first = first or sent
+            return Delivery(True, message_id=str(first.id))
+        except (discord.Forbidden, discord.NotFound) as error:
+            return Delivery(False, detail=type(error).__name__)
+        except discord.HTTPException as error:
+            return Delivery(False, detail=f"HTTP {error.status}", uncertain=error.status >= 500)
+
+    async def _show_progress(self, channel, reply: Reply) -> Delivery:
+        key = reply.run_id or reply.address.conversation
+        text = f"-# ⏳ {reply.text}"[:LIMIT]
+        message = self._progress.get(key)
+        if message is not None:
+            await message.edit(content=text)
+        else:
+            message = self._progress[key] = await channel.send(content=text)
+            while len(self._progress) > 100:
+                self._progress.popitem(last=False)
+        return Delivery(True, message_id=str(message.id))
+
+    async def _clear_progress(self, run_id: str) -> None:
+        message = self._progress.pop(run_id, None)
+        if message is not None:
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
