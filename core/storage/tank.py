@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from contracts import DiaryNote, Event, HistoryItem
+from contracts import DiaryNote, Event, FileRef, HistoryItem
 from core.storage.sqlite import Database, ScopedStore, dumps, loads
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, address TEXT NOT NULL, direction TEXT NOT NULL,
     message_id TEXT, sender_id TEXT, sender_name TEXT, text TEXT NOT NULL, kind TEXT NOT NULL,
-    run_id TEXT, reply_to TEXT, quoted_text TEXT, at REAL NOT NULL);
+    run_id TEXT, reply_to TEXT, quoted_text TEXT, at REAL NOT NULL, files TEXT);
 CREATE INDEX IF NOT EXISTS messages_address ON messages(address, seq);
 CREATE TABLE IF NOT EXISTS kv (scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
     PRIMARY KEY(scope, key));
@@ -68,6 +69,8 @@ class RunRecord:
 class Tank:
     def __init__(self, path: str | Path):
         self.db = Database(path, SCHEMA)
+        if "files" not in {row[1] for row in self.db.query("PRAGMA table_info(messages)")}:
+            self.db.execute("ALTER TABLE messages ADD COLUMN files TEXT")
 
     def close(self) -> None:
         self.db.close()
@@ -78,12 +81,13 @@ class Tank:
     def record_message(self, address: str, direction: str, text: str, *, kind: str = "text",
                        sender_id: str = "", sender_name: str = "", message_id: str | None = None,
                        run_id: str | None = None, reply_to: str | None = None, quoted_text: str = "",
-                       at: float | None = None) -> None:
+                       at: float | None = None, files=()) -> None:
+        stored = dumps([dataclasses.asdict(file) for file in files]) if files else None
         self.db.execute(
             "INSERT INTO messages(address,direction,message_id,sender_id,sender_name,text,kind,run_id,reply_to,"
-            "quoted_text,at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "quoted_text,at,files) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (address, direction, message_id, sender_id, sender_name, text, kind, run_id, reply_to, quoted_text or "",
-             at or time.time()))
+             at or time.time(), stored))
 
     def has_message(self, address: str, direction: str, message_id: str) -> bool:
         return self.db.one("SELECT 1 FROM messages WHERE address=? AND direction=? AND message_id=?",
@@ -95,7 +99,8 @@ class Tank:
         return [HistoryItem(direction=row["direction"], text=row["text"], at=row["at"],
                             sender_name=row["sender_name"] or "", sender_id=row["sender_id"] or "",
                             kind=row["kind"], message_id=row["message_id"], reply_to=row["reply_to"],
-                            quoted_text=row["quoted_text"] or "")
+                            quoted_text=row["quoted_text"] or "",
+                            files=tuple(FileRef(**item) for item in loads(row["files"], [])))
                 for row in reversed(rows)]
 
     # ---- diaries ----------------------------------------------------------------------------------

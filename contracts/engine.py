@@ -72,6 +72,7 @@ class HistoryItem:
     message_id: str | None = None
     reply_to: str | None = None
     quoted_text: str = ""
+    files: tuple[FileRef, ...] = ()  # attachments (for example an image sent before the question)
 
 
 @dataclass(frozen=True)
