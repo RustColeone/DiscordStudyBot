@@ -65,7 +65,8 @@ Quick start from a fresh clone:
    key (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `CLAUDE_API_KEY`).
 3. `python -m core`. It prints an invite link if the bot is in no server yet; invite it.
 4. DM the bot, or mention it (or reply to it) in a server channel. The application owner is the bot's
-   owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands.
+   owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands, including `$video <url>`
+   (needs ffmpeg), `$draw <prompt>` and `$status`; the assistant also uses them when asked.
 
 `core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
 channels it answers in, or to add extensions.

@@ -310,7 +310,8 @@ class DefaultConfigurationTests(unittest.TestCase):
         from core.config import CoreConfig
         with patch.dict(os.environ, {"DISCORD_OWNER_ID": "", "CREATOR_USER_ID": ""}):
             config = CoreConfig.load(None)
-        self.assertEqual([Path(path).name for path in config.extensions], ["discord", "assistant", "basic"])
+        self.assertEqual([Path(path).name for path in config.extensions],
+                         ["discord", "assistant", "basic", "media", "images", "system"])
         self.assertEqual(config.assignments["*"].engine, "assistant")
         self.assertIsNone(config.control)
         with tempfile.TemporaryDirectory() as directory:
