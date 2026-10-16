@@ -195,8 +195,10 @@ cannot approve those operations.
 `--agent status` shows pending work. `--cancel-work`, disabling the agent or a manual reply cancels it.
 Pending tasks and approvals are in memory and do not survive a restart.
 
-Tool stages and elapsed-time updates go to active Discord control channels, including when ordinary
-message notifications are off. These are observable progress, not private reasoning. Such unrequested
+Tool stages and elapsed-time updates go to one Discord control channel, including when ordinary
+message notifications are off: the owner's DM when it is a control channel, otherwise the single
+remaining one. (Every channel where the owner runs a bridge command becomes a control channel; command
+replies still answer there.) These are observable progress, not private reasoning. Such unrequested
 status (progress and the outcomes of the bot's own replies: sent, skipped, failed, unverified) is appended
 to one rolling code-block message per channel, edited for up to an hour and then replaced by a new block.
 Subscribed incoming-message notifications, which the owner can answer by replying, and approval requests
