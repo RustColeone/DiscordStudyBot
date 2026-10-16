@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import re
 from pathlib import Path
+import tempfile
 
 @dataclass
 class ClipSpec:
@@ -24,6 +25,7 @@ class ClipSpec:
     source_site: str = ""
     keep_file: bool = False
     range_explicit: bool = False
+    audio_bitrate: str = '128k'
 
 @dataclass
 class QualityOption:
@@ -58,12 +60,11 @@ def allocate_clip_output_path(clip: ClipSpec, index: int) -> str:
     output_dir = ensure_clip_output_dir()
     extension = clip.output_format or 'mp4'
     base_name = sanitize_filename(clip.video_title or f'clip_{index}')
-    candidate = output_dir / f"{base_name}_{index}.{extension}"
-    counter = 1
-    while candidate.exists():
-        candidate = output_dir / f"{base_name}_{index}_{counter}.{extension}"
-        counter += 1
-    return str(candidate)
+    # Reserve atomically: independent conversations can download the same title
+    # before either render has created its output file.
+    descriptor, candidate = tempfile.mkstemp(prefix=f'{base_name}_{index}_', suffix=f'.{extension}', dir=output_dir)
+    os.close(descriptor)
+    return candidate
 
 def parse_time(time_str: str) -> float:
     """
@@ -86,7 +87,8 @@ def format_time(seconds: float) -> str:
         return f"{mins}:{int(secs):02d}"
     return f"{mins}:{secs:05.2f}"
 
-def estimate_clip_size(duration: float, resolution: str, bitrate: str, fps: int, audio: bool = True) -> float:
+def estimate_clip_size(duration: float, resolution: str, bitrate: str, fps: int, audio: bool = True,
+                       audio_bitrate: str = '128k') -> float:
     """
     Estimate clip size in MB
     
@@ -104,7 +106,7 @@ def estimate_clip_size(duration: float, resolution: str, bitrate: str, fps: int,
     video_kbps = float(bitrate.replace('k', '').replace('K', ''))
     
     # Audio bitrate (typical: 128kbps for most formats)
-    audio_kbps = 128 if audio else 0
+    audio_kbps = float(audio_bitrate.lower().removesuffix('k')) if audio else 0
     
     # Total bitrate
     total_kbps = video_kbps + audio_kbps
@@ -115,13 +117,13 @@ def estimate_clip_size(duration: float, resolution: str, bitrate: str, fps: int,
     return round(size_mb, 2)
 
 
-def calculate_discord_fit(duration: float, max_size_mb: float) -> Optional[Tuple[str, str, int]]:
-    """Choose conservative video settings for a clip that must fit Discord."""
+def calculate_upload_fit(duration: float, max_size_mb: float, audio_bitrate: str = '128k') -> Optional[Tuple[str, str, int]]:
+    """Choose video settings for an output budget, with room for audio and muxing."""
     if duration <= 0 or max_size_mb <= 0:
         return None
 
     target_total_kbps = max_size_mb * 0.90 * 8 * 1024 / duration
-    video_kbps = int(target_total_kbps - 128)
+    video_kbps = min(2500, int(target_total_kbps - float(audio_bitrate.lower().removesuffix('k'))))
     if video_kbps < 96:
         return None
     if video_kbps < 400:
@@ -131,6 +133,10 @@ def calculate_discord_fit(duration: float, max_size_mb: float) -> Optional[Tuple
     else:
         resolution = "720p"
     return resolution, f"{video_kbps}k", 24
+
+
+def calculate_discord_fit(duration: float, max_size_mb: float) -> Optional[Tuple[str, str, int]]:
+    return calculate_upload_fit(duration, max_size_mb)
 
 def get_quality_options(duration: float, max_size_mb: float, output_format: str = "mp4") -> List[QualityOption]:
     """
@@ -283,7 +289,7 @@ async def create_clip(clip: ClipSpec, output_path: str, progress=None) -> bool:
             # Video clipping
             filters = []
             if clip.output_format == 'mp4':
-                ffmpeg_cmd.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-b:a', '128k'])
+                ffmpeg_cmd.extend(['-c:v', 'libx264', '-preset', 'veryfast', '-c:a', 'aac', '-b:a', clip.audio_bitrate])
             
             # Resolution scaling
             if clip.resolution:

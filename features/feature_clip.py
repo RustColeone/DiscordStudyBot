@@ -1,4 +1,5 @@
 import os
+import math
 
 from providers import clip_query as clipQuery
 from app.bot_types import BotAttachment, BotResponse, HandlerResult, IncomingMessage
@@ -199,7 +200,7 @@ class ClipFeature:
         })
 
     async def download_for_agent(self, message, arguments):
-        """Download the requested range, using full duration and Discord-fit defaults."""
+        """Download the requested range within the destination and user file budgets."""
         try:
             progress = message.metadata.get("tool_progress")
             if progress is not None:
@@ -210,12 +211,28 @@ class ClipFeature:
             end = min(end, full_duration)
             if start < 0 or end <= start:
                 return [self._failure("The requested video range is invalid")]
-            max_size = clipQuery.get_discord_size_limit(message.metadata.get("guild_premium_tier", 0))
-            fit = clipQuery.calculate_discord_fit(end - start, max_size)
+            channel_budget = float(message.metadata.get('upload_limit_mb') or
+                                   clipQuery.get_discord_size_limit(message.metadata.get("guild_premium_tier", 0)))
+            requested_budget = float(arguments.get('max_size_mb', channel_budget))
+            if not math.isfinite(requested_budget) or requested_budget <= 0:
+                return [self._failure('The requested maximum file size must be positive and finite')]
+            max_size = min(channel_budget, requested_budget)
+            budget_source = ('user_target' if requested_budget < channel_budget else
+                             message.metadata.get('upload_limit_source', 'channel_limit'))
+            audio_choices = [arguments['audio_bitrate']] if arguments.get('audio_bitrate') else ['128k', '96k', '64k']
+            fit = None
+            for audio_bitrate in audio_choices:
+                fit = clipQuery.calculate_upload_fit(end - start, max_size, audio_bitrate)
+                if fit is not None:
+                    break
             if fit is None:
                 return [BotResponse(
-                    text="The full requested range cannot fit the upload limit at usable quality. Choose a shorter range or another destination.",
-                    metadata={"tool_status": "needs_input", "error_code": "upload_limit"},
+                    text=(f'The estimated bitrate for {end-start:g}s does not fit the {max_size:g} MB file budget '
+                          f'({budget_source}) at the supported quality floor. No rendering or upload was attempted. '
+                          'Ask whether to allow a larger file or choose a shorter range; this is not evidence of a platform rejection.'),
+                    metadata={"tool_status": "needs_input", "error_code": "compression_budget",
+                              'file_budget': {'max_mb': max_size, 'source': budget_source},
+                              'render_attempted': False, 'upload_attempted': False},
                 )]
             resolution, bitrate, fps = fit
             fps = arguments.get("fps") or fps
@@ -223,24 +240,26 @@ class ClipFeature:
                 url=arguments["url"], start=start, end=end,
                 resolution=arguments.get("resolution") or resolution,
                 bitrate=arguments.get("bitrate") or bitrate, fps=fps, output_format="mp4",
-                video_title=title, source_site=site,
+                video_title=title, source_site=site, audio_bitrate=audio_bitrate,
             )
             encoding = {
                 "duration_seconds": end - start, "fps": fps, "resolution": clip.resolution,
-                "video_bitrate": clip.bitrate, "audio_bitrate": "128k", "upload_limit_mb": max_size,
-                "estimated_size_mb": clipQuery.estimate_clip_size(end - start, clip.resolution, clip.bitrate, fps),
+                "video_bitrate": clip.bitrate, "audio_bitrate": clip.audio_bitrate, "upload_limit_mb": max_size,
+                'budget_source': budget_source,
+                "estimated_size_mb": clipQuery.estimate_clip_size(end - start, clip.resolution, clip.bitrate, fps,
+                                                                  audio_bitrate=clip.audio_bitrate),
             }
             if progress is not None:
-                await progress(f"Keeping {end - start:g}s at {fps} fps; video {clip.bitrate} + audio 128k, "
-                               f"estimated {encoding['estimated_size_mb']:.2f} MB / {max_size:g} MB limit.")
+                await progress(f"Keeping {end - start:g}s at {fps} fps; video {clip.bitrate} + audio {clip.audio_bitrate}, "
+                               f"estimated {encoding['estimated_size_mb']:.2f} MB / {max_size:g} MB file budget ({budget_source}).")
             responses = await self._build_clip_file_responses([clip], max_size, progress)
             for response in responses:
                 response.metadata["video_encoding"] = encoding
                 # The next character turn receives measured settings, rather than inventing a bitrate calculation.
                 response.text = (response.text or "") + (
                     f"\nRequested range: {end - start:g}s; {fps} fps; {clip.resolution}; "
-                    f"video {clip.bitrate} + audio 128k; estimated {encoding['estimated_size_mb']:.2f} MB; "
-                    f"upload limit {max_size:g} MB. The rendered file size is checked separately.")
+                    f"video {clip.bitrate} + audio {clip.audio_bitrate}; estimated {encoding['estimated_size_mb']:.2f} MB; "
+                    f"file budget {max_size:g} MB ({budget_source}). The rendered file size is checked separately.")
             return responses
         except Exception as error:
             return [self._failure(str(error), error)]
@@ -333,14 +352,14 @@ class ClipFeature:
                         if clip.keep_file:
                             responses.append(BotResponse(text=(
                                 f"📹 Clip {index}/{len(clips)}: {clip.video_title} ({file_size_mb:.2f}MB, kept on host). "
-                                f"The result exceeds Discord's {max_size:g}MB upload limit, so it was not attached."
-                            )))
+                                f"The result exceeds the configured {max_size:g}MB file budget, so it was not attached."
+                            ), metadata={'tool_status':'failed','error_code':'output_budget_exceeded','retryable':False}))
                         else:
                             os.remove(temp_path)
                             responses.append(BotResponse(text=(
-                                f"❌ Clip {index} rendered at {file_size_mb:.2f}MB, above Discord's {max_size:g}MB limit. "
-                                "It was deleted; trim it or choose Discord-fit compression and try again."
-                            )))
+                                f"❌ Clip {index} rendered at {file_size_mb:.2f}MB, above the configured {max_size:g}MB file budget. "
+                                "It was deleted; adjust compression or the requested range before another attempt."
+                            ), metadata={'tool_status':'failed','error_code':'output_budget_exceeded','retryable':False}))
                         continue
                     responses.append(
                         BotResponse(
