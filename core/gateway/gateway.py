@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import secrets
 import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Mapping
@@ -351,7 +352,55 @@ class Gateway:
             self.bottle.set_routine(name, routine)
             fired.append(name)
             self.audit.record("routine_fired", routine=name)
+        await self.fire_scheduled(now)
         return fired
+
+    MAX_SCHEDULED_PER_CONVERSATION = 50
+    MAX_SCHEDULE_AHEAD_S = 366 * 86400
+
+    def schedule(self, address: Address, at: float, text: str, sender: Sender) -> str:
+        now = self._clock()
+        if not text.strip():
+            raise ValueError("A scheduled message needs text")
+        if at <= now or at - now > self.MAX_SCHEDULE_AHEAD_S:
+            raise ValueError("The time must be in the future and within a year")
+        if len(self.bottle.scheduled(str(address))) >= self.MAX_SCHEDULED_PER_CONVERSATION:
+            raise ValueError("This conversation already has the maximum number of scheduled messages")
+        scheduled_id = secrets.token_hex(3)
+        self.bottle.add_scheduled({"id": scheduled_id, "address": str(address), "at": float(at), "text": text[:2000],
+                                   "sender_id": sender.id, "sender_name": sender.name, "created_at": now})
+        self.audit.record("scheduled", address=str(address), scheduled=scheduled_id)
+        return scheduled_id
+
+    def scheduled_for(self, address: Address) -> list[dict]:
+        return [{key: item[key] for key in ("id", "at", "text", "sender_id", "sender_name")}
+                for item in self.bottle.scheduled(str(address))]
+
+    def cancel_scheduled(self, address: Address, scheduled_id: str) -> bool:
+        if scheduled_id not in {item["id"] for item in self.bottle.scheduled(str(address))}:
+            return False
+        return self.bottle.move_scheduled(scheduled_id, "cancelled")
+
+    async def fire_scheduled(self, now: float) -> None:
+        for item in self.bottle.due(now):
+            if not self.bottle.move_scheduled(item["id"], "firing"):
+                continue
+            address = Address.parse(item["address"])
+            if not self.rule_for(address).get("enabled", True):
+                self.bottle.move_scheduled(item["id"], "skipped", "firing")
+                continue
+            delivery = await self.deliver(Reply(address, "notice", text=item["text"], code="reminder", source="core",
+                                                data={"scheduled_id": item["id"], "sender_id": item["sender_id"],
+                                                      "sender_name": item["sender_name"], "at": str(item["at"])}))
+            if delivery.detail == "interface_not_ready":
+                self.bottle.move_scheduled(item["id"], "pending", "firing")
+                continue
+            status = "sent" if delivery.ok else "uncertain" if delivery.uncertain else "failed"
+            self.bottle.move_scheduled(item["id"], status, "firing")
+            if delivery.ok:
+                self.manager.tank.record_message(str(address), "out", item["text"], kind="reminder",
+                                                 message_id=delivery.message_id)
+            self.audit.record("scheduled_fired", scheduled=item["id"], status=status)
 
 
 def next_fire(routine: Mapping[str, Any], now: float) -> float:

@@ -76,6 +76,8 @@ class ToolContext(Protocol):
 
     `display` is what the calling conversation can show (for example its upload limit).
     `files` are the files people attached to the run's requests, oldest first.
+    `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces
+    receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`).
     """
 
     address: Address
@@ -89,6 +91,15 @@ class ToolContext(Protocol):
     workspace: Path
 
     async def progress(self, text: str) -> None: ...
+
+    async def schedule(self, at: float, text: str) -> str:
+        """Deliver `text` to this conversation at epoch seconds `at`. Returns the scheduled ID."""
+
+    def scheduled(self) -> list[Mapping[str, Any]]:
+        """This conversation's pending scheduled messages: `id`, `at`, `text`, `sender_id`, `sender_name`."""
+
+    async def unschedule(self, scheduled_id: str) -> bool:
+        """Cancel a pending scheduled message of this conversation. False if there is none."""
 
 
 Handler = Callable[[Mapping[str, Any], ToolContext], Awaitable[ToolResult]]

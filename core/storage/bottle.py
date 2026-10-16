@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS rules (pattern TEXT PRIMARY KEY, value TEXT NOT NULL)
 CREATE TABLE IF NOT EXISTS routes (pattern TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS routines (name TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, origin TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS scheduled (
+    id TEXT PRIMARY KEY, address TEXT NOT NULL, at REAL NOT NULL, text TEXT NOT NULL,
+    sender_id TEXT NOT NULL, sender_name TEXT NOT NULL, created_at REAL NOT NULL, status TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS scheduled_due ON scheduled(status, at);
 """
 
 SEEN_RETENTION_S = 30 * 86400
@@ -26,6 +30,9 @@ class Bottle:
         self.db = Database(path, SCHEMA)
         self.db.execute("DELETE FROM seen WHERE at<?", (time.time() - SEEN_RETENTION_S,))
         self.db.execute("DELETE FROM receipts WHERE at<?", (time.time() - SEEN_RETENTION_S,))
+        self.db.execute("DELETE FROM scheduled WHERE status!='pending' AND at<?", (time.time() - SEEN_RETENTION_S,))
+        # A crash while delivering leaves 'firing': it may have been sent, so it is never sent again.
+        self.db.execute("UPDATE scheduled SET status='uncertain' WHERE status='firing'")
 
     def close(self) -> None:
         self.db.close()
@@ -48,6 +55,26 @@ class Bottle:
     def receipt(self, key: str) -> str | None:
         row = self.db.one("SELECT origin FROM receipts WHERE key=?", (key,))
         return None if row is None else row["origin"]
+
+    def add_scheduled(self, item: dict) -> None:
+        columns = ("id", "address", "at", "text", "sender_id", "sender_name", "created_at")
+        self.db.execute(f"INSERT INTO scheduled({','.join(columns)},status) VALUES({','.join('?' * len(columns))},"
+                        "'pending')", [item[column] for column in columns])
+
+    def scheduled(self, address: str | None = None, status: str = "pending") -> list[dict]:
+        sql, parameters = "SELECT * FROM scheduled WHERE status=?", [status]
+        if address is not None:
+            sql, parameters = sql + " AND address=?", [*parameters, address]
+        return [dict(row) for row in self.db.query(sql + " ORDER BY at", parameters)]
+
+    def due(self, now: float) -> list[dict]:
+        return [dict(row) for row in self.db.query(
+            "SELECT * FROM scheduled WHERE status='pending' AND at<=? ORDER BY at", (now,))]
+
+    def move_scheduled(self, scheduled_id: str, status: str, expected: str = "pending") -> bool:
+        cursor = self.db.execute("UPDATE scheduled SET status=? WHERE id=? AND status=?",
+                                 (status, scheduled_id, expected))
+        return cursor.rowcount == 1
 
     def _table(self, table: str) -> dict[str, Any]:
         return {row["pattern" if table != "routines" else "name"]: loads(row["value"])

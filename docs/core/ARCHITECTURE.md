@@ -11,7 +11,7 @@ flowchart TB
         X1["… extensions"]
     end
     subgraph CORE["Core"]
-        GW["Gateway<br/>admission · order · dedupe · routes · routines"]
+        GW["Gateway<br/>admission · order · dedupe · routes · routines · scheduled"]
         BOT[("Bottle<br/>gateway.db")]
         MG{{"Manager<br/>registries · policy · durable runs · approvals"}}
         PR["Providers<br/>model profiles · fallback"]
@@ -36,7 +36,7 @@ flowchart TB
 | Block | Does | Owns | Never |
 | --- | --- | --- | --- |
 | Interfaces | Platform I/O; convert events to `Request`; render `Reply`; report `Delivery` | Platform connection; its section of the bottle | Decide replies, call capabilities, read the tank |
-| Gateway | Single entry; per-conversation order; duplicate drop; admission rules; `$command` detection; reply routing; routines | `gateway.db` (interface sections, seen IDs, rules, routes, routines) | Feature logic, model calls, tank access, formatting |
+| Gateway | Single entry; per-conversation order; duplicate drop; admission rules; `$command` detection; reply routing; routines; scheduled messages | `gateway.db` (interface sections, seen IDs, rules, routes, routines, scheduled messages) | Feature logic, model calls, tank access, formatting |
 | Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; applies policy on every call; durable runs and approvals | `tank.db` (history, runs, events, actions, approvals, stores) | Feature logic, prompts, platform formatting |
 | Engines | Turn loop through `Session` handles | Their run state (saved through the session) | Import providers, storage or interfaces; bypass policy |
 | Capabilities | One action; returns `ToolResult` | Nothing durable except their extension's store | Call other capabilities or engines; talk to the user |
@@ -153,6 +153,10 @@ send and is not subject to admission.
   whose `display.progress` is false. Routed replies carry `data["origin_address"]`.
 * **Routines**: `every_minutes` or `daily_at` (local `HH:MM`). Each firing has a deterministic request
   ID, so a crash between firing and rescheduling cannot fire twice.
+* **Scheduled messages**: one-time `notice` replies (code `reminder`) that capabilities create through
+  `ToolContext.schedule`, for the calling conversation only (at most 50 pending each, within a year).
+  They wait while the interface is not ready and are skipped if the conversation is no longer
+  admitted. A crash while sending marks the message `uncertain`; it is never sent twice.
 
 Config values for rules, routes and routines are written at startup; runtime edits through the
 `core.*` capabilities persist for patterns not in the config.
