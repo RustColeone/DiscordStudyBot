@@ -165,13 +165,22 @@ class Desktop:
             raise ValueError("The selected WeChat control is no longer visible.")
         x, y, width, height = self.rect(node)
         parent = node.get_parent()
+        visible = None
         if node.get_role_name() == "list item" and parent.get_role_name() == "list":
             px, py, pw, ph = self.rect(parent)
             for _ in range(12):
                 x, y, width, height = self.rect(node)
+                visible = (max(y, py), min(y + height, py + ph))
                 if py <= y and y + height <= py + ph:
                     break
-                direction = "5" if y + height > py + ph else "4"
+                # A long message bubble can be taller than the list viewport and never fit;
+                # a clear visible slice of it is enough to click inside the same item.
+                if height > ph and visible[1] - visible[0] >= min(ph // 2, 80):
+                    break
+                if height > ph:
+                    direction = "5" if y > py else "4"
+                else:
+                    direction = "5" if y + height > py + ph else "4"
                 subprocess.run(["xdotool", "mousemove", str(px + pw // 2), str(py + ph // 2),
                                 "click", "--repeat", "3", "--delay", "30", direction],
                                capture_output=True, check=True, timeout=3)
@@ -185,6 +194,8 @@ class Desktop:
         # Qt's exposed Action methods can report success without activating the
         # custom widget. X11 coordinates track the actual compositor placement.
         dx,dy = offset or (width//2,height//2)
+        if visible is not None:
+            dy = min(max(y + dy, visible[0] + 10), visible[1] - 10) - y
         self.move_owned(x+dx,y+dy)
         subprocess.run(["xdotool", "click", str(button)], capture_output=True, check=True, timeout=3)
         time.sleep(0.3)
