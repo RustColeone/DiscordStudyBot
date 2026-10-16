@@ -174,6 +174,8 @@ class AssistantEngine(Engine):
         detail = result.summary.strip()[:3000]
         code = f" ({result.error_code})" if result.error_code and result.status != "success" else ""
         state["transcript"].append({"role": "user", "content": f"[tool {action['tool']} → {result.status}{code}] {detail}"})
+        if result.status == "success":
+            add_images(state, result.files)
 
     async def _send_files(self, session: Session, state: dict, result: ToolResult) -> None:
         sent = []

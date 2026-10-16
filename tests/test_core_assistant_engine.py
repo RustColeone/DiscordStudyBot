@@ -84,6 +84,13 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([[image.mime for image in call["images"]] for call in adapter.calls],
                          [["image/jpeg"], ["image/jpeg"]])
 
+    async def test_images_from_tool_results_are_shown_on_later_turns(self):
+        core, adapter = await self.core([turn("Making it.", "continue", [("tools.make_file", {"name": "chart.png"})]),
+                                         turn("Here it is.")])
+        await iface(core).say("make a chart")
+        await settle(core)
+        self.assertEqual([[image.mime for image in call["images"]] for call in adapter.calls], [[], ["image/png"]])
+
     async def test_invalid_output_and_unknown_tools_get_one_correction_each(self):
         core, adapter = await self.core(["not json", turn("x", "continue", [("tools.nope", {})]), turn("Fine.")])
         await iface(core).say("hello")
