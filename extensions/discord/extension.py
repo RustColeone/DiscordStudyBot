@@ -13,7 +13,7 @@ def setup(context) -> Contributions:
     names = [names] if isinstance(names, str) else list(names)
     token = next((os.environ[name].strip().strip("\"'") for name in names if os.environ.get(name, "").strip()), "")
     return Contributions(interfaces=[DiscordInterface(token, context.data_dir,
-                                                      float(config.get("attachment_max_mb", 25)))])
+                                                      float(config.get("attachment_max_mb", 25)), config=config)])
 
 
 EXTENSION = Extension("discord", setup, contracts="1", version="1",

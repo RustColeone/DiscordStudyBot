@@ -3,6 +3,9 @@
 Conversations are `dm:<user id>` for direct messages and `<channel id>` for server channels and
 threads. In servers the bot answers when mentioned or when someone replies to one of its messages
 (the core's admission rules decide; the interface only reports the facts).
+
+Public operations act on the calling conversation only: music in the caller's voice channel of that
+server (music.py), the study clock (clock.py). Text replies render math (math_render.py).
 """
 
 from __future__ import annotations
@@ -16,9 +19,12 @@ from typing import Any
 
 import discord
 
-from contracts import (Address, Delivery, Display, FileRef, Interface, Operation, Reply, Request, Sender,
+from contracts import (Address, Delivery, Display, FileRef, Interface, Operation, Reply, Request, Risk, Sender,
                        ToolResult)
 
+from .clock import LiveClocks, clock_text
+from .math_render import MathRenderer, fallback_text, split_math
+from .music import CONTROL_ACTIONS, MusicCommand, MusicPlayer, is_url, parse_music_command
 from .status_log import StatusLog, code_safe
 
 DEFAULT_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -70,10 +76,34 @@ class DiscordInterface(Interface):
     name = "discord"
     display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
                       max_upload_mb=DEFAULT_UPLOAD_BYTES / 1024 / 1024, max_text_chars=MESSAGE_LIMIT)
-    operations = (Operation("status", "Discord connection status, servers and owners", command="discord_status"),
-                  Operation("invite", "The link for inviting this bot to a server", command="invite"))
+    operations = (
+        Operation("status", "Discord connection status, servers and owners", command="discord_status"),
+        Operation("invite", "The link for inviting this bot to a server", command="invite"),
+        Operation("music", "The music player in the caller's voice channel in this server. Text: init, play, pause, "
+                  "stop, next, prev, status, queue, or -y <YouTube URLs> [--queue] (play now, or add after the "
+                  "current song).", {"command": {"type": "string"}}, risk=Risk.WRITE, command="music",
+                  command_argument="command", timeout_s=180, owner_only=False),
+        Operation("music_status", "Show this server's music player track and position.", owner_only=False),
+        Operation("music_control", "Initialize (join the caller's voice channel and play), play, pause, stop, or "
+                  "change tracks in this server's music player.",
+                  {"action": {"type": "string", "enum": list(CONTROL_ACTIONS)}}, ("action",), Risk.WRITE,
+                  timeout_s=180, owner_only=False),
+        Operation("queue_music", "Add a YouTube music URL after the current song in this server's playlist; "
+                  "play_now plays it immediately in the caller's voice channel. Resolve references such as "
+                  "'that music' from the conversation and pass its URL.",
+                  {"url": {"type": "string"}, "play_now": {"type": "boolean"}}, ("url",), Risk.WRITE,
+                  timeout_s=180, owner_only=False),
+        Operation("time", "The study clock: UTC minutes:seconds (break time from minute 45) and Beijing, "
+                  "Los Angeles and London times.", command="time", owner_only=False),
+        Operation("clock_start", "Start the live study clock (one message edited every second) in this "
+                  "conversation.", risk=Risk.WRITE, command="start", owner_only=False),
+        Operation("clock_stop", "Stop the live study clock in this conversation.", risk=Risk.WRITE, command="stop",
+                  owner_only=False),
+    )
 
-    def __init__(self, token: str, data_dir: Path, attachment_max_mb: float = 25.0, client: Any = None):
+    def __init__(self, token: str, data_dir: Path, attachment_max_mb: float = 25.0, client: Any = None,
+                 config: Any = None):
+        config = dict(config or {})
         self.token = token
         self.attachments_dir = Path(data_dir) / "attachments"
         self.attachment_max_bytes = int(attachment_max_mb * 1024 * 1024)
@@ -85,6 +115,14 @@ class DiscordInterface(Interface):
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._owners: list[str] = []
         self.status_log = StatusLog(self._send_status, self._edit_status)
+        self._members: OrderedDict[tuple[str, str], Any] = OrderedDict()
+        self.math = MathRenderer(Path(data_dir) / "math", config)
+        music_list = config.get("music_list")
+        self.music = MusicPlayer(self, Path(config.get("music_dir") or Path(data_dir) / "music").expanduser(),
+                                 Path(music_list).expanduser() if music_list else None,
+                                 str(config.get("ffmpeg") or "ffmpeg"))
+        self.clocks = LiveClocks(self._channel, float(config.get("clock_interval_s", 1.0)),
+                                 int(config.get("clock_max", 10)))
 
     # ---- lifecycle --------------------------------------------------------------------------------
     async def start(self, port) -> None:
@@ -120,6 +158,8 @@ class DiscordInterface(Interface):
             self.port.log("client_stopped", error=type(error).__name__)
 
     async def stop(self) -> None:
+        await self.clocks.stop_all()
+        await self.music.close()
         if self.client is not None and not self.client.is_closed():
             await self.client.close()
         if self._task is not None:
@@ -163,6 +203,11 @@ class DiscordInterface(Interface):
             return
         conversation = self.conversation_id(message.channel, author)
         self._remember(conversation, message.channel)
+        if message.guild is not None:
+            self._members[(str(message.guild.id), str(author.id))] = author
+            self._members.move_to_end((str(message.guild.id), str(author.id)))
+            while len(self._members) > 512:
+                self._members.popitem(last=False)
         async with self._locks[conversation]:
             request = await self.to_request(message, conversation)
             result = await self.port.submit(request)
@@ -333,7 +378,7 @@ class DiscordInterface(Interface):
             reference = discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
                                                  fail_if_not_exists=False)
         text = self.render(reply)
-        sent = []
+        sent, items = [], []
         try:
             if reply.kind == "file":
                 file = discord.File(reply.file.path, filename=reply.file.name or Path(reply.file.path).name)
@@ -342,9 +387,15 @@ class DiscordInterface(Interface):
                 if not text.strip():
                     return Delivery(True, detail="suppressed")
                 mentions = self.mentions_for(reply)
-                for index, chunk in enumerate(split_text(text)):
-                    sent.append(await channel.send(content=chunk, reference=reference if index == 0 else None,
-                                                   allowed_mentions=mentions if index == 0 else None))
+                items = await self._text_items(reply, text)
+                for index, (kind, value) in enumerate(items):
+                    first = index == 0
+                    if kind == "image":
+                        sent.append(await channel.send(file=discord.File(value, filename="formula.png"),
+                                                       reference=reference if first else None))
+                    else:
+                        sent.append(await channel.send(content=value, reference=reference if first else None,
+                                                       allowed_mentions=mentions if first else None))
         except (discord.Forbidden, discord.NotFound) as error:
             return Delivery(False, detail=f"{type(error).__name__}: {error}"[:300], uncertain=bool(sent))
         except discord.HTTPException as error:
@@ -352,8 +403,32 @@ class DiscordInterface(Interface):
             return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}: {error}"[:300], uncertain=not certain)
         except (OSError, asyncio.TimeoutError) as error:
             return Delivery(False, detail=f"{type(error).__name__}: {error}"[:300], uncertain=True)
+        finally:
+            for kind, value in items:
+                if kind == "image":
+                    Path(value).unlink(missing_ok=True)
         await self._clear_progress(reply.run_id)
         return Delivery(True, message_id=str(sent[0].id))
+
+    async def _text_items(self, reply: Reply, text: str) -> list[tuple[str, Any]]:
+        """Text chunks and rendered display-math images (`("text", str)` / `("image", path)`) in order."""
+        if (reply.kind != "text" or reply.source == "owner" or not self.math.enabled
+                or ("$" not in text and "\\" not in text)):
+            return [("text", chunk) for chunk in split_text(text)]
+        items, images = [], 0
+        for kind, value in split_math(text):
+            if kind == "text":
+                items.extend(("text", chunk) for chunk in split_text(value) if value.strip())
+                continue
+            path = None
+            if images < self.math.max_images:
+                try:
+                    path = await asyncio.to_thread(self.math.render, value)
+                    images += 1
+                except Exception as error:
+                    self.port.log("math_render_failed", error=type(error).__name__)
+            items.extend([("image", path)] if path else [("text", chunk) for chunk in split_text(fallback_text(value))])
+        return items or [("text", chunk) for chunk in split_text(text)]
 
     async def _send_status(self, conversation: str, text: str):
         channel = await self._channel(conversation)
@@ -399,6 +474,20 @@ class DiscordInterface(Interface):
             return ToolResult.fail("Discord is not connected.", "not_connected")
         if operation == "invite":
             return ToolResult.ok(f"Invite link: {self.invite_url()}")
+        conversation = context.address.conversation
+        if operation == "time":
+            return ToolResult.ok(clock_text())
+        if operation == "clock_start":
+            try:
+                error = await self.clocks.start(conversation)
+            except discord.HTTPException as failure:
+                return ToolResult.fail(f"Could not start the clock: HTTP {getattr(failure, 'status', '?')}",
+                                       "send_failed")
+            return ToolResult.fail(error, "clock_unavailable") if error else ToolResult.ok("Starting Clock")
+        if operation == "clock_stop":
+            return ToolResult.ok("Stopping Timer" if await self.clocks.stop(conversation) else "No active clock to stop")
+        if operation in ("music", "music_status", "music_control", "queue_music"):
+            return await self._music(operation, arguments, context)
         if operation == "status":
             guilds = list(getattr(self.client, "guilds", []) or [])
             latency = getattr(self.client, "latency", float("nan"))
@@ -407,3 +496,28 @@ class DiscordInterface(Interface):
                                  f"{latency * 1000:.0f} ms; {len(guilds)} server(s): {names}; "
                                  f"application owners: {', '.join(self._owners) or 'unknown'}.")
         return await super().operate(operation, arguments, context)
+
+    def _voice_channel(self, guild, sender_id: str):
+        member = guild.get_member(int(sender_id)) if sender_id.isdigit() else None
+        member = member or self._members.get((str(guild.id), sender_id))
+        return getattr(getattr(member, "voice", None), "channel", None)
+
+    async def _music(self, operation, arguments, context) -> ToolResult:
+        conversation = context.address.conversation
+        channel = None if conversation.startswith("dm:") else await self._channel(conversation)
+        guild = getattr(channel, "guild", None)
+        if guild is None:
+            return ToolResult.fail("Music works in a server's text channel while you are in one of its voice "
+                                   "channels.", "not_in_server")
+        if operation == "music_status":
+            command = MusicCommand("status")
+        elif operation == "music_control":
+            command = MusicCommand(CONTROL_ACTIONS[arguments["action"]])
+        elif operation == "queue_music":
+            url = str(arguments["url"]).strip()
+            if not is_url(url):
+                return ToolResult.fail("url must be an http(s) URL", "invalid_arguments")
+            command = MusicCommand("youtube", [url], queue_only=not arguments.get("play_now", False))
+        else:
+            command = parse_music_command(str(arguments.get("command") or ""))
+        return await self.music.run(command, guild, self._voice_channel(guild, context.sender.id))

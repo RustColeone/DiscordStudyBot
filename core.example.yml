@@ -26,7 +26,9 @@
 #   - ../AudioManager/bot_extension
 
 # extension_config:
-#   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25}
+#   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25,
+#             music_dir: /path/to/music, music_list: /path/to/musicList.txt,   # $music (needs ffmpeg, libopus)
+#             clock_interval_s: 1, math: true}   # live $start clock; render $$math$$ as images
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
 #   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
 #   media: {keep_dir: clips}     # --keep-file copies (relative to data/core/extensions/media)
@@ -68,7 +70,8 @@
 #     engine: assistant
 #     personas: [assistant]
 #     allow: ["*"]
-#     preapprove: [reminders.create, reminders.cancel]   # write capabilities that run without asking the owner
+#     preapprove: [reminders.create, reminders.cancel, discord.music, discord.music_control, discord.queue_music,
+#                  discord.clock_start, discord.clock_stop]   # write capabilities that run without asking the owner
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
 #     options: {instructions: "Keep replies short.", diary: true}   # diary: persona notes about each person

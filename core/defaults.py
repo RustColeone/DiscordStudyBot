@@ -15,6 +15,8 @@ DEFAULT_PROMPT = ("You are a helpful, friendly assistant in a Discord server. An
                   "the person writes in. Use tools when they help, and say plainly when you cannot do something.")
 
 
+PREAPPROVED = ["reminders.create", "reminders.cancel", "discord.music", "discord.music_control",
+               "discord.queue_music", "discord.clock_start", "discord.clock_stop"]
 DEFAULT_CHAIN = [
     {"provider": "deepseek", "model": "deepseek-flash"},
     {"provider": "openai", "model": "gpt-6-luna"},
@@ -59,9 +61,9 @@ def default_config() -> dict:
                      **{name: character_chain(name) for name in ("deepseek", "luna", "gemini", "claude")}},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
-            # Reminders only post back into the requester's own conversation, so they need no approval.
-            "*": {"engine": "assistant", "personas": ["assistant"],
-                  "preapprove": ["reminders.create", "reminders.cancel"]},
+            # These only affect the requester's own conversation (or its server's voice channel), so
+            # members may use them without the owner's approval, as in the legacy bot.
+            "*": {"engine": "assistant", "personas": ["assistant"], "preapprove": PREAPPROVED},
             "routine:*": {"engine": "assistant", "personas": ["assistant"], "allow": ["basic.*"],
                           "budget": {"model_calls": 8, "tool_calls": 8, "seconds": 300}},
         },

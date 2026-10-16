@@ -339,7 +339,8 @@ class DefaultConfigurationTests(unittest.TestCase):
         self.assertEqual(config.profiles["gemini"][:2], [{"provider": "gemini", "model": "gemini-3.8-flash"},
                                                          {"provider": "gemini", "model": "gemini-3.6-flash"}])
         self.assertEqual(len(config.profiles["luna"]), 4)
-        self.assertEqual(config.assignments["*"].preapprove, ("reminders.create", "reminders.cancel"))
+        self.assertIn("reminders.create", config.assignments["*"].preapprove)
+        self.assertIn("discord.music", config.assignments["*"].preapprove)
         self.assertEqual(config.assignments["*"].engine, "assistant")
         self.assertIsNone(config.control)
         with tempfile.TemporaryDirectory() as directory:
