@@ -167,9 +167,11 @@ class WeChatConversationAgent:
             await self.bridge.work_notice(key, 'progress', text)
 
         async def approval(actions):
+            command = f'$bridge wechat --approve --chat {json.dumps(key[1], ensure_ascii=False)} --task {state.task.task_id}'
+            actions_text = json.dumps(actions, ensure_ascii=False, indent=1).replace('```', 'ˋˋˋ')
             await self.bridge.work_notice(key, 'approval',
-                "Owner approval required for these exact actions:\n" + json.dumps(actions, ensure_ascii=False)
-                + f'\n$bridge wechat --approve --chat {json.dumps(key[1], ensure_ascii=False)} --task {state.task.task_id}')
+                "Owner approval required for these exact actions:\n```json\n" + actions_text
+                + f"\n```\nReply `{command}` to approve.")
 
         def validate(actions):
             if len(actions) > 5:

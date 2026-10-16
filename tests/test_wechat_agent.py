@@ -127,6 +127,9 @@ class ConversationAgentTests(unittest.IsolatedAsyncioTestCase):
         self.generator.step.return_value = AgentStep('continue', 'Approval needed.', [self.action('change')])
         await self.run_agent()
         pending = self.agent.pending(('account', 'alice'))
+        notice = [call.args[2] for call in self.bridge.work_notice.await_args_list if call.args[1] == 'approval'][-1]
+        self.assertIn('```json\n[', notice)
+        self.assertIn(f'Reply `$bridge wechat --approve --chat "alice" --task {pending["task_id"]}` to approve.', notice)
         self.settings['revision'] += 1
         with self.assertRaises(ValueError):
             self.agent.approve(('account', 'alice'), pending['task_id'])
