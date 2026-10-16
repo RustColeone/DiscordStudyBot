@@ -18,7 +18,9 @@ class FakeInterface(Interface):
         self.operations = (Operation("echo", "Echo arguments back", {"value": {"type": "string"}}, ("value",),
                                      command="echoop" if name == "chat" else None,
                                      command_argument="value" if name == "chat" else None),
-                           Operation("reset", "Pretend to reset", risk=Risk.WRITE))
+                           Operation("reset", "Pretend to reset", risk=Risk.WRITE),
+                           Operation("where", "Say where it was called from", owner_only=False,
+                                     command="where" if name == "chat" else None))
         self.delivered: list[Reply] = []
         self.port = None
         self.started = False
@@ -44,6 +46,8 @@ class FakeInterface(Interface):
             return ToolResult.ok(f"echo {arguments['value']}")
         if operation == "reset":
             return ToolResult.ok("reset done")
+        if operation == "where":
+            return ToolResult.ok(f"here: {context.address}")
         return await super().operate(operation, arguments, context)
 
     async def say(self, text, conversation="room", sender="alice", request_id=None, is_direct=True,
