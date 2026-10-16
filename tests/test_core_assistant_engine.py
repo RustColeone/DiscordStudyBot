@@ -84,6 +84,31 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([[image.mime for image in call["images"]] for call in adapter.calls],
                          [["image/jpeg"], ["image/jpeg"]])
 
+    async def test_an_image_sent_just_before_the_question_is_shown_with_it(self):
+        import time
+        from contracts import Address, FileRef, Sender
+        photo, other = self.tmp / "dish.jpg", self.tmp / "bob.png"
+        photo.write_bytes(b"jpeg")
+        other.write_bytes(b"png")
+        core, adapter = await self.core([turn("Ramen!")], {"assignments": {"*": {
+            "engine": "assistant", "personas": ["p"], "options": {"history_scope": "sender"}}}})
+        chat, room = iface(core), Address("chat", "room")
+        now = time.time()
+        await chat.port.observe(room, "[Image]", sender=Sender("alice", "Alice"), kind="image", message_id="m1",
+                                at=now - 20, files=(FileRef(str(photo), "dish.jpg", "image/jpeg"),))
+        await chat.port.observe(room, "[Image]", sender=Sender("bob", "Bob"), kind="image", message_id="m2",
+                                at=now - 10, files=(FileRef(str(other), "bob.png", "image/png"),))
+        await chat.port.observe(room, "[Image]", sender=Sender("alice", "Alice"), kind="image", message_id="m0",
+                                at=now - 7200, files=(FileRef(str(other), "old.png", "image/png"),))
+        await chat.say("@bot what is this?", is_direct=False, mentions_me=True, received_at=now)
+        await settle(core)
+        self.assertEqual([image.mime for image in adapter.calls[0]["images"]], ["image/jpeg"])
+        prompt = self.prompt(adapter, 0)
+        self.assertIn("Alice: [Image]\n[image dish.jpg, shown to you with this request]", prompt)
+        self.assertNotIn("bob.png", prompt)
+        stored = {item.message_id: item for item in core.tank.recent_messages("chat:room")}
+        self.assertEqual(stored["m1"].files[0].name, "dish.jpg")
+
     async def test_images_from_tool_results_are_shown_on_later_turns(self):
         core, adapter = await self.core([turn("Making it.", "continue", [("tools.make_file", {"name": "chart.png"})]),
                                          turn("Here it is.")])

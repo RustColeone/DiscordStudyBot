@@ -398,12 +398,15 @@ to any conversation:
   delivered or not. It does not regenerate a reply when newer input arrives; it reads the inbox before
   the next step instead. Engines needing different direct/group behaviour should be their own engine.
 * Assignment options: `instructions` (added to the system prompt), `owner_instructions` (added only
-  when an owner is speaking), `max_steps`, `history_scope: sender`,
+  when an owner is speaking), `max_steps`, `history_limit`, `history_image_minutes`, `history_scope: sender`,
   `quote: latest` (default; quote the newest message of the run) or `quote: trigger` (keep quoting
   the original request).
 * Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
   (`low`).
-* Images attached to the run's messages (latest 6) are shown to the model on every turn.
+* Images attached to the run's messages, found by its tools, or sent by the person in history shortly
+  before the request (`history_image_minutes`, default 30; WeChat sends a picture and its question as
+  separate messages) are shown to the model on every turn (latest 6). History lines carry the time,
+  the speaker, what they replied to and their attachments.
 * Diary: the system prompt includes the persona's notes about the sender (matching ones first), and a
   turn may add `diary: [{key, kind, note, importance}]` (at most 2; importance 3+ is kept). Turn it
   off with the assignment option `diary: false`.
@@ -442,7 +445,7 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
 * Extension options (`extension_config.room`): `max_steps`, `history_limit` (16), `max_tokens`
   (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`,
-  `max_steps`, `diary: false`.
+  `max_steps`, `history_limit`, `history_image_minutes`, `diary: false`.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
 ### The included Discord interface

@@ -33,6 +33,43 @@ def owner_instructions(session: Session) -> str:
     return f"You are talking with your owner. Private instructions for them:\n{text}\n\n" if text and session.owner else ""
 
 
+def is_image(file: FileRef) -> bool:
+    return (file.mime or "").startswith("image/") or file.path.lower().endswith(IMAGE_SUFFIXES)
+
+
+def recent_images(items, now: float, window_s: float, limit: int = 4) -> list[FileRef]:
+    """Images people sent shortly before this request, newest last."""
+    found: list[FileRef] = []
+    for item in sorted(items, key=lambda entry: entry.at, reverse=True):
+        if now - item.at > window_s or len(found) >= limit:
+            break
+        if item.direction == "in":
+            found.extend(file for file in reversed(item.files) if is_image(file))
+    return list(reversed(found[:limit]))
+
+
+def combine_images(*groups) -> tuple[FileRef, ...]:
+    seen, result = set(), []
+    for file in (file for group in groups for file in group):
+        if file.path not in seen:
+            seen.add(file.path)
+            result.append(file)
+    return tuple(result[-6:])
+
+
+def history_line(item, shown: set[str]) -> str:
+    """One readable history entry from someone else: time, speaker, text, reply context, attachments."""
+    when = dt.datetime.fromtimestamp(item.at).astimezone().strftime("%m-%d %H:%M")
+    speaker = item.sender_name or ("assistant" if item.direction == "out" else item.sender_id)
+    text = f"[{when}] {speaker}: {item.text}"
+    if item.quoted_text:
+        text += f"\n(replying to: {item.quoted_text[:300]})"
+    for file in item.files:
+        text += f"\n[{'image' if is_image(file) else 'file'} {file.name or 'attachment'}"
+        text += ", shown to you with this request]" if file.path in shown else "]"
+    return text
+
+
 def images(state: dict) -> tuple[FileRef, ...]:
     return tuple(FileRef(**item) for item in state.get("images", []))
 
@@ -397,7 +434,9 @@ class RoomEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, job, tools, correction), profile=persona.profile,
-                output_schema=turn_schema(characters), schema_name="room_turn", images=images(state),
+                output_schema=turn_schema(characters), schema_name="room_turn",
+                images=combine_images(recent_images(self._history(session), session.trigger.received_at,
+                                                    self._image_window(session)), images(state)),
                 effort="medium" if job["observations"] or job["after"] else "low", max_tokens=self.max_tokens))
         except ModelError as error:
             if error.kind == "invalid_output":
@@ -481,12 +520,12 @@ class RoomEngine(Engine):
         if diary:
             system += "\n\n" + diary
         messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-        started = session.trigger.received_at
-        for item in [item for item in session.history.recent(self.history_limit * 2) if item.at < started][-self.history_limit:]:
+        items = self._history(session)
+        shown = {file.path for file in recent_images(items, session.trigger.received_at, self._image_window(session))}
+        for item in items:
             mine = item.direction == "out" and item.sender_name == persona.display_name
-            speaker = item.sender_name or ("assistant" if item.direction == "out" else item.sender_id)
             messages.append({"role": "assistant" if mine else "user",
-                             "content": item.text if mine else f"{speaker}: {item.text}"})
+                             "content": item.text if mine else history_line(item, shown)})
         trigger = session.trigger
         quoted = f"\n(Replying to: {trigger.quoted_text[:1000]})" if trigger.quoted_text else ""
         messages.append({"role": "user", "content": (
@@ -500,6 +539,15 @@ class RoomEngine(Engine):
             else:
                 merged.append(message)
         return merged
+
+    def _history(self, session: Session) -> list:
+        limit = int(session.options.get("history_limit") or self.history_limit)
+        started = session.trigger.received_at
+        return [item for item in session.history.recent(limit * 2) if item.at < started][-limit:]
+
+    @staticmethod
+    def _image_window(session: Session) -> float:
+        return float(session.options.get("history_image_minutes", 30)) * 60
 
     # ---- diary -----------------------------------------------------------------------------------
     @staticmethod

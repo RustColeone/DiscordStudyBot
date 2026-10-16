@@ -26,6 +26,46 @@ def add_images(state: dict, files) -> None:
             state["images"] = [*state.get("images", []), item][-6:]
 
 
+def is_image(file: FileRef) -> bool:
+    return (file.mime or "").startswith("image/") or file.path.lower().endswith(IMAGE_SUFFIXES)
+
+
+def recent_images(items, now: float, window_s: float, limit: int = 4) -> list[FileRef]:
+    """Images people sent shortly before this request (WeChat sends a picture and its question
+    separately), newest last."""
+    found: list[FileRef] = []
+    for item in sorted(items, key=lambda entry: entry.at, reverse=True):
+        if now - item.at > window_s or len(found) >= limit:
+            break
+        if item.direction == "in":
+            found.extend(file for file in reversed(item.files) if is_image(file))
+    return list(reversed(found[:limit]))
+
+
+def combine_images(*groups) -> tuple[FileRef, ...]:
+    seen, result = set(), []
+    for file in (file for group in groups for file in group):
+        if file.path not in seen:
+            seen.add(file.path)
+            result.append(file)
+    return tuple(result[-6:])
+
+
+def history_line(item, named: bool, shown: set[str]) -> str:
+    """One readable history entry: time, speaker, text, what it replied to and its attachments."""
+    if item.direction == "out":
+        return item.text
+    when = dt.datetime.fromtimestamp(item.at).astimezone().strftime("%m-%d %H:%M")
+    speaker = f"{item.sender_name or item.sender_id}: " if named else ""
+    text = f"[{when}] {speaker}{item.text}"
+    if item.quoted_text:
+        text += f"\n(replying to: {item.quoted_text[:300]})"
+    for file in item.files:
+        text += f"\n[{'image' if is_image(file) else 'file'} {file.name or 'attachment'}"
+        text += ", shown to you with this request]" if file.path in shown else "]"
+    return text
+
+
 def owner_instructions(session: Session) -> str:
     text = str(session.options.get("owner_instructions") or "").strip()
     return f"You are talking with your owner. Private instructions for them:\n{text}\n\n" if text and session.owner else ""
@@ -213,18 +253,11 @@ class AssistantEngine(Engine):
             system += ("\n\nOther requests in this conversation are being handled in parallel. Do not start the same "
                        "work again; if asked about it, say it is still in progress:\n" + activity)
         messages: list[dict[str, str]] = [{"role": "system", "content": system}]
-        started = session.trigger.received_at
-        items = [item for item in session.history.recent(self.history_limit * 3) if item.at < started]
-        if session.options.get("history_scope") == "sender" and not session.trigger.is_direct:
-            # Only this member's own messages and the replies that answered them.
-            sender = session.trigger.sender.id
-            theirs = {item.message_id for item in items if item.direction == "in" and item.sender_id == sender}
-            items = [item for item in items if (item.direction == "in" and item.sender_id == sender)
-                     or (item.direction == "out" and item.reply_to in theirs)]
-        for item in items[-self.history_limit:]:
+        items = self._history(session)
+        shown = {file.path for file in self._history_images(session, items)}
+        for item in items:
             role = "user" if item.direction == "in" else "assistant"
-            text = item.text if role == "assistant" or session.trigger.is_direct else f"{item.sender_name or item.sender_id}: {item.text}"
-            messages.append({"role": role, "content": text})
+            messages.append({"role": role, "content": history_line(item, not session.trigger.is_direct, shown)})
         messages.extend(dict(item) for item in state["transcript"])
         if correction:
             messages.append({"role": "user", "content": correction})
@@ -269,6 +302,26 @@ class AssistantEngine(Engine):
             except ValueError:
                 pass  # the core refused it (invalid, copied or over the limit); the reply is unaffected
 
+    def _history(self, session: Session) -> list:
+        limit = int(session.options.get("history_limit") or self.history_limit)
+        started = session.trigger.received_at
+        items = [item for item in session.history.recent(limit * 3) if item.at < started]
+        if session.options.get("history_scope") == "sender" and not session.trigger.is_direct:
+            # Only this member's own messages and the replies that answered them.
+            sender = session.trigger.sender.id
+            theirs = {item.message_id for item in items if item.direction == "in" and item.sender_id == sender}
+            items = [item for item in items if (item.direction == "in" and item.sender_id == sender)
+                     or (item.direction == "out" and item.reply_to in theirs)]
+        return items[-limit:]
+
+    @staticmethod
+    def _history_images(session: Session, items: list) -> list[FileRef]:
+        return recent_images(items, session.trigger.received_at,
+                             float(session.options.get("history_image_minutes", 30)) * 60)
+
+    def _images(self, session: Session, state: dict) -> tuple[FileRef, ...]:
+        return combine_images(self._history_images(session, self._history(session)), images(state))
+
     @staticmethod
     def _activity(session: Session) -> str:
         import time
@@ -288,7 +341,7 @@ class AssistantEngine(Engine):
             try:
                 result = await session.models.generate(ModelRequest(
                     self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
-                    images=images(state),
+                    images=self._images(session, state),
                     effort=self.effort, max_tokens=self.max_tokens))
             except ModelError as error:
                 if error.kind != "invalid_output" or attempt == 2:
@@ -321,7 +374,7 @@ class AssistantEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
-                    images=images(state),
+                    images=self._images(session, state),
                 effort=self.effort, max_tokens=self.max_tokens))
             message = (result.data or {}).get("message", "").strip()
         except ModelError:
