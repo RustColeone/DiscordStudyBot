@@ -306,7 +306,12 @@ The handler receives validated `arguments` and a `ToolContext`: `address`, `send
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
 `files` (files people attached to the run's requests); `storage` (your extension's private store, shared by your capabilities, committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a
-directory for this run's output files); `await progress(text)`.
+directory for this run's output files); `await progress(text)`; `await schedule(at, text)`
+(a one-time `reminder` notice in the calling conversation at Unix time `at`; returns its ID; raises
+`ValueError` for past times, more than a year ahead or more than 50 pending), `scheduled()` (the
+conversation's pending items: `id`, `at`, `text`, `sender_id`, `sender_name`) and
+`await unschedule(id)`. Interfaces render `reminder` notices; `data` has `sender_id`, `sender_name`
+and `at` (to mark late delivery).
 
 Return a `ToolResult`; do not raise for expected failures. `ToolResult.ok(summary, files=…,
 sources=…, data=…)`, `ToolResult.fail(summary, error_code, retryable=False)` (`retryable=True` only for

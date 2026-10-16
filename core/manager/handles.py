@@ -112,6 +112,15 @@ class ToolContextHandle:
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)
 
+    async def schedule(self, at: float, text: str) -> str:
+        return self._manager.gateway.schedule(self.address, at, text, self.sender)
+
+    def scheduled(self) -> list[dict]:
+        return self._manager.gateway.scheduled_for(self.address)
+
+    async def unschedule(self, scheduled_id: str) -> bool:
+        return self._manager.gateway.cancel_scheduled(self.address, scheduled_id)
+
 
 def model_error_result(error: ModelError) -> ToolResult:
     return ToolResult.fail(str(error), error.kind)

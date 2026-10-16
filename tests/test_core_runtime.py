@@ -375,6 +375,68 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(core.tank.runs(("done",), address="routine:r"), [])
         self.assertGreater(core.bottle.routines()["r"]["next_at"], routine["next_at"])
 
+    # ---- scheduled messages ------------------------------------------------------------------------
+    async def test_scheduled_message_fires_once_when_due_and_is_recorded(self):
+        now = [time.time()]
+        core = await self.core(clock=lambda: now[0])
+        address, alice = Address("chat", "room"), Sender("alice", "Alice")
+        first = core.gateway.schedule(address, now[0] + 600, "drink water", alice)
+        core.gateway.schedule(address, now[0] + 1200, "stretch", alice)
+        self.assertEqual([item["text"] for item in core.gateway.scheduled_for(address)], ["drink water", "stretch"])
+        await core.gateway.tick(now[0] + 599)
+        self.assertEqual(iface(core).notices("reminder"), [])
+        await core.gateway.tick(now[0] + 600)
+        await core.gateway.tick(now[0] + 601)
+        notices = iface(core).notices("reminder")
+        self.assertEqual([(n.text, n.data["scheduled_id"], n.data["sender_id"]) for n in notices],
+                         [("drink water", first, "alice")])
+        self.assertEqual([item["text"] for item in core.gateway.scheduled_for(address)], ["stretch"])
+        self.assertIn(("out", "drink water"), [(m.direction, m.text) for m in core.tank.recent_messages("chat:room")])
+
+    async def test_scheduled_message_limits_and_cancellation(self):
+        now = [time.time()]
+        core = await self.core(clock=lambda: now[0])
+        address, alice = Address("chat", "room"), Sender("alice", "Alice")
+        for at, text in ((now[0] - 1, "past"), (now[0] + 400 * 86400, "far"), (now[0] + 60, "  ")):
+            with self.assertRaises(ValueError):
+                core.gateway.schedule(address, at, text, alice)
+        scheduled_id = core.gateway.schedule(address, now[0] + 60, "x", alice)
+        self.assertFalse(core.gateway.cancel_scheduled(Address("chat", "other"), scheduled_id))
+        self.assertTrue(core.gateway.cancel_scheduled(address, scheduled_id))
+        self.assertFalse(core.gateway.cancel_scheduled(address, scheduled_id))
+        await core.gateway.tick(now[0] + 120)
+        self.assertEqual(iface(core).notices("reminder"), [])
+        core.gateway.MAX_SCHEDULED_PER_CONVERSATION = 2
+        core.gateway.schedule(address, now[0] + 60, "a", alice)
+        core.gateway.schedule(address, now[0] + 60, "b", alice)
+        with self.assertRaises(ValueError):
+            core.gateway.schedule(address, now[0] + 60, "c", alice)
+
+    async def test_scheduled_message_waits_for_interface_and_skips_closed_conversations(self):
+        now = [time.time()]
+        core = await self.core({"admission": {"chat:closed": {"enabled": False}}}, clock=lambda: now[0])
+        alice = Sender("alice", "Alice")
+        core.gateway.schedule(Address("chat", "room"), now[0] + 60, "later", alice)
+        closed = core.gateway.schedule(Address("chat", "closed"), now[0] + 60, "never", alice)
+        iface(core).port.set_ready(False, "reconnecting")
+        await core.gateway.tick(now[0] + 61)
+        self.assertEqual(iface(core).notices("reminder"), [])
+        self.assertEqual(len(core.gateway.scheduled_for(Address("chat", "room"))), 1)
+        iface(core).port.set_ready(True)
+        await core.gateway.tick(now[0] + 62)
+        self.assertEqual([n.text for n in iface(core).notices("reminder")], ["later"])
+        self.assertEqual(core.bottle.scheduled(status="skipped")[0]["id"], closed)
+
+    async def test_scheduled_message_interrupted_while_sending_is_never_sent_twice(self):
+        core = await self.core()
+        address = Address("chat", "room")
+        scheduled_id = core.gateway.schedule(address, time.time() + 60, "once", Sender("alice", "Alice"))
+        core.bottle.move_scheduled(scheduled_id, "firing")
+        core = await self.restart(core)
+        await core.gateway.tick(time.time() + 120)
+        self.assertEqual(iface(core).notices("reminder"), [])
+        self.assertEqual(core.bottle.scheduled(status="uncertain")[0]["id"], scheduled_id)
+
     async def test_interface_operations_and_core_capabilities_are_owner_only(self):
         core = await self.core({"assignments": {"*": {"preapprove": ["chat.reset"]}}})
         chat = iface(core)
