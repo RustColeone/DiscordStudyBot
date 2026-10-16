@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from app.bot_types import BotResponse
-from services.agent_loop import AgentLoop, AgentRun, AgentStep, parse_step
+from services.agent_loop import AgentLoop, AgentRun, AgentStep, parse_step, signature
 from services.agent_task import AgentTask
 from services.command_registry import CommandRegistry, CommandTool
 from services.tool_outcome import ToolOutcome, normalize_outcome
@@ -90,14 +90,31 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_successful_write_cannot_run_twice_after_approval(self):
         generate = AsyncMock(side_effect=[AgentStep("continue", "Apply.", [self.action("change")]),
-                                         AgentStep("continue", "Apply again.", [self.action("change")])])
+                                         AgentStep("continue", "Apply again.", [self.action("change")]),
+                                         AgentStep("continue", "Apply once more.", [self.action("change")])])
         execute = AsyncMock(return_value="write verified")
         loop = self.loop(generate, execute)
         await loop.run(self.state)
         await loop.run(self.state, confirm=True)
-        await loop.run(self.state, 'confirm', confirm=True)
         execute.assert_awaited_once()
-        self.assertEqual(self.state.status, "blocked")
+        self.assertEqual(self.state.status, "complete")
+        self.assertEqual([o["error_code"] for o in self.state.observations], [None, "already_completed"])
+        self.assertIn("already succeeded", self.state.observations[-1]["summary"])
+        # No fixed internal sentence reaches the conversation; only the model's own turns are spoken.
+        self.assertEqual([text for kind, text in self.timeline if kind == "say"], ["Apply.", "Apply again.", "Apply once more."])
+
+    async def test_repeated_prepare_is_reported_to_model_which_can_finish_normally(self):
+        generate = AsyncMock(side_effect=[AgentStep("continue", "Drawing.", [self.action("recover", "image")]),
+                                         AgentStep("continue", "Drawing again.", [self.action("recover", "image")]),
+                                         AgentStep("complete", "The image is already in the chat.")])
+        async def execute(action):
+            # The WeChat adapter marks a successful prepare (such as a delivered image) as completed.
+            self.state.writes_completed.add(signature(action))
+            return "image delivered"
+        await self.loop(generate, execute).run(self.state)
+        self.assertEqual(self.state.status, "complete")
+        self.assertEqual(self.timeline[-1], ("say", "The image is already in the chat."))
+        self.assertEqual([o["error_code"] for o in self.state.observations], [None, "already_completed"])
 
     async def test_nonretryable_failure_cannot_repeat_unchanged(self):
         generate = AsyncMock(return_value=AgentStep("continue", "Trying.", [self.action()]))

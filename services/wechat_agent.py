@@ -206,18 +206,22 @@ class WeChatConversationAgent:
                     retained[artifact_id] = response.attachment
                     while len(retained) > 5:
                         retained.pop(next(iter(retained)))
-                    outcome.summary += f'\nRetained artifact ID: {artifact_id}'
+                    retained_note = f'\nRetained artifact ID: {artifact_id}'
                     try:
                         await publish(BotResponse(attachment=response.attachment))
                     except ConversationChanged:
                         # Keep the tool outcome/file so fresh input does not re-run a completed download.
+                        outcome.summary += retained_note
                         state.observations.append({'action': action, **outcome.context()})
                         raise
                     except Exception:
                         outcome.status, outcome.error_code, outcome.retryable = 'failed', 'delivery_failed', False
-                        outcome.summary = 'File delivery could not be verified. Do not retry it automatically.\n' + outcome.summary
+                        outcome.summary = ('File delivery could not be verified. Do not retry it automatically.\n'
+                                           + outcome.summary + retained_note)
                         break
-                    outcome.summary += '\nThe desktop shows this file in the current conversation.'
+                    # The artifact is no longer retained, so the model must not be offered its ID.
+                    outcome.summary += ('\nThe desktop shows this file in the current conversation; it is already '
+                                        'delivered and needs no deliver_prepared_file call.')
                     retained.pop(artifact_id, None)
                     if response.attachment.delete_after_send:
                         Path(response.attachment.path).unlink(missing_ok=True)

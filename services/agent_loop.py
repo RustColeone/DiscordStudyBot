@@ -152,8 +152,20 @@ class AgentLoop:
             tool = self.registry.get(action["tool"])
             key = signature(action)
             if key in state.writes_completed:
-                await self._stop(state, "blocked", "That state-changing action already succeeded; I won't execute it twice.")
-                return False
+                if any(o["action"] == action and o.get("error_code") == "already_completed" for o in state.observations):
+                    # Told once already; the user has the result, so finish without repeating it.
+                    state.status = state.task.status = "complete"
+                    record_timing("agent_finished", status=state.status, steps=state.steps, actions=state.actions_taken)
+                    return False
+                earlier = next((o for o in reversed(state.observations)
+                                if o["action"] == action and o["status"] == "success"), None)
+                # Like the shared room: report the earlier success to the model instead of
+                # stopping with a fixed message that would reach the conversation verbatim.
+                state.observations.append({"action": action, **ToolOutcome(
+                    "success", [], "This exact action already succeeded earlier in this request and was not repeated. "
+                    "Its result is already with the user.\n" + (earlier["summary"] if earlier else ""),
+                    "already_completed").context()})
+                continue
             if tool.risk == "write" and key not in state.approved and not self.preauthorized(tool, action):
                 state.pending_actions = actions[index:]
                 state.status = state.task.status = "awaiting_confirmation"

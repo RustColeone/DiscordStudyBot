@@ -150,6 +150,19 @@ class ConversationAgentTests(unittest.IsolatedAsyncioTestCase):
         handler.assert_awaited_once()
         self.assertTrue(path.is_file())
 
+    async def test_delivered_file_is_not_offered_as_a_retained_artifact(self):
+        path = Path(self.directory.name) / 'image.png'
+        path.write_bytes(b'image fixture')
+        self.tool('draw', 'prepare', AsyncMock(return_value=[BotResponse(attachment=BotAttachment(str(path)))]))
+        self.generator.step.side_effect = [AgentStep('continue', 'Drawing.', [self.action('draw')]),
+                                           AgentStep('complete', 'Here it is.')]
+        await self.run_agent()
+        # The second model step receives the AgentRun (work) whose last observation is the delivered draw.
+        observed = self.generator.step.await_args.args[1].observations[-1]['summary']
+        self.assertNotIn('Retained artifact ID', observed)
+        self.assertIn('already delivered', observed)
+        self.assertEqual(self.agent.file_inventory(('account', 'alice')), [])
+
     async def test_retained_files_are_scoped_to_the_original_conversation(self):
         path = Path(self.directory.name) / 'one.txt'
         path.write_text('test')
