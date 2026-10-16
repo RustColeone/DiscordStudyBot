@@ -400,6 +400,9 @@ to any conversation:
   the original request).
 * Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
   (`low`).
+* Diary: the system prompt includes the persona's notes about the sender (matching ones first), and a
+  turn may add `diary: [{key, kind, note, importance}]` (at most 2; importance 3+ is kept). Turn it
+  off with the assignment option `diary: false`.
 
 ### Diaries
 
