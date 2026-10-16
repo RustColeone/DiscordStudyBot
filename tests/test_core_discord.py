@@ -287,6 +287,10 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("engine exploded", blocks[0])
         self.assertIn("wechat:room · converting video", blocks[0])
         self.assertIn("wechat:room · uploading", blocks[0])
+        await self.discord.deliver(Reply(owner, "event", "reading failed", code="wechat_error",
+                                         data={"origin_address": "wechat:_interface", "interface": "wechat"}))
+        self.assertEqual(len(self.owner.dm_channel.texts()), 1)
+        self.assertIn("wechat · reading failed", self.owner.dm_channel.texts()[0])
 
     async def test_long_approval_arguments_are_shown_in_a_json_block(self):
         from contracts import Reply
