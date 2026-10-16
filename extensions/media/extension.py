@@ -1,12 +1,13 @@
-"""Media extension: download a video (full or a range) fitted to the conversation's upload limit."""
+"""Media extension: video downloads and clips fitted to the conversation's upload limit."""
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from contracts import Capability, Contributions, Extension, FileRef, Risk, ToolResult
 
-from . import video
+from . import clip, video
 
 AUDIO_CHOICES = ("128k", "96k", "64k")
 
@@ -71,7 +72,125 @@ async def download_video(arguments, context) -> ToolResult:
         data={"method": method, "duration_s": duration, "size_mb": round(size_mb, 2), "budget_mb": budget})
 
 
+QUALITY = {
+    "resolution": {"type": "string", "enum": ["360p", "480p", "720p", "1080p"]},
+    "fps": {"type": "integer", "minimum": 1, "maximum": 60},
+    "bitrate": {"type": "string", "pattern": "^[1-9][0-9]{1,4}k$",
+                "description": "Video bitrate, or the audio bitrate for audio formats"},
+    "format": {"type": "string", "enum": list(clip.FORMATS), "description": "Output format (default mp4)"},
+    "keep_file": {"type": "boolean", "description": "Also keep the rendered file on the bot host"},
+}
+
+
+def clip_capabilities(keep_dir: Path) -> list[Capability]:
+    async def clip_video(arguments, context) -> ToolResult:
+        try:
+            clips = await clip.create(context, [(arguments["url"].strip(), arguments.get("start"), arguments.get("end"))],
+                                      arguments.get("format") or "mp4", arguments.get("resolution"),
+                                      arguments.get("fps"), arguments.get("bitrate"), bool(arguments.get("keep_file")))
+        except clip.ClipError as error:
+            return ToolResult.fail(str(error), error.code)
+        clip.save(context, clips)
+        return clip.preview_result(context, clips, commands=False)
+
+    async def adjust_pending_clip(arguments, context) -> ToolResult:
+        limit = float(context.display.max_upload_mb)
+        action, note = arguments["action"], ""
+        try:
+            clips, index = clip.pick(context, arguments.get("clip"))
+            item = clips[index]
+            if action == "trim":
+                if not (arguments.get("start") or arguments.get("end")):
+                    return ToolResult.fail("Trimming needs a start or an end time.", "invalid_arguments")
+                clip.trim(item, arguments.get("start"), arguments.get("end"))
+            elif action == "fit_upload":
+                if not clip.fit(item, limit, arguments.get("resolution")):
+                    return ToolResult.ask(
+                        f"{clip.duration_of(item):g}s is too long to fit the {limit:g} MB upload limit at usable "
+                        "quality. Nothing was changed. Ask for a shorter start and end time.",
+                        error_code="compression_budget", data={"limit_mb": limit})
+            elif action == "keep_full_quality":
+                item["keep_file"] = True
+                if item["estimated_size_mb"] > limit:
+                    note = ("⚠️ This remains too large to upload here. It can be processed and kept on the bot host, "
+                            "but trimming or compression is required for delivery in this conversation.")
+            elif not clip.set_quality(item, limit, arguments.get("resolution"), arguments.get("fps"),
+                                      arguments.get("bitrate"), arguments.get("format"), arguments.get("keep_file")):
+                return ToolResult.fail("set_quality needs resolution, fps, bitrate, format or keep_file.",
+                                       "invalid_arguments")
+        except clip.ClipError as error:
+            return ToolResult.fail(str(error), error.code)
+        clip.save(context, clips)
+        return clip.preview_result(context, clips, commands=False, note=note)
+
+    async def manage_pending_clips(arguments, context) -> ToolResult:
+        if arguments["action"] == "cancel":
+            return clip.cancel(context)
+        return await clip.confirm(context, keep_dir, arguments.get("skip") or (), arguments.get("keep_file"))
+
+    async def list_pending_clips(arguments, context) -> ToolResult:
+        clips = clip.load(context)
+        if not clips:
+            return ToolResult.ok("There are no pending clips in this conversation.", data={"clips": []})
+        limit = float(context.display.max_upload_mb)
+        return ToolResult.ok(clip.preview_text(clips, limit, context.display.markdown, commands=False),
+                             data={"limit_mb": limit, "clips": [clip.summary(item) for item in clips]})
+
+    async def clip_command(arguments, context) -> ToolResult:
+        return await clip.command(context, arguments.get("text", ""), keep_dir)
+
+    return [
+        Capability(
+            "media.clip_video",
+            "Inspect a video URL and create a reversible pending clip preview with size estimates for this "
+            "conversation's upload limit; nothing is rendered yet. Resolve 'this video' from recent conversation. "
+            "If no time range or delivery goal is given, prepare the preview first; when it is too large, ask whether "
+            "to trim, compress to the upload limit, or keep full quality on the bot host. For a plain download use "
+            "media.download_video instead.",
+            clip_video,
+            parameters={"url": {"type": "string", "description": "Video page URL"},
+                        "start": {"type": "string", "description": "Optional start, e.g. 1:05"},
+                        "end": {"type": "string", "description": "Optional end, e.g. 1:20"}, **QUALITY},
+            required=("url",), risk=Risk.PREPARE, needs={"files"}, timeout_s=300),
+        Capability(
+            "media.adjust_pending_clip",
+            "Update a pending clip after the person states the goal: trim (start and/or end), fit_upload (compress "
+            "the current range under this conversation's upload limit), keep_full_quality (keep the current quality "
+            "and keep the file on the bot host when it cannot be uploaded), or set_quality (explicit resolution, "
+            "fps, bitrate, format or keep_file). Returns the updated preview.",
+            adjust_pending_clip,
+            parameters={"action": {"type": "string", "enum": ["trim", "fit_upload", "keep_full_quality", "set_quality"],
+                                   "description": "How to adapt the pending clip"},
+                        "clip": {"type": "integer", "minimum": 1, "description": "One-based clip number (default 1)"},
+                        "start": {"type": "string", "description": "Trim start, e.g. 1:05"},
+                        "end": {"type": "string", "description": "Trim end, e.g. 1:20"}, **QUALITY},
+            required=("action",), risk=Risk.PREPARE),
+        Capability(
+            "media.manage_pending_clips",
+            "Confirm the pending clips (render them and deliver the files to this conversation) or cancel the "
+            "pending preview. The destination is the current conversation.",
+            manage_pending_clips,
+            parameters={"action": {"type": "string", "enum": ["confirm", "cancel"]},
+                        "skip": {"type": "array", "items": {"type": "integer", "minimum": 1},
+                                 "description": "One-based clip numbers to leave out when confirming"},
+                        "keep_file": QUALITY["keep_file"]},
+            required=("action",), risk=Risk.PREPARE, needs={"files"}, timeout_s=1800),
+        Capability(
+            "media.list_pending_clips",
+            "Show this conversation's pending clips (settings, size estimates and the upload limit).",
+            list_pending_clips, risk=Risk.READ),
+        Capability(
+            "media.clip_command",
+            "The $clip command: preview, adjust, confirm or cancel clips with legacy flags.",
+            clip_command, parameters={"text": {"type": "string"}}, risk=Risk.PREPARE, internal=True,
+            needs={"files"}, command="clip", command_argument="text", timeout_s=1800),
+    ]
+
+
 def setup(context) -> Contributions:
+    keep_dir = Path(str(context.config.get("keep_dir") or "clips")).expanduser()
+    if not keep_dir.is_absolute():
+        keep_dir = context.data_dir / keep_dir
     return Contributions(capabilities=[Capability(
         "media.download_video",
         "Download a video from a link (YouTube, Bilibili and most sites) and deliver it as a file. The full video is "
@@ -88,7 +207,8 @@ def setup(context) -> Contributions:
             "audio_bitrate": {"type": "string", "pattern": "^(32|48|64|96|128|160|192|256|320)k$"},
         },
         required=("url",), risk=Risk.PREPARE, needs={"files"}, command="video", command_argument="url",
-        timeout_s=1800)])
+        timeout_s=1800), *clip_capabilities(keep_dir)])
 
 
-EXTENSION = Extension("media", setup, contracts="1", version="1", description="Video downloads fitted to upload limits")
+EXTENSION = Extension("media", setup, contracts="1", version="1",
+                      description="Video downloads and clips fitted to upload limits")

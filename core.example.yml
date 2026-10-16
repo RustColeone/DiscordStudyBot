@@ -15,7 +15,7 @@
 #   - extensions/discord
 #   - extensions/assistant
 #   - extensions/basic
-#   - extensions/media           # $video: downloads fitted to the upload limit (yt-dlp + ffmpeg)
+#   - extensions/media           # $video downloads and $clip previews/clips, fitted to the upload limit (yt-dlp + ffmpeg)
 #   - extensions/images          # $draw: Gemini or OpenAI images
 #   - extensions/system          # $status: host status
 #   - extensions/reminders       # $remind 10m drink water, $reminders, $unremind <id>
@@ -29,6 +29,7 @@
 #   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25}
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
 #   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
+#   media: {keep_dir: clips}     # --keep-file copies (relative to data/core/extensions/media)
 #   web: {grounding: true, grounding_model: gemini-3.8-flash, searxng_url: ""}   # or SEARXNG_URL in .env
 #   cli: {conversation: local, user: local, user_name: you}
 

@@ -1,7 +1,8 @@
 """Video download and fitting (ported from providers/clip_query.py and features/feature_clip.py).
 
 Downloads with yt-dlp, keeps the full requested range, and fits the file budget: a fitting H.264/AAC
-source is stream-copied; otherwise the video is re-encoded with an adaptive audio bitrate.
+source is stream-copied; otherwise the video is re-encoded with an adaptive audio bitrate. Clips may
+also be rendered as another video container, a GIF or audio only.
 """
 
 from __future__ import annotations
@@ -15,6 +16,9 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 Progress = Optional[Callable[[str], Awaitable[None]]]
+
+
+AUDIO_FORMATS = ("mp3", "m4a", "wav", "aac", "ogg", "flac")
 
 
 class VideoSourceError(RuntimeError):
@@ -32,6 +36,7 @@ class VideoPlan:
     audio_bitrate: str
     copy_budget_mb: Optional[float] = None
     stream_copy: Optional[dict] = field(default=None)
+    output_format: str = "mp4"
 
 
 def parse_time(text: str) -> float:
@@ -139,7 +144,8 @@ async def render(plan: VideoPlan, output: Path, progress: Progress = None) -> Pa
     """Download and produce `output` (MP4). Raises VideoSourceError or RuntimeError."""
     import yt_dlp
     template = str(output.with_suffix(".source.%(ext)s"))
-    base = _ydl_options({"format": "bestvideo+bestaudio/best", "outtmpl": template})
+    audio_only = plan.output_format in AUDIO_FORMATS
+    base = _ydl_options({"format": "bestaudio/best" if audio_only else "bestvideo+bestaudio/best", "outtmpl": template})
     if progress is not None:
         await progress("Downloading the source video...")
 
@@ -170,18 +176,36 @@ async def render(plan: VideoPlan, output: Path, progress: Progress = None) -> Pa
             if progress is not None:
                 await progress("The copied source did not fit; re-encoding instead...")
         if progress is not None:
-            await progress(f"Encoding {plan.end - plan.start:g}s at {plan.resolution}, {plan.fps} fps, "
-                           f"video {plan.bitrate} + audio {plan.audio_bitrate}...")
-        filters = f"scale=-2:{plan.resolution.removesuffix('p')},fps={plan.fps}"
+            await progress(f"Encoding {plan.end - plan.start:g}s {describe(plan)}...")
         code, error = await _ffmpeg("-ss", str(plan.start), "-i", source, "-t", str(plan.end - plan.start),
-                                    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", plan.audio_bitrate,
-                                    "-vf", filters, "-b:v", plan.bitrate, "-movflags", "+faststart", "-y", str(output))
+                                    *_encoding(plan), "-y", str(output))
         if code != 0:
             raise RuntimeError("FFmpeg processing failed: " + error[-600:])
         return output
     finally:
         with suppress(OSError):
             os.remove(source)
+
+
+def describe(plan: VideoPlan) -> str:
+    if plan.output_format in AUDIO_FORMATS:
+        return f"to {plan.output_format} audio at {plan.audio_bitrate}"
+    if plan.output_format == "gif":
+        return f"to a {plan.fps or 15} fps GIF"
+    return (f"at {plan.resolution}, {plan.fps} fps, video {plan.bitrate} + audio {plan.audio_bitrate}"
+            + ("" if plan.output_format == "mp4" else f" ({plan.output_format})"))
+
+
+def _encoding(plan: VideoPlan) -> list[str]:
+    if plan.output_format in AUDIO_FORMATS:
+        return ["-vn", "-b:a", plan.audio_bitrate]
+    if plan.output_format == "gif":
+        return ["-vf", f"fps={plan.fps or 15},scale=-1:360:flags=lanczos", "-loop", "0"]
+    arguments = ["-vf", f"scale=-2:{plan.resolution.removesuffix('p')},fps={plan.fps}", "-b:v", plan.bitrate]
+    if plan.output_format == "mp4":
+        arguments = ["-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", plan.audio_bitrate,
+                     *arguments, "-movflags", "+faststart"]
+    return arguments
 
 
 async def _ffmpeg(*arguments: str) -> tuple[int, str]:

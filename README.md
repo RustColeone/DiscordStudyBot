@@ -65,8 +65,8 @@ Quick start from a fresh clone:
    key (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `CLAUDE_API_KEY`).
 3. `python -m core`. It prints an invite link if the bot is in no server yet; invite it.
 4. DM the bot, or mention it (or reply to it) in a server channel. The application owner is the bot's
-   owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands, including `$video <url>`
-   (needs ffmpeg), `$draw <prompt>`, `$status`, `$remind 10m <text>`, `$search <query>`, `$read <url>`, `$wolfram <query>` (needs `WOLFRAM_APPID`) and
+   owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands, including `$video <url>` and
+   `$clip -u <url> -s 1:05 -e 1:20` then `$clip --confirm` (need ffmpeg), `$draw <prompt>`, `$status`, `$remind 10m <text>`, `$search <query>`, `$read <url>`, `$wolfram <query>` (needs `WOLFRAM_APPID`) and
    `$memory` (what the bot remembers about you here);
    the assistant also uses them when asked. To give a channel the shared room of four characters,
    assign it the `room` engine in `core.yml` (see the example).
