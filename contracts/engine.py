@@ -158,6 +158,7 @@ class Session(Protocol):
     tools: Tools
     history: History
     options: Mapping[str, Any]
+    owner: bool  # the trigger's sender is an owner of its interface (never for routines)
 
     def memory(self, persona: str) -> Store:
         """The persona's private key-value store, shared by all its conversations."""

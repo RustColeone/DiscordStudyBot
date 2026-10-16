@@ -26,6 +26,11 @@ def add_images(state: dict, files) -> None:
             state["images"] = [*state.get("images", []), item][-6:]
 
 
+def owner_instructions(session: Session) -> str:
+    text = str(session.options.get("owner_instructions") or "").strip()
+    return f"You are talking with your owner. Private instructions for them:\n{text}\n\n" if text and session.owner else ""
+
+
 def images(state: dict) -> tuple[FileRef, ...]:
     return tuple(FileRef(**item) for item in state.get("images", []))
 
@@ -197,6 +202,7 @@ class AssistantEngine(Engine):
         system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}. "
                   f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')}).\n\n"
                   + (f"Instructions for this conversation:\n{instructions}\n\n" if instructions else "")
+                  + owner_instructions(session)
                   + CONTRACT.format(display=f"{style} Keep each message under {display.max_text_chars} characters.",
                                     tools=json.dumps(tools, ensure_ascii=False) if tools else "(none)"))
         diary = self._diary_prompt(session)

@@ -75,6 +75,7 @@
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
 #     options: {instructions: "Keep replies short.", diary: true}   # diary: persona notes about each person
+#     # owner_instructions: private text added only when an owner speaks; max_steps: per-assignment step limit
 #   "discord:123456789012345678":   # a server channel
 #     engine: assistant
 #     persona: assistant
