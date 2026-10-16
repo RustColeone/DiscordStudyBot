@@ -266,7 +266,7 @@ class RoomEngine(Engine):
                 if not await self._act(session, state, job, actions):
                     return
             while True:
-                if state["steps"] >= self.max_steps:
+                if state["steps"] >= self._limit(session):
                     await self._block(session, state, job, "step_limit")
                     return
                 state["steps"] += 1
@@ -399,10 +399,14 @@ class RoomEngine(Engine):
                 raise ValueError(f"Your previous reply was not valid: {error}. Return one JSON object.") from None
             raise
         turn = result.data
-        self._check(state, job, turn, names, set(characters))
+        self._check(state, job, turn, names, set(characters), self._limit(session))
         return turn
 
-    def _check(self, state: dict, job: dict, turn: dict, names: set[str], characters: set[str]) -> None:
+    def _limit(self, session: Session) -> int:
+        return max(4, min(int(session.options.get("max_steps") or self.max_steps), 50))
+
+    def _check(self, state: dict, job: dict, turn: dict, names: set[str], characters: set[str],
+               limit: int) -> None:
         def reject(problem: str):
             raise ValueError(f"Your previous turn was rejected: {problem} Return the full corrected turn.")
         if not turn["message"].strip():
@@ -419,7 +423,7 @@ class RoomEngine(Engine):
         if turn["status"] == "complete" and job["observations"] and job["observations"][-1]["status"] != "success":
             reject("your latest tool failed or needs input; recover, or report blocked or needs_input.")
         jobs = state["jobs"]
-        if len(jobs) + len(turn["jobs"]) > self.max_steps:
+        if len(jobs) + len(turn["jobs"]) > limit:
             reject("the room's work board is full.")
         proposed: dict[str, list[str]] = {}
         for item in turn["jobs"]:
