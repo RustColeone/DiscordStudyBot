@@ -235,12 +235,14 @@ class ClipFeature:
                               'render_attempted': False, 'upload_attempted': False},
                 )]
             resolution, bitrate, fps = fit
+            explicit_quality = any(arguments.get(key) for key in ('fps', 'resolution', 'bitrate', 'audio_bitrate'))
             fps = arguments.get("fps") or fps
             clip = clipQuery.ClipSpec(
                 url=arguments["url"], start=start, end=end,
                 resolution=arguments.get("resolution") or resolution,
                 bitrate=arguments.get("bitrate") or bitrate, fps=fps, output_format="mp4",
                 video_title=title, source_site=site, audio_bitrate=audio_bitrate,
+                copy_budget_mb=max_size if start == 0 and end >= full_duration and not explicit_quality else None,
             )
             encoding = {
                 "duration_seconds": end - start, "fps": fps, "resolution": clip.resolution,
@@ -250,15 +252,27 @@ class ClipFeature:
                                                                   audio_bitrate=clip.audio_bitrate),
             }
             if progress is not None:
-                await progress(f"Keeping {end - start:g}s at {fps} fps; video {clip.bitrate} + audio {clip.audio_bitrate}, "
+                await progress(f"Keeping {end - start:g}s; an H.264 source that fits {max_size:g} MB ({budget_source}) is copied as is, "
+                               f"otherwise encoding at {fps} fps, video {clip.bitrate} + audio {clip.audio_bitrate}, "
+                               f"estimated {encoding['estimated_size_mb']:.2f} MB."
+                               if clip.copy_budget_mb else
+                               f"Keeping {end - start:g}s at {fps} fps; video {clip.bitrate} + audio {clip.audio_bitrate}, "
                                f"estimated {encoding['estimated_size_mb']:.2f} MB / {max_size:g} MB file budget ({budget_source}).")
             responses = await self._build_clip_file_responses([clip], max_size, progress)
+            if clip.stream_copy:
+                copied = clip.stream_copy
+                encoding.update(method='stream_copy', fps=copied['fps'], resolution=f"{copied['width']}x{copied['height']}",
+                                video_bitrate='source', audio_bitrate='source', video_codec=copied['video_codec'],
+                                audio_codec=copied['audio_codec'], estimated_size_mb=copied['estimated_size_mb'])
+                settings = (f"{copied['fps']} fps; {copied['width']}x{copied['height']}; source H.264/AAC copied without re-encoding")
+            else:
+                encoding['method'] = 'reencode'
+                settings = f"{fps} fps; {clip.resolution}; video {clip.bitrate} + audio {clip.audio_bitrate}"
             for response in responses:
                 response.metadata["video_encoding"] = encoding
                 # The next character turn receives measured settings, rather than inventing a bitrate calculation.
                 response.text = (response.text or "") + (
-                    f"\nRequested range: {end - start:g}s; {fps} fps; {clip.resolution}; "
-                    f"video {clip.bitrate} + audio {clip.audio_bitrate}; estimated {encoding['estimated_size_mb']:.2f} MB; "
+                    f"\nRequested range: {end - start:g}s; {settings}; estimated {encoding['estimated_size_mb']:.2f} MB; "
                     f"file budget {max_size:g} MB ({budget_source}). The rendered file size is checked separately.")
             return responses
         except Exception as error:

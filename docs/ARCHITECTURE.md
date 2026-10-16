@@ -127,7 +127,9 @@ error text rather than raising, and orchestration recorded those invocations as
 `source_unavailable`; changing encoding settings doesn't resolve source access.
 
 `download_video` is a capability that downloads the full duration by default and
-chooses compression for the current upload limit. `clip_video` remains a capability
+chooses compression for the current upload limit. When an H.264/AAC source pair already
+fits that limit and no explicit quality was requested, it is stream-copied instead of
+re-encoded. `clip_video` remains a capability
 for an explicitly requested preview. Download behavior belongs in the tool adapter,
 not in the general execution loop. Blocking yt-dlp calls run in worker threads so they
 don't freeze Discord's event loop. Video selection permits a combined format fallback.

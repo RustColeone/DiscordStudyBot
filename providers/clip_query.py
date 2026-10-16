@@ -4,6 +4,7 @@ Supports YouTube, Bilibili, and 1000+ other sites
 """
 import os
 import asyncio
+from contextlib import suppress
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 import re
@@ -26,6 +27,9 @@ class ClipSpec:
     keep_file: bool = False
     range_explicit: bool = False
     audio_bitrate: str = '128k'
+    # When set, a full-range MP4 may stream-copy an H.264/AAC source that fits this budget.
+    copy_budget_mb: Optional[float] = None
+    stream_copy: Optional[dict] = None
 
 @dataclass
 class QualityOption:
@@ -217,6 +221,45 @@ async def get_video_info(url: str) -> Tuple[str, str, float]:
         print(f"Error getting video info: {e}")
         raise VideoSourceError(f"Unable to inspect the video source: {e}") from e
 
+def _format_bytes(entry: dict, duration: float) -> Optional[float]:
+    size = entry.get('filesize') or entry.get('filesize_approx')
+    if size:
+        return float(size)
+    rate = entry.get('tbr') or entry.get('vbr') or entry.get('abr')
+    return float(rate) * 1000 / 8 * duration if rate else None
+
+
+def select_copy_formats(formats: List[dict], duration: float, budget_mb: float, max_height: int = 1080) -> Optional[dict]:
+    """Choose the largest H.264 video + AAC audio source pair that fits the budget without re-encoding."""
+    limit = budget_mb * 0.95 * 1024 * 1024
+    videos, audios = [], []
+    for entry in formats:
+        vcodec, acodec = str(entry.get('vcodec') or 'none'), str(entry.get('acodec') or 'none')
+        if entry.get('ext') not in ('mp4', 'm4a') or str(entry.get('protocol') or 'https').startswith(('m3u8', 'f4m')):
+            continue
+        size = _format_bytes(entry, duration)
+        if size is None:
+            continue
+        if vcodec.startswith(('avc1', 'h264')) and acodec == 'none' and (entry.get('height') or 0) <= max_height:
+            videos.append((entry, size))
+        elif acodec.startswith(('mp4a', 'aac')) and vcodec == 'none':
+            audios.append((entry, size))
+    best = None
+    for video, video_size in videos:
+        for audio, audio_size in audios:
+            if video_size + audio_size > limit:
+                continue
+            rank = (video.get('height') or 0, video.get('tbr') or 0, audio.get('abr') or 0)
+            if best is None or rank > best[0]:
+                best = (rank, video, audio, video_size + audio_size)
+    if best is None:
+        return None
+    _, video, audio, size = best
+    return {'format': f"{video['format_id']}+{audio['format_id']}", 'width': video.get('width'),
+            'height': video.get('height'), 'fps': video.get('fps'), 'video_codec': video.get('vcodec'),
+            'audio_codec': audio.get('acodec'), 'estimated_size_mb': round(size / 1024 / 1024, 2)}
+
+
 async def create_clip(clip: ClipSpec, output_path: str, progress=None) -> bool:
     """
     Download and process clip using yt-dlp and FFmpeg
@@ -252,13 +295,36 @@ async def create_clip(clip: ClipSpec, output_path: str, progress=None) -> bool:
         if progress is not None:
             await progress("Downloading source media...")
         def download():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                try:
-                    info = ydl.extract_info(clip.url, download=True)
-                    return ydl.prepare_filename(info)
-                except Exception as error:
-                    raise VideoSourceError(f"Unable to download the video source: {error}") from error
-        temp_file = await asyncio.to_thread(download)
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(clip.url, download=False)
+                copy = None
+                if clip.copy_budget_mb and not is_audio and clip.output_format == 'mp4':
+                    copy = select_copy_formats(info.get('formats') or [], clip.end - clip.start, clip.copy_budget_mb)
+                with yt_dlp.YoutubeDL({**ydl_opts, 'format': copy['format'] if copy else ydl_opts['format']}) as ydl:
+                    result = ydl.process_ie_result(info, download=True)
+                    return ydl.prepare_filename(result), copy
+            except Exception as error:
+                raise VideoSourceError(f"Unable to download the video source: {error}") from error
+        temp_file, copy = await asyncio.to_thread(download)
+
+        if copy is not None:
+            if progress is not None:
+                await progress(f"Source {copy['width']}x{copy['height']} H.264/AAC (~{copy['estimated_size_mb']:.1f} MB) "
+                               "fits the file budget; copying it without re-encoding...")
+            process = await asyncio.create_subprocess_exec(
+                'ffmpeg', '-i', temp_file, '-map', '0:v:0', '-map', '0:a:0', '-c', 'copy',
+                '-movflags', '+faststart', '-y', output_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await process.communicate()
+            if (not process.returncode and os.path.exists(output_path)
+                    and os.path.getsize(output_path) / 1024 / 1024 <= clip.copy_budget_mb):
+                clip.stream_copy = copy
+                with suppress(OSError):
+                    os.remove(temp_file)
+                return True
+            if progress is not None:
+                await progress("The copied source did not fit the file budget; re-encoding instead...")
         
         # Build FFmpeg command for clipping and processing
         duration = clip.end - clip.start

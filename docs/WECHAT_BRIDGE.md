@@ -207,7 +207,9 @@ local policy, configurable with `WECHAT_BRIDGE_MAX_UPLOAD_MB` (1–100); it is n
 maximum server limit. The installed Linux client's exact server limit has not been established. A user
 can request a smaller output with `download_video.max_size_mb`; this cannot raise the local budget.
 Video fitting adapts audio bitrate along with video bitrate, keeping the full requested duration unless
-the user chooses a shorter range. Estimates, measured render sizes and actual upload failures remain
+the user chooses a shorter range. A full-duration request without explicit resolution, fps or bitrate
+first looks for an H.264 + AAC source pair that fits the budget and stream-copies it; only otherwise does
+the Pi re-encode in software. Estimates, measured render sizes and actual upload failures remain
 distinct evidence; a failed estimate must not be described as a WeChat rejection.
 The helper verifies the selected path, a single
 new file object in an initially empty editor, and the outgoing message after Send. MP4s can appear as
@@ -521,3 +523,12 @@ quoted delivery all still apply. No cursor (first start), a changed settings rev
 keep the plain baseline, so enabling a chat never answers backlog. The cursor is written only when it
 advances. Work already in flight when the process stops is still not resumed. Startup logs show
 `catch_up_messages` counts without message contents.
+
+The same night's 86.66 MiB full video (request `1293cd8c3a09`) spent about 58 s downloading an AV1
+source (58.5 MB) and about 205 s re-encoding it on the Pi with software x264 (measured 0.53x real time),
+producing a larger 90.9 MB file. It then waited 34 s for the desktop lock held by another chat's file
+receipt check and its upload never received a server ID (`status=1`, `upload_status=2`) before the
+desktop client exited around 00:10. A fitting H.264 source (1280x548 + AAC, 80.5 MiB) was available;
+the new stream-copy path prepared the same full video in 43 s live, verified by `ffprobe` (385.45 s,
+H.264/AAC, 30 fps, `moov` first). That check did not send anything to WeChat. Whether this Linux client
+completes inline uploads of this size remains unverified.
