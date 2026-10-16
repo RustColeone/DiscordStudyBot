@@ -32,6 +32,7 @@ class ReminderTests(unittest.IsolatedAsyncioTestCase):
         listing = self.chat.texts("room")[-1]
         self.assertLess(listing.index("drink water (Alice)"), listing.index("stretch (Bob)"))
         await self.core.gateway.tick(time.time() + 11 * 60)
+        await settle(self.core)
         notices = self.chat.notices("reminder")
         self.assertEqual([(n.address.conversation, n.text, n.data["sender_id"]) for n in notices],
                          [("room", "drink water", "alice")])
