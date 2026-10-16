@@ -107,6 +107,8 @@ class DiscordInterface(Interface):
         self.token = token
         self.attachments_dir = Path(data_dir) / "attachments"
         self.attachment_max_bytes = int(attachment_max_mb * 1024 * 1024)
+        # Legacy habits such as "$agent hi": the prefix is dropped and the message counts as addressed.
+        self.talk_prefixes = tuple(str(item).strip() for item in config.get("talk_prefixes") or () if str(item).strip())
         self.client = client
         self.port = None
         self._task: asyncio.Task | None = None
@@ -235,7 +237,11 @@ class DiscordInterface(Interface):
                          and getattr(resolved_message.author, "id", None) == user.id)
         if user is not None:
             content = re.sub(rf"<@!?{user.id}>", "", content).strip()
-        addressed = is_direct or mentioned or replied_to_me
+        prefixed = next((prefix for prefix in self.talk_prefixes
+                         if content == prefix or content.startswith(prefix + " ")), None)
+        if prefixed:
+            content = content[len(prefixed):].strip()
+        addressed = is_direct or mentioned or replied_to_me or bool(prefixed)
         files, kinds = [], []
         for attachment in message.attachments or []:
             kinds.append(attachment_kind(getattr(attachment, "content_type", "")))
@@ -251,7 +257,7 @@ class DiscordInterface(Interface):
         return Request(
             id=str(message.id), address=Address(self.name, conversation), sender=Sender(str(message.author.id), name),
             text=content, received_at=message.created_at.timestamp(), is_direct=is_direct,
-            mentions_me=True if is_direct else (mentioned or replied_to_me),
+            mentions_me=True if is_direct else (mentioned or replied_to_me or bool(prefixed)),
             reply_to=str(reference.message_id) if reference and reference.message_id else None,
             quoted_text=(resolved_message.content or "")[:1000] if resolved_message is not None else "",
             kind=kind, files=tuple(files), display=display,

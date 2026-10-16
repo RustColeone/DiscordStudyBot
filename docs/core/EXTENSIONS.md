@@ -453,7 +453,8 @@ display `$$…$$` is sent as PNG images between the text parts. Its public opera
 anyone, acting only on the calling conversation) are `discord.music` (`$music`), `music_status`,
 `music_control`, `queue_music` (one player per server, in the caller's voice channel), `time`
 (`$time`), `clock_start` (`$start`) and `clock_stop` (`$stop`); `status` and `invite` are owner-only.
-Options: `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
+Options: `talk_prefixes` (for example `["$agent", "$chat"]`: a message starting with one is addressed
+to the bot like a mention, without the prefix), `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
 `math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` (10).
 
 ## Core capabilities
