@@ -1,4 +1,4 @@
-"""Persona diaries: core rules and the $memory command."""
+"""Persona diaries: core rules, the $memory command and the assistant engine's use of them."""
 
 import tempfile
 import time
@@ -41,6 +41,20 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
     def system(self, adapter, index=0):
         return adapter.calls[index]["messages"][0]["content"]
 
+    async def test_notes_are_kept_per_person_and_conversation_and_recalled_next_time(self):
+        core, adapter = await self.core([
+            turn("Nice!", diary=[note("music.favorite", "Loves Andy Hui's songs"), note("mood", "fine", 2)]),
+            turn("Hi Bob."), turn("Hi again."), turn("Hello.")])
+        for text, options in (("I really love 古巨基", {}), ("hello", {"sender": "bob", "name": "Bob"}),
+                              ("any music for me?", {}), ("hi", {"conversation": "elsewhere"})):
+            await iface(core).say(text, **options)
+            await settle(core)
+        self.assertNotIn("Andy Hui", self.system(adapter, 1))
+        self.assertIn('"note": "Loves Andy Hui\'s songs"', self.system(adapter, 2))
+        self.assertIn("Your diary about Alice", self.system(adapter, 2))
+        self.assertNotIn("Andy Hui", self.system(adapter, 3))
+        notes = core.tank.notes("p", "chat:room", "alice")
+        self.assertEqual([(n.key, n.importance) for n in notes], [("music.favorite", 4)])
 
     async def test_core_refuses_invalid_copied_excess_and_routine_notes(self):
         from core.manager.diary import WRITES_PER_RUN
@@ -113,6 +127,13 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(chat.texts("room")[-1], "Note removed.")
 
+    async def test_diary_can_be_switched_off_per_assignment(self):
+        core, adapter = await self.core([turn("ok", diary=[note("k", "something real")])], {
+            "assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": False}}}})
+        await iface(core).say("I moved to Tokyo")
+        await settle(core)
+        self.assertNotIn("Your diary", self.system(adapter))
+        self.assertEqual(core.tank.note_counts("chat:room", "alice"), {})
 
 
 if __name__ == "__main__":

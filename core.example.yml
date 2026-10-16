@@ -61,7 +61,7 @@
 #     preapprove: [reminders.create, reminders.cancel]   # write capabilities that run without asking the owner
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
-#     options: {instructions: "Keep replies short."}
+#     options: {instructions: "Keep replies short.", diary: true}   # diary: persona notes about each person
 #   "discord:123456789012345678":   # a server channel
 #     engine: assistant
 #     persona: assistant
