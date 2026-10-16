@@ -16,6 +16,21 @@ import re
 
 from contracts import Engine, EngineSpec, FileRef, ModelError, ModelRequest, RunYield, Session, ToolResult
 
+
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def add_images(state: dict, files) -> None:
+    """Remember image attachments of the run's messages (latest 6) so every turn can see them."""
+    for file in files or ():
+        item = dataclasses.asdict(file) if dataclasses.is_dataclass(file) else dict(file)
+        if (item.get("mime") or "").startswith("image/") or item["path"].lower().endswith(IMAGE_SUFFIXES):
+            state["images"] = [*state.get("images", []), item][-6:]
+
+
+def images(state: dict) -> tuple[FileRef, ...]:
+    return tuple(FileRef(**item) for item in state.get("images", []))
+
 PLURAL = re.compile(r"你[们們]|大家|各位|\b(?:you all|you guys|all of you|everyone|everybody|the team)\b", re.I)
 SELECTIVE = re.compile(r"你[们們](?:不用|不必|不需要|不要)|(?:不用|不必|不需要|不要).{0,8}(?:你[们們]|大家|各位)")
 QUOTED = re.compile(r'```.*?```|"[^"\n]*"|“[^”\n]*”|「[^」\n]*」', re.S)
@@ -105,6 +120,7 @@ class RoomEngine(Engine):
                                   "event_cursor": -1, "opened": False}
         if not state["opened"]:
             state["opened"] = True
+            add_images(state, session.trigger.files)
             self._open(session, state, session.trigger.text, "opening")
         for job in state["jobs"].values():
             if job["status"] == "running":
@@ -129,6 +145,7 @@ class RoomEngine(Engine):
         requests = session.inbox()
         for request in requests:
             self._input(session, state, request.text, request.sender.name or request.sender.id)
+            add_images(state, request.files)
         return bool(requests)
 
     # ---- participants and input ------------------------------------------------------------------
@@ -181,6 +198,7 @@ class RoomEngine(Engine):
                 if request["id"] == session.trigger.id:
                     continue  # the trigger is the goal itself
                 self._input(session, state, request["text"], request["sender"].get("name") or request["sender"]["id"])
+                add_images(state, request.get("files"))
             elif event.kind in ("tool_result", "approval_denied"):
                 call_id = str(event.data.get("call_key", "")).removeprefix("call:")
                 job = next((job for job in state["jobs"].values()
@@ -372,7 +390,7 @@ class RoomEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, job, tools, correction), profile=persona.profile,
-                output_schema=turn_schema(characters), schema_name="room_turn",
+                output_schema=turn_schema(characters), schema_name="room_turn", images=images(state),
                 effort="medium" if job["observations"] or job["after"] else "low", max_tokens=self.max_tokens))
         except ModelError as error:
             if error.kind == "invalid_output":

@@ -162,6 +162,21 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.spoken(core)[-1], ("Luna", "", "It is broken."))
         self.assertEqual(len(script.prompts["Luna"]), 5)
 
+    async def test_every_character_sees_the_attached_images(self):
+        import time
+        from contracts import Address, FileRef, Request, Sender
+        photo = self.tmp / "dish.png"
+        photo.write_bytes(b"png")
+        core = await self.core(Script(Luna=[turn("Looks tasty.")], Gemini=[turn("Is that ramen?")]))
+        chat = iface(core)
+        await chat.port.submit(Request(id="img-1", address=Address("chat", "room"), sender=Sender("alice", "Alice"),
+                                       text="Luna and Gemini, look!", received_at=time.time(), display=chat.display,
+                                       files=(FileRef(str(photo), "dish.png", "image/png"),)))
+        await settle(core)
+        adapter = core.providers._adapters["fake"]
+        self.assertEqual(len(adapter.calls), 2)
+        self.assertTrue(all([image.mime for image in call["images"]] == ["image/png"] for call in adapter.calls))
+
     async def test_each_character_keeps_her_own_diary(self):
         note = {"key": "music.favorite", "kind": "fact", "note": "Loves Andy Hui", "importance": 4}
         script = Script(Luna=[turn("Nice taste.", diary=[note]), turn("Still Andy Hui?")], Gemini=[turn("Hm.")])
