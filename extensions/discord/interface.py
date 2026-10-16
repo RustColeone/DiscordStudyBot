@@ -296,6 +296,9 @@ class DiscordInterface(Interface):
             return bool(reply.data.get("origin_address"))
         if reply.kind == "notice":
             return reply.code == "run_failed_detail" or (reply.code == "relayed" and reply.data.get("ok") == "true")
+        if reply.kind == "event":
+            # Interface status (no originating chat to reply to); chat notifications stay separate.
+            return str(reply.data.get("origin_address", "")).endswith(":_interface") and reply.file is None
         return False
 
     def status_line(self, reply: Reply) -> str:
@@ -304,6 +307,8 @@ class DiscordInterface(Interface):
             return f"{origin} · {reply.text}"
         if reply.code == "relayed":
             return f"sent to {reply.data.get('address')}"
+        if reply.kind == "event":
+            return f"{reply.data.get('interface', '')} · {reply.text}"
         return reply.text
 
     def render_approval(self, reply: Reply) -> str:
