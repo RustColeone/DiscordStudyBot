@@ -209,14 +209,22 @@ class AgentFeature:
             self.registry.register(CommandTool(
                 name="generate_image",
                 description=(
-                    "Ask Gemini's Nano Banana image model to draw, illustrate, render, create, or edit an image "
-                    "from a visual description. Use this whenever the user requests an image as the deliverable. Gemini owns "
-                    "image-generation tasks; do not substitute a text description of what the image could look like."
+                    "Draw, illustrate, render, create, or edit an image from a visual description. Use this whenever "
+                    "the user requests an image as the deliverable; do not substitute a text description of what the "
+                    "image could look like. Gemini's Nano Banana model is the default. Set provider=openai only when "
+                    "the user explicitly asks for GPT, ChatGPT, OpenAI, or DALL-E to draw it."
                 ),
-                parameters={"prompt": {
-                    "type": "string",
-                    "description": "Complete visual description and requested style for Gemini to render",
-                }},
+                parameters={
+                    "prompt": {
+                        "type": "string",
+                        "description": "Complete visual description and requested style to render",
+                    },
+                    "provider": {
+                        "type": "string",
+                        "enum": ["gemini", "openai"],
+                        "description": "Image provider; omit for the default Gemini model",
+                    },
+                },
                 required=["prompt"],
                 risk="prepare",
                 handler=self._generate_image,
@@ -2075,7 +2083,7 @@ class AgentFeature:
         return await self.draw_feature.generate(
             message,
             arguments["prompt"],
-            provider="gemini",
+            provider=arguments.get("provider") or "gemini",
         )
 
     async def _image_search(self, app, message, arguments):
