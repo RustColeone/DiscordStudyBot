@@ -311,7 +311,8 @@ class DiscordInterface(Interface):
             footer = f"\n-# {origin}" if origin and not origin.endswith(":_interface") else ""
             return f"📨 {reply.text}{footer}" if reply.text else ""
         origin = data.get("origin_address")
-        return (f"-# from `{origin}`\n" if origin else "") + (reply.text or "")
+        speaker = f"**{reply.speaker}{' · ' + reply.label if reply.label else ''}**\n" if reply.speaker else ""
+        return (f"-# from `{origin}`\n" if origin else "") + speaker + (reply.text or "")
 
     async def deliver(self, reply: Reply) -> Delivery:
         if self.client is None:

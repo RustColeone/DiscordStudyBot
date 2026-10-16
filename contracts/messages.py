@@ -117,7 +117,8 @@ class Reply:
     `approval_request`) so each interface can phrase it appropriately. `kind="event"` is an
     interface notification for the owner (see InterfacePort.notify).
     `source` says who produced it: `run` (an engine), `command`, `owner` (an owner's relay or send),
-    or `core`.
+    or `core`. `speaker` is the display name of the persona talking, set by engines with several
+    personas; `label` qualifies it (for example a work note). Interfaces show both in their own way.
     """
 
     address: Address
@@ -131,6 +132,8 @@ class Reply:
     data: Mapping[str, str] = field(default_factory=dict)
     source: ReplySource = "core"
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    speaker: str = ""
+    label: str = ""
 
     def __post_init__(self):
         if self.kind == "file" and self.file is None:

@@ -7,6 +7,7 @@ and keeps its own bottle (gateway.db). It never formats output, calls models or 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import datetime as dt
 import secrets
 import time
@@ -248,8 +249,7 @@ class Gateway:
         if target != reply.address:
             data = dict(reply.data)
             data.setdefault("origin_address", str(reply.address))
-            reply = Reply(target, reply.kind, reply.text, reply.file, None, reply.in_reply_to, reply.run_id,
-                          reply.code, data)
+            reply = dataclasses.replace(reply, address=target, quote=None, data=data)
         try:
             return await interface.deliver(reply)
         except Exception as error:

@@ -312,6 +312,15 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         await self.discord.deliver(Reply(Address("discord", "555"), "text", "plain"))
         self.assertIsNone(self.client.channels[555].sent[-1].allowed_mentions)
 
+    async def test_speaker_and_label_name_the_persona_talking(self):
+        from contracts import Reply
+        await self.start()
+        room = Address("discord", "555")
+        self.assertEqual(self.discord.render(Reply(room, "text", "hi", speaker="Luna")), "**Luna**\nhi")
+        self.assertEqual(self.discord.render(Reply(room, "text", "checking", speaker="Luna", label="Work note")),
+                         "**Luna · Work note**\nchecking")
+        self.assertEqual(self.discord.render(Reply(room, "text", "plain")), "plain")
+
     async def test_missing_token_reports_not_ready_without_crashing(self):
         await self.start(token="", ready=False)
         self.assertFalse(self.core.gateway.ready()["discord"][0])
