@@ -344,6 +344,20 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.core.gateway.ready()["discord"][1], "No Discord bot token is configured.")
 
 
+class TokenTests(unittest.TestCase):
+    def test_the_bot_token_is_read_from_discord_bot_token_first(self):
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from core.loader import import_extension
+        extension, _ = import_extension(ROOT / "extensions" / "discord")
+        context = SimpleNamespace(config={}, data_dir=Path(tempfile.mkdtemp()), log=lambda *a, **k: None)
+        for environment, expected in (({"DISCORD_BOT_TOKEN": "new", "TOKEN": "old"}, "new"),
+                                      ({"DISCORD_BOT_TOKEN": "", "TOKEN": "old"}, "old")):
+            with patch.dict(os.environ, {"DISCORD_TOKEN": "", **environment}):
+                self.assertEqual(extension.setup(context).interfaces[0].token, expected)
+
+
 class DefaultConfigurationTests(unittest.TestCase):
     def test_fresh_clone_defaults_load_discord_assistant_and_basic(self):
         import os

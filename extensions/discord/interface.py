@@ -131,7 +131,7 @@ class DiscordInterface(Interface):
         self.port = port
         self._prune_attachments()
         if not self.token:
-            print("[discord] No bot token: set DISCORD_TOKEN (or TOKEN) in .env. Discord is not connected.", flush=True)
+            print("[discord] No bot token: set DISCORD_BOT_TOKEN in .env. Discord is not connected.", flush=True)
             port.log("token_missing")
             port.set_ready(False, "No Discord bot token is configured.")
             return
@@ -151,7 +151,7 @@ class DiscordInterface(Interface):
                   "(Bot → Privileged Gateway Intents) and restart.", flush=True)
             self.port.set_ready(False, "Message Content intent is not enabled for this bot.")
         except discord.LoginFailure:
-            print("[discord] The bot token was rejected. Check DISCORD_TOKEN.", flush=True)
+            print("[discord] The bot token was rejected. Check DISCORD_BOT_TOKEN.", flush=True)
             self.port.set_ready(False, "The Discord token was rejected.")
         except asyncio.CancelledError:
             raise

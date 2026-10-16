@@ -1,4 +1,5 @@
-"""Included Discord extension: connects the bot to Discord. Needs DISCORD_TOKEN (or TOKEN)."""
+"""Included Discord extension: connects the bot to Discord. Needs DISCORD_BOT_TOKEN in .env
+(DISCORD_TOKEN and TOKEN are still accepted)."""
 
 import os
 
@@ -9,7 +10,7 @@ from .interface import DiscordInterface
 
 def setup(context) -> Contributions:
     config = context.config
-    names = config.get("token_env") or ["DISCORD_TOKEN", "TOKEN"]
+    names = config.get("token_env") or ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "TOKEN"]
     names = [names] if isinstance(names, str) else list(names)
     token = next((os.environ[name].strip().strip("\"'") for name in names if os.environ.get(name, "").strip()), "")
     return Contributions(interfaces=[DiscordInterface(token, context.data_dir,

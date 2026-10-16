@@ -61,7 +61,7 @@ Quick start from a fresh clone:
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an
    application, add a bot, copy its token and enable **Message Content Intent** (Bot → Privileged
    Gateway Intents).
-2. `pip install -r requirements.txt`, then create `.env` with `DISCORD_TOKEN=...` and at least one model
+2. `pip install -r requirements.txt`, then create `.env` with `DISCORD_BOT_TOKEN=...` and at least one model
    key (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `CLAUDE_API_KEY`).
 3. `python -m core`. It prints an invite link if the bot is in no server yet; invite it.
 4. DM the bot, or mention it (or reply to it) in a server channel. The application owner is the bot's
