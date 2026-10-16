@@ -486,6 +486,13 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cancelled, [1])
         self.assertEqual([run.status for run in core.tank.runs(("done", "cancelled", "failed"))], ["cancelled"])
 
+    async def test_owner_reply_to_a_notification_reaches_a_chat_the_bot_does_not_answer(self):
+        core = await self.core({"admission": {"chat:quiet": {"enabled": False}}})
+        delivery = await iface(core).port.notify("quiet: hello?", origin=Address("chat", "quiet"))
+        await iface(core, "owner").say("hi from the owner", conversation="dm", sender="boss",
+                                       reply_to=delivery.message_id)
+        await settle(core)
+        self.assertEqual(iface(core).texts("quiet"), ["hi from the owner"])
 
     async def test_public_interface_operations_are_open_to_everyone(self):
         core = await self.core()
