@@ -470,6 +470,23 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("hey", iface(core, "owner").texts("dm"))
         self.assertIn(("out", "hey"), [(item.direction, item.text) for item in core.tank.recent_messages("owner:dm")])
 
+    async def test_interface_can_cancel_the_run_it_is_delivering_for(self):
+        core = await self.core({"assignments": {"*": {"engine": "assistant", "personas": ["p"]}}},
+                               FakeAdapter([{"message": "hi", "status": "complete", "actions": []}]))
+        chat = iface(core)
+        original, cancelled = chat.deliver, []
+
+        async def deliver(reply):
+            if reply.kind == "text" and reply.source == "run":
+                cancelled.append(await chat.port.cancel(reply.address, "manual reply"))
+            return await original(reply)
+        chat.deliver = deliver
+        await chat.say("hello")
+        await asyncio.wait_for(settle(core), 10)
+        self.assertEqual(cancelled, [1])
+        self.assertEqual([run.status for run in core.tank.runs(("done", "cancelled", "failed"))], ["cancelled"])
+
+
     async def test_public_interface_operations_are_open_to_everyone(self):
         core = await self.core()
         await iface(core).say("$where", conversation="guest")
