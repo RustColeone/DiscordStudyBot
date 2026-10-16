@@ -23,6 +23,7 @@ class BotApplication:
     def __init__(self, config):
         self.config = config
         self.platform = None
+        self.message_routes = {}
         self.attachment_cleanup_task = None
         self.mcp_refresh_task = None
         cleanup_expired_cache()
@@ -36,7 +37,7 @@ class BotApplication:
         self.clip_feature = ClipFeature()
         self.broadcast_feature = BroadcastFeature()
         self.music_feature = MusicFeature()
-        self.bridge_feature = BridgeFeature()
+        self.bridge_feature = BridgeFeature(config)
         self.search_feature = SearchFeature()
         self.database_feature = DatabaseFeature()
         self.memory_feature = MemoryFeature()
@@ -74,8 +75,18 @@ class BotApplication:
     def attach_platform(self, platform) -> None:
         self.platform = platform
 
+    def register_message_route(self, prefix, handler):
+        self.message_routes[prefix] = handler
+
+    async def send_channel_message(self, channel_id, content):
+        for prefix, handler in self.message_routes.items():
+            if str(channel_id).startswith(prefix):
+                return await handler(channel_id, content)
+        return await self.platform.send_channel_message(channel_id, content)
+
     async def start_background_tasks(self) -> None:
         await self.mcp_tool_manager.connect(self.agent_feature.registry)
+        await self.bridge_feature.start(self)
         self.time_feature.start_scheduler(self)
         if self.attachment_cleanup_task is None or self.attachment_cleanup_task.done():
             self.attachment_cleanup_task = self.platform.create_background_task(
@@ -87,6 +98,7 @@ class BotApplication:
             )
 
     async def stop_background_tasks(self) -> None:
+        await self.bridge_feature.close()
         cancelled = []
         for task in (self.attachment_cleanup_task, self.mcp_refresh_task):
             if task is not None:
@@ -123,6 +135,8 @@ class BotApplication:
             return []
 
         if not message.content.startswith("$"):
+            if self.bridge_feature.wants_passive(message):
+                return await self.bridge_feature.handle_passive(self,message)
             responses = await self.chat_feature.handle_passive(self, message)
             if responses:
                 return responses

@@ -83,3 +83,23 @@ class BridgedObject(ABC):
             True if listening, False otherwise
         """
         return self.listen_mode
+
+    async def execute(self, command, app, message):
+        """Default command adapter; richer bridges can add account/inbox/event capabilities."""
+        from app.bot_types import BotResponse
+        action = command.action
+        if action == "status":
+            text = self.get_status()
+        elif action == "init":
+            text = "Bridge connected." if await self.initialize() else "Bridge connection failed."
+        elif action == "disconnect":
+            text = "Bridge disconnected." if await self.disconnect() else "Bridge disconnection failed."
+        elif action == "send":
+            text = await self.send_message(command.message) or "Message sent."
+        elif action == "listen":
+            if command.mode != "status":
+                self.set_listen_mode(not self.is_listening() if command.mode == "toggle" else command.mode == "on")
+            text = f"Bridge forwarding: {'on' if self.is_listening() else 'off'}."
+        else:
+            raise ValueError(f"This bridge does not support {action}")
+        return [BotResponse(text=text)]

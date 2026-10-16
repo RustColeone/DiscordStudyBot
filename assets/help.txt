@@ -223,33 +223,14 @@ $google -s Python documentation
 === BRIDGE ===
 # External App Bridge System
 
-The bridge system connects Discord to external applications (games, APIs, webhooks, etc.)
-
-Initialize & Connect:
-$bridge --init           Initialize the bridge connection
-
-Send Messages:
-$bridge --send "msg"     Send message to bridged app
-$bridge -s "msg"         Short form
-
-Auto-Forward Mode:
-$bridge --listen on      Enable auto-forward mode
-$bridge --listen off     Disable auto-forward mode
-                         When ON, all non-command messages are forwarded
-
-Status & Control:
-$bridge --status         Show connection status
-$bridge -st              Short form
-$bridge --disconnect     Close bridge connection
-
-Customization:
-This bot includes an example bridge. To create custom bridges (for games, Slack, etc.):
-1. Inherit from BridgedObject class (bridges/bridge_base.py)
-2. Implement send_message(), initialize(), disconnect(), get_status()
-3. Update bridges/bridge_parser.py with your custom commands
-4. Replace the example bridge import in features/feature_bridge.py
-
-Example: bridges/meiju_bridge.py shows game chat automation using pyautogui
+$bridge --help and $help bridge render the live parser command catalogue.
+Named bridge selection is remembered per Discord channel.
+The maintained example demonstrates the lifecycle; the Linux WeChat bridge provides owner-only
+QR login, chat reading, explicit sends, bound forwarding and independent notification subscriptions.
+Automated replies require whitelist membership, an enabled assistant and explicit group mentions.
+Configure names and group aliases live; no group names are built into the implementation.
+Current-chat text/file delivery is preauthorized by its whitelist; privileged writes still need owner approval.
+See docs/WECHAT_BRIDGE.md for setup, architecture and desktop-client limitations.
 
 === CLIP ===
 # Video Clip Extraction

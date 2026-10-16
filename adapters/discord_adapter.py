@@ -206,6 +206,7 @@ class DiscordAdapter:
                 "was_mentioned": was_mentioned,
                 "is_creator": is_creator,
                 "referenced_content": referenced_content,
+                'referenced_message_id':str(getattr(reference,'message_id',None) or getattr(referenced_message,'id','') or ''),
                 "referenced_attachments": referenced_attachments,
                 "referenced_attachment_urls": referenced_attachment_urls,
                 "referenced_image_attachments": referenced_image_attachments,
@@ -325,8 +326,15 @@ class DiscordAdapter:
     async def delete_message(self, native_message) -> None:
         await native_message.delete()
 
-    async def send_direct_message(self, user_reference, content: str) -> None:
-        await user_reference.send(content)
+    async def send_direct_message(self, user_reference, content: str):
+        if isinstance(user_reference,(str,int)):
+            user_id=int(user_reference)
+            user_reference=self.client.get_user(user_id) or await self.client.fetch_user(user_id)
+        first=None
+        for chunk in self._split_message(content):
+            sent=await user_reference.send(chunk)
+            if first is None: first=sent
+        return first
 
     def create_background_task(self, coroutine):
         return self.client.loop.create_task(coroutine)

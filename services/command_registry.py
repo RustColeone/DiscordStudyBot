@@ -16,6 +16,10 @@ class CommandTool:
     risk: str
     handler: ToolHandler
     input_schema: Optional[Dict[str, Any]] = None
+    required_capabilities: tuple[str, ...] = ()
+    owner_required: bool = False
+    approval_scope: str = ''
+    input_prompt_argument: str | None = None
 
     def argument_schema(self) -> Dict[str, Any]:
         if self.input_schema is not None:
@@ -28,12 +32,17 @@ class CommandTool:
         }
 
     def schema(self) -> Dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "parameters": self.argument_schema(),
             "risk": self.risk,
         }
+        if self.approval_scope:
+            result['approval_scope'] = self.approval_scope
+        if self.input_prompt_argument:
+            result['interaction'] = {'type':'needs_input', 'prompt_argument':self.input_prompt_argument}
+        return result
 
 
 class CommandRegistry:

@@ -47,11 +47,14 @@ class AgentRun:
     user_answers: list[str] = field(default_factory=list)
     original_time: object = None
     last_step: AgentStep | None = None
+    input_required: bool = False
 
     def context(self):
         return {"goal": self.task.goal, "status": self.status,
                 "observations": self.observations[-20:], "steps_used": self.steps,
                 "user_answers": self.user_answers,
+                "visible_turns": self.visible_turns[-12:],
+                "input_required": self.input_required,
                 "pending_question": self.last_step.message if self.last_step is not None
                 and self.last_step.status == "needs_input" else None}
 
@@ -62,15 +65,19 @@ def signature(action):
 
 class AgentLoop:
     def __init__(self, registry, generate, execute, publish, progress, approval, validate,
-                 max_steps=12, max_actions=24):
+                 max_steps=12, max_actions=24, preauthorized=None):
         self.registry, self.generate, self.execute = registry, generate, execute
         self.publish, self.progress, self.approval = publish, progress, approval
         self.validate = validate
         self.max_steps, self.max_actions = max_steps, max_actions
+        self.preauthorized = preauthorized or (lambda tool, action: False)
 
     async def run(self, state, user_answer="", confirm=False):
+        if state.status == "needs_input" and (confirm or not user_answer.strip()):
+            return
         if user_answer and not confirm:
             state.user_answers.append(user_answer)
+            state.input_required = False
         state.status = state.task.status = "running"
         if confirm:
             state.approved.update(signature(action) for action in state.pending_actions)
@@ -93,6 +100,22 @@ class AgentLoop:
             try:
                 step = await self.generate(state, user_answer, correction)
                 self.validate(step.actions)
+                questions = [(action, self.registry.get(action['tool']).input_prompt_argument)
+                             for action in step.actions
+                             if self.registry.get(action['tool']).input_prompt_argument]
+                if questions:
+                    if len(step.actions) != 1:
+                        raise ValueError('Ask one question with no other actions while waiting for the answer')
+                    action, argument = questions[0]
+                    prompt = action['arguments'].get(argument)
+                    if not isinstance(prompt, str) or not prompt.strip():
+                        raise ValueError('An input request must have a nonempty question')
+                    # Legacy question tools map to the same conversation state as
+                    # a native needs_input step, never a successful work action.
+                    step = AgentStep('needs_input', prompt.strip())
+                if state.input_required and step.status not in {"needs_input", "blocked"}:
+                    raise ValueError("The tool requires a new user answer. Ask one concise question with "
+                                     "status=needs_input and actions=[]; do not run tools or repeat work before an answer arrives.")
                 if step.status == "complete" and state.observations and state.observations[-1]["status"] != "success":
                     raise ValueError("The latest tool result failed or needs input; resolve it or report a blocker")
             except ValueError as error:
@@ -115,6 +138,7 @@ class AgentLoop:
             state.visible_turns.append(step.message)
             if step.status != "continue":
                 state.status = state.task.status = step.status
+                state.input_required = step.status == "needs_input"
                 record_timing("agent_finished", status=state.status, steps=state.steps,
                               actions=state.actions_taken)
                 return
@@ -130,7 +154,7 @@ class AgentLoop:
             if key in state.writes_completed:
                 await self._stop(state, "blocked", "That state-changing action already succeeded; I won't execute it twice.")
                 return False
-            if tool.risk == "write" and key not in state.approved:
+            if tool.risk == "write" and key not in state.approved and not self.preauthorized(tool, action):
                 state.pending_actions = actions[index:]
                 state.status = state.task.status = "awaiting_confirmation"
                 state.task.record("approval.requested", state.owner, actions=state.pending_actions)
@@ -158,6 +182,8 @@ class AgentLoop:
                 outcome = ToolOutcome("failed", [], str(error)[:1500], type(error).__name__, transient)
             observation = {"action": action, **outcome.context()}
             state.observations.append(observation)
+            if outcome.status == "needs_input":
+                state.input_required = True
             state.task.record("tool.succeeded" if outcome.status == "success" else "tool.failed",
                               state.owner, tool=tool.name, result=outcome.summary,
                               error_code=outcome.error_code, retryable=outcome.retryable)
