@@ -436,6 +436,10 @@ class WeChatBridge(BridgedObject):
                                and signatures[c["id"]] != self._all_previews.get(c["id"]))
             self._all_previews = signatures
         for chat_id in watched:
+            busy = getattr(self.transport, 'chat_busy', None)
+            if busy is not None and busy(chat_id):
+                # A file receipt can take minutes; other chats must keep polling.
+                continue
             try:
                 messages = await self.transport.read_messages(chat_id, 40)
             except RuntimeError as error:

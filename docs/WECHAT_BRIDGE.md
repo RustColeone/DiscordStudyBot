@@ -532,3 +532,23 @@ desktop client exited around 00:10. A fitting H.264 source (1280x548 + AAC, 80.5
 the new stream-copy path prepared the same full video in 43 s live, verified by `ffprobe` (385.45 s,
 H.264/AAC, 30 fps, `moov` first). That check did not send anything to WeChat. Whether this Linux client
 completes inline uploads of this size remains unverified.
+
+### Why replies stopped later that night
+
+- The desktop client exited around 00:10 and on relaunch waited at **Confirm on Phone**. The
+  helper reports that screen as `unavailable`, and the bot announces lost readiness only on a
+  ready-to-not-ready transition, so after a restart nothing told the owner. Polling stops while the
+  account is not ready; nothing relaunches the client automatically.
+- In 垃圾桶 the account's group nickname is 🥎🥎🥎🥎. Typing `@⚡BeastIX` there produces plain text
+  with no `atuserlist`, which strict native routing correctly rejects as `other_mention`. Only a
+  mention picked from WeChat's member list triggers a reply.
+- A file receipt held the chat's lock for up to ten minutes, and polling waited on that lock, so
+  one upload froze observation of every chat. Polling now skips a chat whose receipt is in flight.
+  The receipt loop decrypted a snapshot every 0.1 s; one transient `DatabaseSnapshotError` while
+  WeChat rewrote its WAL ended the wait after 61 s and reported `delivery_failed` for a video that
+  was delivered at 00:54. Files now poll once per second and tolerate transient snapshot errors until
+  the deadline. Verified receipt IDs are remembered by the transport, so the poller cannot mistake
+  the bot's own media for unsupported/manual activity before it is recorded.
+- WeChat itself re-compresses inline videos before uploading (`wxutility`, about 3 minutes at 1.5
+  cores for 385 s of 1280x548 video), then uploads at roughly 1.6 Mbit/s. The 80.8 MiB stream-copied
+  file reached a server ID about 9.5 minutes after Send.

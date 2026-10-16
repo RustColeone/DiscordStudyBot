@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from services.wechat_native_transport import WeChatNativeTransport
+from services.wechat_database_pages import DatabaseSnapshotError
 from services.wechat_native import NativeSchemaError
 
 
@@ -19,6 +20,27 @@ class NativeTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt['message_id'], 'native:video')
         self.assertEqual(self.reader.read_messages.call_count, 2)
 
+    async def test_file_receipt_survives_transient_snapshot_errors_and_is_remembered_as_own(self):
+        self.transport._receipt_before['room@chatroom'] = set()
+        media = {'id':'native:video','outgoing':True,'kind':'video','text':'[Video]','server_id':'0'}
+        busy = DatabaseSnapshotError('The native database changed during capture')
+        self.reader.read_messages = unittest.mock.Mock(side_effect=[[media], busy, busy, [{**media,'server_id':'9'}]])
+        with patch('services.wechat_native_transport.asyncio.sleep', AsyncMock()) as sleep:
+            receipt = await self.transport._delivery_receipt('Group', {'sent':True,'verified':False}, None)
+        self.assertTrue(receipt['verified'])
+        self.assertIn('native:video', self.transport.own_message_ids)
+        self.assertEqual({call.args[0] for call in sleep.await_args_list}, {1})
+        self.reader.read_messages = unittest.mock.Mock(side_effect=busy)
+        with patch('services.wechat_native_transport.asyncio.sleep', AsyncMock()), \
+                patch('services.wechat_native_transport.time.monotonic', side_effect=[0, 700]):
+            receipt = await self.transport._delivery_receipt('Group', {'sent':True}, None)
+        self.assertEqual(receipt, {'verified':False,'reason':'native_receipt_unreadable','desktop_verified':False})
+
+    async def test_chat_busy_reports_receipt_lock_so_polling_can_skip_it(self):
+        self.assertFalse(self.transport.chat_busy('Group'))
+        async with self.transport._chat_locks['room@chatroom']:
+            self.assertTrue(self.transport.chat_busy('Group'))
+        self.assertFalse(self.transport.chat_busy('Group'))
 
     async def test_file_helper_uses_native_receipt_mode(self):
         with patch('services.wechat_desktop.WeChatDesktopTransport._run_helper', AsyncMock(return_value={'sent':True})) as helper:

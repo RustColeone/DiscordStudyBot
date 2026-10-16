@@ -256,6 +256,18 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("new arrival" in text for text in sent))
         self.assertFalse(any("\nParticipant: old" in text for text in sent))
 
+    async def test_poll_skips_a_chat_waiting_for_file_receipt_instead_of_blocking_others(self):
+        old = {"id": "old", "chat_id": "alice", "text": "old", "outgoing": False, "kind": "text"}
+        self.transport.read_messages.return_value = [old]
+        await self.command('--notify on --chat Alice')
+        self.transport.read_messages.reset_mock()
+        self.transport.chat_busy = lambda chat_id: True
+        await self.bridge._poll_once()
+        self.transport.read_messages.assert_not_awaited()
+        self.transport.chat_busy = lambda chat_id: False
+        await self.bridge._poll_once()
+        self.transport.read_messages.assert_awaited_once()
+
     async def test_account_change_resets_baseline_and_unready_account_does_not_send(self):
         self.bridge._known_account = "old-account"
         self.transport.status.return_value = {"state": "logged_out", "account_id": "", "name": ""}
