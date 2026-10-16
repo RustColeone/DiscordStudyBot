@@ -442,6 +442,17 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
   (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `diary: false`.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
+### The included Discord interface
+
+[`extensions/discord`](../../extensions/discord/interface.py) renders replies with Markdown, speaker
+labels, a rolling status block for unrequested notices, and math: inline `$…$` becomes Unicode and
+display `$$…$$` is sent as PNG images between the text parts. Its public operations (usable by
+anyone, acting only on the calling conversation) are `discord.music` (`$music`), `music_status`,
+`music_control`, `queue_music` (one player per server, in the caller's voice channel), `time`
+(`$time`), `clock_start` (`$start`) and `clock_stop` (`$stop`); `status` and `invite` are owner-only.
+Options: `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
+`math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` (10).
+
 ## Core capabilities
 
 All owner-only; the writes need approval unless pre-approved (an owner's `$command` counts as
