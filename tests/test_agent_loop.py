@@ -160,6 +160,32 @@ class AgentLoopTests(unittest.IsolatedAsyncioTestCase):
         await self.loop(generate, execute, max_steps=2).run(self.state)
         self.assertEqual(self.state.status, "blocked")
         self.assertIn("unfinished", self.timeline[-1][1])
+        # The closing call proposed more actions, so the neutral fallback is used; the reason stays internal.
+        self.assertNotIn("step limit", self.timeline[-1][1])
+        self.assertTrue(any("step limit" in call.args[0] for call in self.progress.await_args_list))
+
+    async def test_stop_message_is_written_by_the_model_without_internal_reason(self):
+        state = AgentRun(AgentTask("帮我下载这个视频"))
+        generate = AsyncMock(side_effect=[
+            AgentStep("continue", "好的，我去下载。", [self.action()]),
+            AgentStep("continue", "再试一次。", [self.action()]),
+            AgentStep("blocked", "视频源这次拿不到，先到这里吧。")])
+        execute = AsyncMock(return_value=ToolOutcome("failed", [], "No video formats found", "source_unavailable", False))
+        await self.loop(generate, execute).run(state)
+        self.assertEqual(state.status, "blocked")
+        spoken = [text for kind, text in self.timeline if kind == "say"]
+        self.assertEqual(spoken[-1], "视频源这次拿不到，先到这里吧。")
+        self.assertFalse(any("Repeating" in text or "No video formats" in text for text in spoken))
+        self.assertIn("Internal reason", generate.await_args.args[2])
+        self.assertIn("No video formats", generate.await_args.args[2])
+
+    async def test_model_failure_uses_localized_fallback_without_another_model_call(self):
+        state = AgentRun(AgentTask("画一张龙娘"))
+        generate = AsyncMock(side_effect=RuntimeError("provider down"))
+        await self.loop(generate, AsyncMock()).run(state)
+        generate.assert_awaited_once()
+        self.assertEqual(self.timeline, [("say", "这次没能全部完成，已经做好的部分都保留着。需要的话可以再说一次。")])
+        self.assertTrue(any("RuntimeError" in call.args[0] for call in self.progress.await_args_list))
 
     async def test_tool_needing_input_cannot_run_more_actions_before_an_answer(self):
         generate = AsyncMock(side_effect=[

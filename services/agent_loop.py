@@ -1,6 +1,7 @@
 """One task owner decides, acts, observes, and continues across any registered tools."""
 from dataclasses import dataclass, field
 import json
+import re
 
 from services.request_timing import record as record_timing
 from services.tool_outcome import ToolOutcome, normalize_outcome
@@ -61,6 +62,23 @@ class AgentRun:
 
 def signature(action):
     return json.dumps(action, sort_keys=True, ensure_ascii=False)
+
+
+STOP_INSTRUCTION = (
+    "This run must stop now and cannot take any more actions. Internal reason, for you only: {reason}\n"
+    "Reply with status=blocked and actions=[]. Write one or two short sentences to the user in the user's "
+    "language and your usual voice: what is already done and that the rest could not be finished. Do not quote "
+    "the internal reason, error text, tool names or IDs, do not claim delivered results failed, and do not "
+    "promise an automatic retry."
+)
+
+
+def stop_fallback(state):
+    """Neutral last-resort text when the model cannot write the closing message."""
+    text = state.task.goal + "".join(state.user_answers)
+    if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text):
+        return "这次没能全部完成，已经做好的部分都保留着。需要的话可以再说一次。"
+    return "This is still unfinished. Anything already done is kept; ask again if you still need it."
 
 
 class AgentLoop:
@@ -128,7 +146,7 @@ class AgentLoop:
                 return
             except Exception as error:
                 state.task.record("agent.generation_failed", state.owner, error=type(error).__name__)
-                await self._stop(state, "blocked", "The model request failed; the task is still unfinished.")
+                await self._stop(state, "blocked", "The model request failed: " + type(error).__name__, ask_model=False)
                 return
             correction = ""
             invalid_steps = 0
@@ -209,8 +227,25 @@ class AgentLoop:
                 break
         return True
 
-    async def _stop(self, state, status, message):
+    async def _stop(self, state, status, reason, ask_model=True):
+        """End the run. The internal reason goes to the task log and the owner's progress channel;
+        the conversation receives a message the model writes in the user's language, or a neutral fallback."""
         state.status = state.task.status = status
+        state.task.record("agent.stopped", state.owner, reason=reason)
+        try:
+            await self.progress(f"{state.owner}: stopped ({status}) — {reason[:400]}")
+        except Exception:
+            pass
+        message = None
+        if ask_model:
+            try:
+                step = await self.generate(state, "", STOP_INSTRUCTION.format(reason=reason[:600]))
+                if not step.actions and isinstance(step.message, str) and step.message.strip():
+                    message = step.message.strip()
+            except Exception:
+                message = None
+        if message is None:
+            message = stop_fallback(state)
         state.visible_turns.append(message)
         await self.publish(message)
         record_timing("agent_finished", status=status, steps=state.steps, actions=state.actions_taken)
