@@ -55,3 +55,6 @@ desktop.ini
 # Generated clip outputs
 temp/
 
+# Core runtime
+core.yml
+data/
