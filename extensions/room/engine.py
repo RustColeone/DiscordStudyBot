@@ -28,6 +28,11 @@ def add_images(state: dict, files) -> None:
             state["images"] = [*state.get("images", []), item][-6:]
 
 
+def owner_instructions(session: Session) -> str:
+    text = str(session.options.get("owner_instructions") or "").strip()
+    return f"You are talking with your owner. Private instructions for them:\n{text}\n\n" if text and session.owner else ""
+
+
 def images(state: dict) -> tuple[FileRef, ...]:
     return tuple(FileRef(**item) for item in state.get("images", []))
 
@@ -468,6 +473,7 @@ class RoomEngine(Engine):
                   f"{now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')}).\n\n"
                   + (f"Instructions for this conversation:\n{session.options['instructions']}\n\n"
                      if session.options.get("instructions") else "")
+                  + owner_instructions(session)
                   + INSTRUCTION.format(characters=roster, example=example,
                                        display=f"{style} Keep each message under {display.max_text_chars} characters.",
                                        tools=json.dumps(catalog, ensure_ascii=False) if catalog else "(none)"))

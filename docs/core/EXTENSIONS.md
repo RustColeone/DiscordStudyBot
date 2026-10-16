@@ -343,6 +343,7 @@ class MyEngine(Engine):
 | `state`, `await save(state)` | Your JSON state; persisted on `save`. |
 | `resumed` | `True` when the core restarted during the run. |
 | `options` | The assignment's `options` mapping (per-conversation settings). |
+| `owner` | Whether the trigger's sender is an owner of its interface (never for routines). |
 | `personas`, `memory(name)` | Personas of this conversation; each persona's private persistent store. |
 | `diary(name)` | That persona's notes about the trigger's sender in this conversation (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Filter by `sender_id` yourself if needed. |
@@ -396,7 +397,8 @@ to any conversation:
 * A failed or refused text delivery does not stop it; file deliveries are reported to the model as
   delivered or not. It does not regenerate a reply when newer input arrives; it reads the inbox before
   the next step instead. Engines needing different direct/group behaviour should be their own engine.
-* Assignment options: `instructions` (added to the system prompt), `history_scope: sender`,
+* Assignment options: `instructions` (added to the system prompt), `owner_instructions` (added only
+  when an owner is speaking), `max_steps`, `history_scope: sender`,
   `quote: latest` (default; quote the newest message of the run) or `quote: trigger` (keep quoting
   the original request).
 * Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
@@ -439,7 +441,8 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
   retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
 * Extension options (`extension_config.room`): `max_steps`, `history_limit` (16), `max_tokens`
-  (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `diary: false`.
+  (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`,
+  `max_steps`, `diary: false`.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
 ### The included Discord interface

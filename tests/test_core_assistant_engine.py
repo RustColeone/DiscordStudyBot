@@ -91,6 +91,16 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual([[image.mime for image in call["images"]] for call in adapter.calls], [[], ["image/png"]])
 
+    async def test_owner_instructions_are_used_only_when_the_owner_speaks(self):
+        core, adapter = await self.core([turn("Hi boss."), turn("Hi Alice.")], {"assignments": {"*": {
+            "engine": "assistant", "personas": ["p"], "options": {"owner_instructions": "Call them captain."}}}})
+        await iface(core).say("hello", sender="boss")
+        await settle(core)
+        await iface(core).say("hello", conversation="other")
+        await settle(core)
+        self.assertIn("Call them captain.", adapter.calls[0]["messages"][0]["content"])
+        self.assertNotIn("Call them captain.", adapter.calls[1]["messages"][0]["content"])
+
     async def test_invalid_output_and_unknown_tools_get_one_correction_each(self):
         core, adapter = await self.core(["not json", turn("x", "continue", [("tools.nope", {})]), turn("Fine.")])
         await iface(core).say("hello")

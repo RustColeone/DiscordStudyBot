@@ -60,6 +60,7 @@ class SessionHandle:
         self.state: dict = dict(record.state)
         self.resumed = resumed
         self.options = dict(record.assignment.get("options") or {})
+        self.owner = record.origin != "routine" and manager.is_owner(self.trigger)
         profile = self.personas[0].profile if self.personas else "default"
         self.models = ModelsHandle(manager, record.id, profile)
         self.tools = ToolsHandle(manager, record.id)
