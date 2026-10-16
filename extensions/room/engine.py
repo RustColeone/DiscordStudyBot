@@ -368,6 +368,8 @@ class RoomEngine(Engine):
 
     @staticmethod
     def _observe(state: dict, job: dict, action: dict, result: ToolResult) -> None:
+        if result.status == "success":
+            add_images(state, result.files)  # found or generated images become shared evidence
         observation = {"job": job["id"], "character": job["character"],
                        "action": {"tool": action["tool"], "arguments": action["arguments"]},
                        "signature": signature(action), "status": result.status, "summary": result.summary[:3000],
