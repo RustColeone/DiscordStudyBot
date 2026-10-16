@@ -1,0 +1,38 @@
+# Copy to config.yml in this folder: `cp config.example.yml config.yml && chmod 600 config.yml`.
+# config.yml is git-ignored (also by this folder's own .gitignore, in case the folder is its own repository).
+# Settings under extension_config.whale_chan in core.yml override this file.
+
+# The Discord bot: create an application at https://discord.com/developers/applications, add a bot,
+# enable "Message Content Intent" and invite it. Its token is read from this environment variable:
+token_env: DISCORD_BOT_TOKEN_WHALE_CHAN
+# Or, if you prefer not to edit .env, put the token here instead. Then keep this file private
+# (chmod 600) and never share or copy this folder together with its config.yml.
+# token: "your-bot-token"
+# interface: whale_chan        # conversations are whale_chan:dm:<user> or whale_chan:<channel>
+
+# The persona.
+# display_name: 鲸酱
+# prompt: |
+#   ...                         # replaces the whale-girl personality
+# new_chat_text: "🐳 好的主人，新的对话开始啦～"   # the reply to /new
+
+# The engine: one ongoing thread per conversation; /new starts a fresh one.
+effort: high                    # low | medium | high
+max_steps: 10                   # tool steps per message
+max_tokens: 8000
+history_limit: 60               # messages of the current thread sent as context
+history_chars: 40000            # and at most this many characters of them
+
+# Models tried in order (candidates whose provider has no API key are skipped).
+models:
+  - {provider: deepseek, model: deepseek-v4-pro}
+  - {provider: deepseek, model: deepseek-flash}
+
+# Math rendering ($$…$$ as images): math, math_width_px, math_dpi, math_font_size_pt, math_max_images.
+# math: true
+
+# Extra assignment settings for this bot's conversations (core.yml assignments still win):
+# assignment:
+#   preapprove: [reminders.create, reminders.cancel]
+#   deny: ["system.*"]
+#   options: {owner_instructions: "…"}

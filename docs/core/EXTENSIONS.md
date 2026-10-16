@@ -126,8 +126,9 @@ EXTENSION = Extension("my_extension", setup, contracts="1", version="1", descrip
 * `contracts="1"` is the contracts major version you target; a mismatch refuses to load.
 * **Drop-in:** put the folder into `plugins/` and restart; every folder there with an `extension.py`
   loads without touching `core.yml` (`plugin_dirs` lists the drop-in directories; default `plugins/`).
-  Folders in `plugins/` and every `config.yml` are git-ignored. [`plugins/scholar`](../../plugins/scholar)
-  is a complete example: a second Discord bot with its own engine.
+  Folders in `plugins/` and every `config.yml` are git-ignored; an extension that is its own repository
+  should also ship a `.gitignore` listing `config.yml`. [`plugins/whale_chan`](../../plugins/whale_chan)
+  is a complete example: a second Discord bot with its own engine and persona.
 * Or list a folder from any repository in `core.yml`:
 
 ```yaml
@@ -138,7 +139,11 @@ extension_config:
 ```
 
 * **Settings:** `context.config` is the folder's own `config.yml`, with `extension_config.<name>` from
-  core.yml merged over it. Keep secrets in `.env` and name the variable in the config.
+  core.yml merged over it.
+* **Secrets:** prefer `.env` and name the variable in the config (for example
+  `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Putting a secret directly in the folder's `config.yml`
+  (`token: …`) is supported for people who would rather not edit the environment; then
+  `chmod 600 config.yml`, and never share or copy the folder together with its `config.yml`.
 * **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `profiles`
   (name → ordered candidates, as in core.yml) and `assignments` / `admission` for the extension's own
   interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load).

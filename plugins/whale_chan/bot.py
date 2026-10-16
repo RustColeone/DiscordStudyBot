@@ -1,6 +1,6 @@
-"""A second Discord bot (its own application and token) for this plugin. Deliberately small: DMs,
-mentions and replies in servers, text, files, image attachments and a progress line. Everything else
-(policy, tools, models) belongs to the core."""
+"""Whale-chan's own Discord bot (its own application and token). Deliberately small: DMs, mentions and
+replies in servers, text with rendered math, files, image attachments and a progress line. Everything
+else (policy, tools, models) belongs to the core."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from pathlib import Path
 import discord
 
 from contracts import Address, Delivery, Display, FileRef, Interface, Reply, Request, Sender
+
+from .math_render import MathRenderer, fallback_text, split_math
 
 LIMIT = 2000
 NOTICES = {
@@ -37,14 +39,15 @@ def split_text(text: str, limit: int = LIMIT) -> list[str]:
     return [*chunks, remaining] if remaining or not chunks else chunks
 
 
-class ScholarBot(Interface):
-    def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0):
+class WhaleChanBot(Interface):
+    def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None):
         self.name, self.token = name, token
         self.attachments = Path(data_dir) / "attachments"
         self.attachment_max = int(attachment_max_mb * 1024 * 1024)
         self.display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
                                max_upload_mb=10, max_text_chars=LIMIT)
         self.operations = ()
+        self.math = MathRenderer(Path(data_dir) / "math", config or {})
         self.client: discord.Client | None = None
         self._task: asyncio.Task | None = None
         self._channels: dict[str, object] = {}
@@ -165,14 +168,40 @@ class ScholarBot(Interface):
             if not text.strip():
                 return Delivery(True, detail="suppressed")
             first = None
-            for index, chunk in enumerate(split_text(text)):
-                sent = await channel.send(content=chunk, reference=reference if index == 0 else None)
+            for kind, value in await self._parts(reply, text):
+                if kind == "image":
+                    try:
+                        sent = await channel.send(file=discord.File(value, filename="formula.png"),
+                                                  reference=reference if first is None else None)
+                    finally:
+                        Path(value).unlink(missing_ok=True)
+                else:
+                    sent = await channel.send(content=value, reference=reference if first is None else None)
                 first = first or sent
             return Delivery(True, message_id=str(first.id))
         except (discord.Forbidden, discord.NotFound) as error:
             return Delivery(False, detail=type(error).__name__)
         except discord.HTTPException as error:
             return Delivery(False, detail=f"HTTP {error.status}", uncertain=error.status >= 500)
+
+    async def _parts(self, reply: Reply, text: str) -> list[tuple[str, str]]:
+        """Text chunks and rendered display-math images, in order."""
+        if reply.kind != "text" or not self.math.enabled or "$" not in text and "\\" not in text:
+            return [("text", chunk) for chunk in split_text(text)]
+        parts, images = [], 0
+        for kind, value in split_math(text):
+            if kind == "text":
+                parts.extend(("text", chunk) for chunk in split_text(value) if value.strip())
+                continue
+            path = None
+            if images < self.math.max_images:
+                try:
+                    path = await asyncio.to_thread(self.math.render, value)
+                    images += 1
+                except Exception as error:
+                    self.port.log("math_render_failed", error=type(error).__name__)
+            parts.extend([("image", str(path))] if path else [("text", chunk) for chunk in split_text(fallback_text(value))])
+        return parts or [("text", chunk) for chunk in split_text(text)]
 
     async def _show_progress(self, channel, reply: Reply) -> Delivery:
         key = reply.run_id or reply.address.conversation

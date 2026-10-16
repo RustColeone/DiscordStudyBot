@@ -73,8 +73,8 @@ Quick start from a fresh clone:
 
 `core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
 channels it answers in, or to add extensions. Extensions can also be dropped into [`plugins/`](plugins)
-with their own git-ignored `config.yml`; [`plugins/scholar`](plugins/scholar) adds a second Discord bot
-with a plan-work-review engine.
+with their own git-ignored `config.yml`; [`plugins/whale_chan`](plugins/whale_chan) adds 鲸酱, a second
+Discord bot that chats like a personal AI web client (DeepSeek, with the whale-girl personality).
 
 ### WeChat Adapter Notes
 
