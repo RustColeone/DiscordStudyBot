@@ -168,6 +168,55 @@ class WeChatReplySupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([[m['id'] for m in c['messages']] for c in contexts],[['one'],['two']])
         self.assertNotIn('one',[m['id'] for m in contexts[1]['history']])
 
+    async def restarted(self, **options):
+        restarted = WeChatReplySupervisor(self.transport, self.store, self.notify, self.generator, **options)
+        restarted._sleep = AsyncMock()
+        self.addAsyncCleanup(restarted.close)
+        return restarted
+
+    async def test_recent_message_arriving_while_stopped_is_answered_after_restart(self):
+        await self.enable()
+        seen = {**message('native:10', 'before stop'), 'position': [10, 10], 'timestamp': int(time.time()) - 300}
+        await self.supervisor.baseline('owner', 'alice', [seen])
+        await self.supervisor.close()
+        missed = {**message('native:11', '说句话'), 'position': [11, 11], 'timestamp': int(time.time()) - 60}
+        restarted = await self.restarted()
+        with patch('builtins.print') as output:
+            await restarted.observe('owner', 'alice', [seen, missed])
+        await asyncio.wait_for(restarted._tasks[('owner', 'alice')], timeout=2)
+        self.generator.assert_awaited_once()
+        self.assertEqual([m['id'] for m in self.generator.await_args.args[0]['messages']], ['native:11'])
+        self.transport.send.assert_awaited_once()
+        self.assertTrue(any('catch_up_messages' in call.args[0] for call in output.call_args_list))
+        self.assertFalse(any('说句话' in call.args[0] for call in output.call_args_list))
+        self.assertEqual(self.store.read_cursor('owner', 'alice')[0], (11, 11))
+        # The same message is not answered again by a later restart.
+        again = await self.restarted()
+        await again.observe('owner', 'alice', [seen, missed])
+        self.assertNotIn(('owner', 'alice'), again._tasks)
+        self.generator.assert_awaited_once()
+
+    async def test_restart_catch_up_is_bounded_by_age_settings_revision_and_first_start(self):
+        await self.enable()
+        seen = {**message('native:10'), 'position': [10, 10], 'timestamp': int(time.time()) - 3000}
+        await self.supervisor.baseline('owner', 'alice', [seen])
+        stale = {**message('native:11', 'old question'), 'position': [11, 11], 'timestamp': int(time.time()) - 1200}
+        await (await self.restarted()).observe('owner', 'alice', [seen, stale])
+        self.generator.assert_not_awaited()
+        # A settings change after the cursor means the chat was not reply-ready under the same policy.
+        self.store.configure('owner', 'alice', instructions='changed while stopped')
+        recent = {**message('native:12'), 'position': [12, 12], 'timestamp': int(time.time())}
+        await (await self.restarted()).observe('owner', 'alice', [seen, stale, recent])
+        self.generator.assert_not_awaited()
+        # No durable cursor (first start, or catch-up disabled) remains a plain baseline.
+        await self.supervisor.configure('owner', 'bob', agent_enabled=True, whitelisted=True, chat_kind='direct')
+        latest = {**message('native:20', chat='bob'), 'position': [20, 20], 'timestamp': int(time.time())}
+        await (await self.restarted()).observe('owner', 'bob', [latest])
+        newer = {**message('native:21', chat='bob'), 'position': [21, 21], 'timestamp': int(time.time())}
+        await (await self.restarted(catch_up_seconds=0)).observe('owner', 'bob', [latest, newer])
+        self.generator.assert_not_awaited()
+        self.transport.send.assert_not_awaited()
+
     async def test_real_new_manual_reply_still_cancels_with_native_cursor(self):
         await self.enable()
         baseline={**message('native:old'),'position':[10,10]}

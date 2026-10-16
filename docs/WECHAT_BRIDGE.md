@@ -162,7 +162,8 @@ is independent per chat. Opening a conversation can consume its unread badge.
 
 Each chat can inherit all-chat notifications, explicitly enable its own destination, or opt out while
 all-chat notifications remain enabled. Startup baselines existing messages rather than forwarding/replying
-to old history. Unsupported views/media can produce a labeled unread/activity preview instead of an
+to old history; with the native reader, recent messages that arrived while the bot was stopped are still
+routed (see [restart catch-up](#restart-catch-up-october-15)). Unsupported views/media can produce a labeled unread/activity preview instead of an
 invented full message. Incoming media is currently forwarded as activity/preview text, not downloaded
 and mirrored as a Discord attachment. Outgoing tool-generated files use the verified file-send path.
 Discord mentions are suppressed in forwarded text.
@@ -503,3 +504,20 @@ Validation: 531 regression tests passed, including repeated quote targets,
 native upload commit detection, single-click file submission, and unsupported
 attachment capability filtering. Production startup confirmed all five chat
 baselines and the DeepSeek Flash reply engine.
+
+## Restart catch-up (October 15)
+
+The mention `@⚡BeastIX 大肥鱼说句话` in 《乌鲁克氮泵》 (native message 7, 23:54:59 PDT) carried
+the account's exact `atuserlist` target, so routing would have accepted it. It arrived while
+`discordstudybot.service` was stopped (23:49:14–23:56:06) for a one-off recovery run. On start, the
+bridge baselined all seven visible messages, including the mention, as handled history. The read
+position was only in memory, so nothing distinguished "observed before" from "arrived while stopped".
+
+The supervisor now persists each chat's native read position with the settings revision it was
+observed under (`wechat_read_cursors`). At startup, or when the account becomes ready again, messages
+after that cursor and newer than `WECHAT_BRIDGE_CATCHUP_SECONDS` (default 900, 0 disables, maximum
+3600) go through the normal routing path: whitelist, explicit mention, manual-reply cancellation and
+quoted delivery all still apply. No cursor (first start), a changed settings revision, or older messages
+keep the plain baseline, so enabling a chat never answers backlog. The cursor is written only when it
+advances. Work already in flight when the process stops is still not resumed. Startup logs show
+`catch_up_messages` counts without message contents.

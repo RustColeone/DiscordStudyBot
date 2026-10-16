@@ -24,7 +24,8 @@ class WeChatBridge(BridgedObject):
             generator = WeChatReplyGenerator(self.config)
         self.supervisor = WeChatReplySupervisor(self.transport, self.store, self._notify, generator,
             account_interval_seconds=20,
-            coalesce_seconds=self.config.get('WECHAT_BRIDGE_COALESCE_SECONDS', 1))
+            coalesce_seconds=self.config.get('WECHAT_BRIDGE_COALESCE_SECONDS', 1),
+            catch_up_seconds=self.config.get('WECHAT_BRIDGE_CATCHUP_SECONDS', 900))
         self.app = None
         self.poll_task = None
         self.account = {"state": "unavailable", "name": "", "account_id": ""}

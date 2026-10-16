@@ -62,6 +62,8 @@ WECHAT_BRIDGE_REPLY_PROVIDER: deepseek
 WECHAT_BRIDGE_REPLY_MODEL:
 # Gather incoming bursts briefly; generation overlaps the outbound send cooldown.
 WECHAT_BRIDGE_COALESCE_SECONDS: 1
+# Native reads only: after a restart, route messages missed while stopped if newer than this (0 disables).
+WECHAT_BRIDGE_CATCHUP_SECONDS: 900
 # Native reads require validated local database keys; desktop still sends.
 WECHAT_BRIDGE_READ_BACKEND: desktop
 WECHAT_BRIDGE_DATABASE_ROOT:

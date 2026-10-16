@@ -64,6 +64,10 @@ class WeChatConversationStore:
                 payload TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'observed',
                 recorded_at REAL NOT NULL,
                 UNIQUE(account_id, chat_id, message_id))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS wechat_read_cursors (
+                account_id TEXT NOT NULL, chat_id TEXT NOT NULL,
+                sort_seq INTEGER NOT NULL, local_id INTEGER NOT NULL, revision INTEGER NOT NULL,
+                updated_at REAL NOT NULL, PRIMARY KEY (account_id, chat_id))""")
         info = path.stat()
         self._schema_identity = (str(path),info.st_dev,info.st_ino)
 
@@ -214,6 +218,22 @@ class WeChatConversationStore:
                 (str(account_id), str(chat_id), str(account_id), str(chat_id)))
         return inserted
 
+    def read_cursor(self, account_id, chat_id):
+        """Return the last observed native position and the settings revision it was observed under."""
+        self._ensure_tables()
+        with db.get_db() as conn:
+            row = conn.execute('SELECT sort_seq,local_id,revision FROM wechat_read_cursors WHERE account_id=? AND chat_id=?',
+                               (str(account_id), str(chat_id))).fetchone()
+        return ((row['sort_seq'], row['local_id']), row['revision']) if row else None
+
+    def save_read_cursor(self, account_id, chat_id, position, revision):
+        self._ensure_tables()
+        with db.get_db() as conn:
+            conn.execute("""INSERT INTO wechat_read_cursors VALUES (?,?,?,?,?,?)
+                ON CONFLICT(account_id,chat_id) DO UPDATE SET sort_seq=excluded.sort_seq,
+                local_id=excluded.local_id, revision=excluded.revision, updated_at=excluded.updated_at""",
+                (str(account_id), str(chat_id), int(position[0]), int(position[1]), int(revision), time.time()))
+
     def history(self, account_id, chat_id, limit=30):
         self._ensure_tables()
         with db.get_db() as conn:
@@ -245,7 +265,7 @@ class WeChatConversationStore:
 
 class WeChatReplySupervisor:
     def __init__(self, transport, store, notify=None, generator=None, account_interval_seconds=20,
-                 coalesce_seconds=1):
+                 coalesce_seconds=1, catch_up_seconds=900):
         self.transport, self.store, self.notify = transport, store, notify
         if generator is None:
             from providers.wechat_reply import WeChatReplyGenerator
@@ -253,7 +273,9 @@ class WeChatReplySupervisor:
         self.generator = generator
         self.account_interval_seconds = max(5.0, float(account_interval_seconds))
         self.coalesce_seconds = max(0.0, min(5.0, float(coalesce_seconds)))
+        self.catch_up_seconds = max(0.0, min(3600.0, float(catch_up_seconds)))
         self._baselines = set()
+        self._saved_cursors = {}
         self._revisions = {}
         self._epochs = defaultdict(int)
         self._pending = defaultdict(list)
@@ -287,16 +309,53 @@ class WeChatReplySupervisor:
             # A failed Discord delivery must not restart or duplicate a WeChat send.
             print(f"[wechat reply] notification failed: {type(error).__name__}")
 
+    def _catch_up_floor(self, key, revision):
+        """A durable cursor from the same settings revision marks where observation stopped."""
+        if self.catch_up_seconds <= 0:
+            return None
+        saved = self.store.read_cursor(*key)
+        if saved is None or saved[1] != revision:
+            return None
+        return saved[0]
+
+    def _recent(self, message):
+        timestamp = message.get('timestamp')
+        return type(timestamp) in (int, float) and time.time() - timestamp <= self.catch_up_seconds
+
+    def _save_cursor(self, key):
+        position, revision = self._positions.get(key), self._revisions.get(key)
+        if position is None or revision is None or self._saved_cursors.get(key) == (position, revision):
+            return
+        self.store.save_read_cursor(*key, position, revision)
+        self._saved_cursors[key] = (position, revision)
+
     async def baseline(self, account_id, chat_id, messages):
+        """Treat visible history as already handled, except recent messages never observed before a restart.
+
+        Returns the unobserved messages left for the normal observe() path to route.
+        """
         key = (str(account_id), str(chat_id))
         await self._invalidate(key)
+        revision = self.store.get(*key)["revision"]
+        floor = self._catch_up_floor(key, revision)
+        catch_up, positions = [], []
         for message in messages:
+            position = self._position(message)
+            if floor is not None and position is not None and position > floor and self._recent(message):
+                catch_up.append(message)
+                continue
             self.store.record(*key, message)
-        positions = [position for message in messages if (position := self._position(message)) is not None]
-        if positions:
+            if position is not None:
+                positions.append(position)
+        if catch_up:
+            self._positions[key] = floor
+            print('[wechat bridge] ' + json.dumps({'chat_id': key[1], 'catch_up_messages': len(catch_up)}))
+        elif positions:
             self._positions[key] = max(positions)
         self._baselines.add(key)
-        self._revisions[key] = self.store.get(*key)["revision"]
+        self._revisions[key] = revision
+        self._save_cursor(key)
+        return catch_up
 
     async def reset_baseline(self, account_id=None, chat_id=None):
         keys = set(self._baselines) | set(self._tasks)
@@ -359,8 +418,8 @@ class WeChatReplySupervisor:
         key = (str(account_id), str(chat_id))
         settings = self.store.get(*key)
         if key not in self._baselines or self._revisions.get(key) != settings["revision"]:
-            await self.baseline(*key, messages)
-            return
+            if not await self.baseline(*key, messages):
+                return
         fresh = []
         notifications = []
         manual = False
@@ -396,6 +455,7 @@ class WeChatReplySupervisor:
                     fresh = []
             elif message.get("kind", "text") == "text" and str(message.get("text") or "").strip():
                 fresh.append(dict(message))
+        self._save_cursor(key)
         for message in notifications:
             await self._notify(key, "incoming", message)
         if notifications:
