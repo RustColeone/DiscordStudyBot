@@ -35,6 +35,7 @@ class CoreConfig:
         self.raw, self.base_dir = raw, base_dir
         self.data_dir = self.path(raw.get("data_dir", "data/core"))
         self.extensions = [self.path(item) for item in raw.get("extensions", [])]
+        self.plugin_dirs = [self.path(item) for item in raw.get("plugin_dirs", [])]
         self.extension_config = dict(raw.get("extension_config") or {})
         self.providers = dict(raw.get("providers") or {})
         self.profiles = dict(raw.get("profiles") or {})
@@ -52,6 +53,16 @@ class CoreConfig:
                                 for pattern, value in (raw.get("assignments") or {}).items()}
         except (KeyError, TypeError) as error:
             raise ConfigError(f"Invalid persona or assignment: {error}") from error
+
+    def plugins(self) -> list[Path]:
+        """Drop-in extensions: every folder with an extension.py in a plugin directory, not listed already."""
+        listed = {path.resolve() for path in self.extensions}
+        found = []
+        for directory in self.plugin_dirs:
+            if directory.is_dir():
+                found.extend(path for path in sorted(directory.iterdir())
+                             if (path / "extension.py").is_file() and path.resolve() not in listed)
+        return found
 
     def path(self, value: str) -> Path:
         path = Path(os.path.expanduser(str(value)))
@@ -79,8 +90,9 @@ class CoreConfig:
         for key in ("data_dir",):
             if key in raw:
                 raw[key] = str(cls._resolve(raw[key], base))
-        if "extensions" in raw:
-            raw["extensions"] = [str(cls._resolve(item, base)) for item in raw["extensions"]]
+        for key in ("extensions", "plugin_dirs"):
+            if key in raw:
+                raw[key] = [str(cls._resolve(item, base)) for item in raw[key]]
         return cls(merge(defaults, raw), base)
 
     @staticmethod

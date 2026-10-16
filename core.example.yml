@@ -26,6 +26,10 @@
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
 
+# Drop-in folders: every subfolder with an extension.py loads automatically (default [plugins]).
+# Each extension folder may keep a git-ignored config.yml; extension_config below overrides it.
+# plugin_dirs: [plugins]
+
 # extension_config:
 #   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25,
 #             music_dir: /path/to/music, music_list: /path/to/musicList.txt,   # $music (needs ffmpeg, libopus)

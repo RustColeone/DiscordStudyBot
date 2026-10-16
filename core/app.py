@@ -24,6 +24,15 @@ class Core:
         self.started = False
 
     async def build(self) -> None:
+        try:
+            await self._build()
+        except Exception:
+            for store in (getattr(self, "tank", None), getattr(self, "bottle", None)):
+                if store is not None:
+                    store.close()
+            raise
+
+    async def _build(self) -> None:
         config = self.config
         config.data_dir.mkdir(parents=True, exist_ok=True)
         self.audit = Audit(config.data_dir / "audit.log", echo=config.audit_echo)
@@ -40,7 +49,7 @@ class Core:
         self.gateway = Gateway(self.bottle, self.manager, audit=self.audit, rules=config.rules,
                                routes=config.routes, routines=config.routines, **options)
         names = set()
-        for path in config.extensions:
+        for path in [*config.extensions, *config.plugins()]:
             loaded = await load_extension(path, lambda name: config.extension_config.get(name, {}),
                                           config.data_dir / "extensions", self.audit.record)
             name = loaded.extension.name
@@ -55,6 +64,7 @@ class Core:
                 self.manager.register_capability(capability, name)
             for persona in loaded.contributions.personas:
                 self.manager.register_persona(persona, name)
+            self._register_defaults(loaded)
             self.extensions.append(loaded)
             self.audit.record("extension_loaded", extension=name, path=str(path),
                               interfaces=[i.name for i in loaded.contributions.interfaces],
@@ -66,6 +76,23 @@ class Core:
             problems.append(f"control route {config.control} uses an interface that is not loaded")
         if problems:
             raise ConfigError("; ".join(problems))
+
+    def _register_defaults(self, loaded: LoadedExtension) -> None:
+        """Profiles, assignments and admission an extension suggests; core.yml and runtime edits win."""
+        contributions, name = loaded.contributions, loaded.extension.name
+        own = {interface.name for interface in contributions.interfaces}
+        for pattern in [*contributions.assignments, *contributions.admission]:
+            if pattern.split(":", 1)[0] not in own or ":" not in pattern:
+                raise ConfigError(f"{name}: defaults may only cover its own interfaces, not {pattern!r}")
+        for profile, candidates in contributions.profiles.items():
+            if profile not in self.config.profiles:
+                self.providers.add_profile(profile, candidates)
+        for pattern, value in contributions.assignments.items():
+            self.manager.default_assignment(pattern, value)
+        stored = self.bottle.rules()
+        for pattern, rule in contributions.admission.items():
+            if pattern not in self.config.rules and pattern not in stored:
+                self.gateway.admin().set_rule(pattern, dict(rule))
 
     async def start(self) -> None:
         if not hasattr(self, "manager"):

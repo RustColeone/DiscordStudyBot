@@ -82,12 +82,26 @@ def import_extension(path: str | Path) -> tuple[Extension, ModuleType]:
     return extension, module
 
 
+def local_config(path: str | Path) -> dict:
+    """The extension folder's own `config.yml` (kept out of git), or {}."""
+    file = Path(path) / "config.yml"
+    if not file.is_file():
+        return {}
+    import yaml
+    value = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
+    if not isinstance(value, dict):
+        raise ExtensionError(f"{file} must be a mapping")
+    return value
+
+
 async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[str, Any]], data_root: Path,
                          log: Callable[..., None]) -> LoadedExtension:
     extension, module = import_extension(path)
     data_dir = data_root / extension.name
     data_dir.mkdir(parents=True, exist_ok=True)
-    context = ExtensionContextImpl(extension.name, dict(config_for(extension.name) or {}), data_dir, log)
+    from core.defaults import merge
+    config = merge(local_config(path), dict(config_for(extension.name) or {}))
+    context = ExtensionContextImpl(extension.name, config, data_dir, log)
     try:
         contributions = extension.setup(context)
         if inspect.isawaitable(contributions):

@@ -58,3 +58,12 @@ temp/
 # Core runtime
 core.yml
 data/
+
+# Drop-in extensions are usually their own repositories; the README and the example are tracked
+plugins/*
+!plugins/README.md
+!plugins/scholar/
+
+# Local extension settings
+extensions/*/config.yml
+plugins/*/config.yml

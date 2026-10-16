@@ -104,13 +104,16 @@ default personas in `Contributions.personas`; a configured persona with the same
 my_extension/
   extension.py        # defines EXTENSION
   anything_else.py    # import with relative imports: from .anything_else import X
+  config.example.yml  # optional: documented settings to copy
+  config.yml          # optional, git-ignored: this extension's local settings
 ```
 
 ```python
 from contracts import Contributions, Extension, Persona
 
 def setup(context) -> Contributions:
-    # context.name, context.config (your section of core.yml), context.data_dir (private dir), context.log(event, **fields)
+    # context.name, context.config (local config.yml, overridden by core.yml), context.data_dir (private dir),
+    # context.log(event, **fields)
     return Contributions(interfaces=[...], engines=[...], capabilities=[...],
                          personas=[Persona("whale", "本鲸", "…", profile="default")])
 
@@ -121,14 +124,25 @@ EXTENSION = Extension("my_extension", setup, contracts="1", version="1", descrip
 * `setup` may be `async`. It runs once at startup; start network loops in `Interface.start`, not here.
   Objects created in `setup` may be shared by your interface, engines and capabilities.
 * `contracts="1"` is the contracts major version you target; a mismatch refuses to load.
-* The directory may live in any repository. Enable it in `core.yml`:
+* **Drop-in:** put the folder into `plugins/` and restart; every folder there with an `extension.py`
+  loads without touching `core.yml` (`plugin_dirs` lists the drop-in directories; default `plugins/`).
+  Folders in `plugins/` and every `config.yml` are git-ignored. [`plugins/scholar`](../../plugins/scholar)
+  is a complete example: a second Discord bot with its own engine.
+* Or list a folder from any repository in `core.yml`:
 
 ```yaml
 extensions:
   - ../MusicManager/bot_extension
 extension_config:
-  my_extension: {some_option: 1}      # becomes context.config
+  my_extension: {some_option: 1}      # merged over the folder's config.yml into context.config
 ```
+
+* **Settings:** `context.config` is the folder's own `config.yml`, with `extension_config.<name>` from
+  core.yml merged over it. Keep secrets in `.env` and name the variable in the config.
+* **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `profiles`
+  (name → ordered candidates, as in core.yml) and `assignments` / `admission` for the extension's own
+  interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load).
+  core.yml and runtime edits always win.
 
 `python -m core --config core.yml --check` loads and validates every extension and lists what each
 contributes, without starting anything.

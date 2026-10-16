@@ -381,3 +381,72 @@ class ParallelWorkTests(CoreCase):
         iface(configured).port.set_owners(["zed"], control=Address("chat", "dm-zed"))
         self.assertFalse(configured.manager.is_owner(Request("x", Address("chat", "r"), Sender("zed"), "", 0)))
         self.assertEqual(configured.manager.control, Address("owner", "dm"))
+
+
+DROP_IN = '''
+from contracts import Contributions, Display, Extension, Interface, Persona, Delivery
+
+
+class Bot(Interface):
+    display = Display()
+
+    def __init__(self, name):
+        self.name = name
+
+    async def start(self, port):
+        self.port = port
+
+    async def stop(self):
+        pass
+
+    async def deliver(self, reply):
+        return Delivery(True)
+
+
+def setup(context):
+    name = context.config["interface"]
+    return Contributions(interfaces=[Bot(name)], personas=[Persona("sage", "Sage", "You are Sage.", "sage")],
+                         profiles={"sage": [{"provider": "fake", "model": "big"}]},
+                         assignments={name + ":*": {"engine": "probe", "personas": ["sage"]}},
+                         admission={name + ":*": {"require_mention_in_groups": False}})
+
+
+EXTENSION = Extension("dropin", setup, contracts="1")
+'''
+
+
+class PluginTests(CoreCase):
+    def plugin(self, config: str) -> Path:
+        folder = self.tmp / "plugins" / "dropin"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "extension.py").write_text(DROP_IN)
+        (folder / "config.yml").write_text(config)
+        return folder
+
+    async def test_dropped_in_folder_loads_with_its_local_config_and_defaults(self):
+        self.plugin("interface: sage_bot\n")
+        core = await self.core({"plugin_dirs": [str(self.tmp / "plugins")],
+                                "assignments": {"sage_bot:vip": {"engine": "probe", "personas": ["p"]}}})
+        self.assertIn("sage_bot", core.gateway.interfaces)
+        self.assertEqual(core.manager.assignment_for(Address("sage_bot", "x")).personas, ("sage",))
+        self.assertEqual(core.manager.assignment_for(Address("sage_bot", "vip")).personas, ("p",))
+        self.assertFalse(core.gateway.rule_for(Address("sage_bot", "x"))["require_mention_in_groups"])
+        self.assertIn("sage", core.providers.profiles())
+        await iface(core, "sage_bot").port.submit(Request(
+            id="1", address=Address("sage_bot", "x"), sender=Sender("u", "U"), text="echo hi", received_at=time.time(),
+            display=iface(core, "sage_bot").display))
+        await settle(core)
+        self.assertEqual(core.tank.runs(("done",))[0].personas, ["sage"])
+
+    async def test_core_yml_settings_override_the_local_config(self):
+        self.plugin("interface: sage_bot\n")
+        core = await self.core({"plugin_dirs": [str(self.tmp / "plugins")],
+                                "extension_config": {"dropin": {"interface": "renamed"}}})
+        self.assertIn("renamed", core.gateway.interfaces)
+
+    async def test_defaults_for_other_interfaces_are_refused(self):
+        from core.config import ConfigError
+        folder = self.plugin("interface: sage_bot\n")
+        (folder / "extension.py").write_text(DROP_IN.replace('name + ":*": {"engine"', '"chat:*": {"engine"'))
+        with self.assertRaisesRegex(ConfigError, "only cover its own interfaces"):
+            await self.core({"plugin_dirs": [str(self.tmp / "plugins")]})

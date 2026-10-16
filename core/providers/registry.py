@@ -47,6 +47,13 @@ class Providers:
                 if candidate.get("provider") not in self._settings and candidate.get("provider") not in self._adapters:
                     raise ValueError(f"Profile {name!r} uses unknown provider {candidate.get('provider')!r}")
 
+    def add_profile(self, name: str, candidates) -> None:
+        candidates = [dict(candidate) for candidate in candidates]
+        for candidate in candidates:
+            if candidate.get("provider") not in self._settings and candidate.get("provider") not in self._adapters:
+                raise ValueError(f"Profile {name!r} uses unknown provider {candidate.get('provider')!r}")
+        self._profiles.setdefault(name, candidates)
+
     def profiles(self) -> list[str]:
         return sorted(self._profiles)
 

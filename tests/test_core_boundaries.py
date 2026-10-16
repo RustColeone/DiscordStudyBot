@@ -45,13 +45,13 @@ class BoundaryTests(unittest.TestCase):
                                 or module in sys.stdlib_module_names, f"{path} imports {module}")
 
     def test_extensions_see_the_core_only_through_contracts(self):
-        roots = [ROOT / "extensions", ROOT / "tests" / "core_fixtures"]
+        roots = [ROOT / "extensions", ROOT / "plugins", ROOT / "tests" / "core_fixtures"]
         for root in roots:
             for path in root.rglob("*.py"):
                 for module, level in imports(path):
                     if level:
                         continue
-                    self.assertNotIn(module, LEGACY | {"core", "extensions", "tests"}, f"{path} imports {module}")
+                    self.assertNotIn(module, LEGACY | {"core", "extensions", "plugins", "tests"}, f"{path} imports {module}")
 
 
 def new_core(config):
