@@ -168,6 +168,43 @@ class DesktopEvidenceTests(unittest.TestCase):
                 desktop.click(node)
         self.assertFalse(any(call.args[0][1] == "click" for call in subprocess.call_args_list))
 
+    def test_click_reaches_a_message_bubble_taller_than_the_list_viewport(self):
+        desktop = Desktop.__new__(Desktop)
+        desktop.app = SimpleNamespace(get_process_id=lambda: 123, clear_cache=lambda: None)
+        desktop.showing = lambda node: True
+        # The list shows y=100..500; a 33-line prompt bubble is 900 px tall and starts below the view.
+        positions = iter([150])
+        state = {'y': 450}
+        parent = SimpleNamespace(get_role_name=lambda: 'list')
+        node = SimpleNamespace(get_parent=lambda: parent, get_role_name=lambda: 'list item', clear_cache=lambda: None)
+        desktop.rect = lambda item: (0, 100, 600, 400) if item is parent else (0, state['y'], 600, 900)
+        moves = []
+        def run(args, **kwargs):
+            if args[1] == 'getmouselocation': return SimpleNamespace(stdout=b'WINDOW=42\n')
+            if args[1] == 'getwindowpid': return SimpleNamespace(returncode=0, stdout=b'123\n')
+            if args[1] == 'mousemove' and len(args) > 4:
+                state['y'] = next(positions)  # one wheel scroll moved the bubble up
+            elif args[1] == 'mousemove':
+                moves.append((int(args[2]), int(args[3])))
+            return SimpleNamespace(returncode=0, stdout=b'')
+        with patch('scripts.wechat_desktop.subprocess.run', side_effect=run), \
+                patch('scripts.wechat_desktop.time.sleep'):
+            desktop.click(node, button=3, offset=(90, 450))
+        # Clicked inside the bubble's visible slice instead of failing because it can never fully fit.
+        self.assertEqual(len(moves), 1)
+        self.assertTrue(100 < moves[0][1] < 500)
+
+    def test_click_still_refuses_a_bubble_that_never_becomes_visible(self):
+        desktop = Desktop.__new__(Desktop)
+        desktop.app = SimpleNamespace(get_process_id=lambda: 123, clear_cache=lambda: None)
+        desktop.showing = lambda node: True
+        parent = SimpleNamespace(get_role_name=lambda: 'list')
+        node = SimpleNamespace(get_parent=lambda: parent, get_role_name=lambda: 'list item', clear_cache=lambda: None)
+        desktop.rect = lambda item: (0, 100, 600, 400) if item is parent else (0, 2000, 600, 900)
+        with patch('scripts.wechat_desktop.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=b'')), \
+                patch('scripts.wechat_desktop.time.sleep'):
+            with self.assertRaisesRegex(ValueError, 'scrolled into view'):
+                desktop.click(node, button=3)
 
     def test_repeated_reads_do_not_toggle_selected_chat_closed(self):
         desktop = Desktop.__new__(Desktop)
