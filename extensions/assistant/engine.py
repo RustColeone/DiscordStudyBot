@@ -7,11 +7,27 @@ carries a stable call_id, so a restart resumes without repeating work.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 from typing import Any
 
-from contracts import Engine, EngineSpec, ModelError, ModelRequest, RunYield, Session, ToolResult
+from contracts import Engine, EngineSpec, FileRef, ModelError, ModelRequest, RunYield, Session, ToolResult
+
+
+IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def add_images(state: dict, files) -> None:
+    """Remember image attachments of the run's messages (latest 6) so every turn can see them."""
+    for file in files or ():
+        item = dataclasses.asdict(file) if dataclasses.is_dataclass(file) else dict(file)
+        if (item.get("mime") or "").startswith("image/") or item["path"].lower().endswith(IMAGE_SUFFIXES):
+            state["images"] = [*state.get("images", []), item][-6:]
+
+
+def images(state: dict) -> tuple[FileRef, ...]:
+    return tuple(FileRef(**item) for item in state.get("images", []))
 
 TURN_SCHEMA = {
     "type": "object",
@@ -67,6 +83,7 @@ class AssistantEngine(Engine):
         while True:
             for request in session.inbox():
                 self._add_input(session, state, request.text, request.sender.name or request.sender.id, request.id)
+                add_images(state, request.files)
             if state["steps"] >= self.max_steps:
                 await self._close(session, state)
                 return RunYield.DONE
@@ -109,6 +126,7 @@ class AssistantEngine(Engine):
                 request = event.data["request"]
                 sender = request["sender"].get("name") or request["sender"]["id"]
                 self._add_input(session, state, request["text"], sender, request["id"])
+                add_images(state, request.get("files"))
             elif event.kind in ("tool_result", "approval_denied"):
                 call_id = str(event.data.get("call_key", "")).removeprefix("call:")
                 action = next((item for item in state["pending"] if item["call_id"] == call_id), None)
@@ -262,6 +280,7 @@ class AssistantEngine(Engine):
             try:
                 result = await session.models.generate(ModelRequest(
                     self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
+                    images=images(state),
                     effort=self.effort, max_tokens=self.max_tokens))
             except ModelError as error:
                 if error.kind != "invalid_output" or attempt == 2:
@@ -294,6 +313,7 @@ class AssistantEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
+                    images=images(state),
                 effort=self.effort, max_tokens=self.max_tokens))
             message = (result.data or {}).get("message", "").strip()
         except ModelError:

@@ -68,6 +68,22 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Waiting for owner approval", prompt)
         self.assertIn("[tool tools.write_value → success] wrote k (execution 1)", prompt)
 
+    async def test_attached_images_are_shown_to_the_model_on_every_turn(self):
+        import time
+        from contracts import Address, FileRef, Request, Sender
+        photo, notes = self.tmp / "cat.jpg", self.tmp / "notes.txt"
+        photo.write_bytes(b"jpeg")
+        notes.write_text("x")
+        core, adapter = await self.core([turn("Looking.", "continue", [("basic.now", {})]), turn("A cat.")])
+        chat = iface(core)
+        await chat.port.submit(Request(id="img-1", address=Address("chat", "room"), sender=Sender("alice", "Alice"),
+                                       text="what is this?", received_at=time.time(), display=chat.display,
+                                       files=(FileRef(str(photo), "cat.jpg", "image/jpeg"), FileRef(str(notes), "notes.txt"))))
+        await settle(core)
+        self.assertEqual(chat.texts("room"), ["Looking.", "A cat."])
+        self.assertEqual([[image.mime for image in call["images"]] for call in adapter.calls],
+                         [["image/jpeg"], ["image/jpeg"]])
+
     async def test_invalid_output_and_unknown_tools_get_one_correction_each(self):
         core, adapter = await self.core(["not json", turn("x", "continue", [("tools.nope", {})]), turn("Fine.")])
         await iface(core).say("hello")

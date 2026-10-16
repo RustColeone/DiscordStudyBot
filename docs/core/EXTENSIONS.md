@@ -401,6 +401,7 @@ to any conversation:
   the original request).
 * Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
   (`low`).
+* Images attached to the run's messages (latest 6) are shown to the model on every turn.
 * Diary: the system prompt includes the persona's notes about the sender (matching ones first), and a
   turn may add `diary: [{key, kind, note, importance}]` (at most 2; importance 3+ is kept). Turn it
   off with the assignment option `diary: false`.
@@ -430,7 +431,7 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
 * Every persona sees the conversation history (her own messages as hers), the board, recent room
-  messages and shared tool results, and only her own diary.
+  messages, shared tool results, the images attached to the run's messages, and only her own diary.
 * Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
   person's answer. Both keep the board in the run, so they survive restarts. New messages during a
   run answer waiting questions or open new jobs.
