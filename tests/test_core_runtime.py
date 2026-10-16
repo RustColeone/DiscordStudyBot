@@ -1,0 +1,415 @@
+import asyncio
+import json
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from contracts import Address, Request, Sender
+from tests.core_support import FakeAdapter, extension_module, iface, settle, start_core
+
+
+class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cores = []
+
+    async def asyncTearDown(self):
+        for core in self.cores:
+            await core.stop()
+        self._tmp.cleanup()
+
+    async def core(self, overrides=None, adapter=None, clock=None):
+        core = await start_core(self.tmp, overrides, adapter, clock)
+        self.cores.append(core)
+        probe = extension_module(core, "probe")
+        probe.RELEASE = asyncio.Event()
+        probe.RUNS.clear()
+        return core
+
+    async def restart(self, core, overrides=None, adapter=None):
+        await core.stop()
+        self.cores.remove(core)
+        return await self.core(overrides, adapter)
+
+    def counts(self):
+        path = self.tmp / "counter.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    # ---- basic flow, admission and dedupe ----------------------------------------------------------
+    async def test_message_runs_engine_reply_and_history_in_both_directions(self):
+        core = await self.core()
+        chat = iface(core)
+        self.assertTrue(await chat.say("echo hello"))
+        await settle(core)
+        self.assertEqual(chat.texts("room", "text"), ["hello"])
+        history = core.tank.recent_messages("chat:room")
+        self.assertEqual([(item.direction, item.text) for item in history], [("in", "echo hello"), ("out", "hello")])
+        self.assertEqual(core.tank.runs(("done",))[0].status, "done")
+
+    async def test_duplicate_request_ids_are_dropped_including_after_restart(self):
+        core = await self.core()
+        self.assertTrue(await iface(core).say("echo one", request_id="native-1"))
+        self.assertFalse(await iface(core).say("echo again", request_id="native-1"))
+        await settle(core)
+        core = await self.restart(core)
+        self.assertFalse(await iface(core).say("echo third", request_id="native-1"))
+        await settle(core)
+        self.assertEqual(len(core.tank.runs(("done",))), 1)
+
+    async def test_admission_requires_explicit_group_mention_and_respects_rules(self):
+        core = await self.core({"admission": {"chat:quiet": {"enabled": False},
+                                              "chat:vip": {"allow_senders": ["carol"]}}})
+        chat = iface(core)
+        self.assertFalse(await chat.say("echo x", is_direct=False, mentions_me=None))
+        self.assertFalse(await chat.say("echo x", is_direct=False, mentions_me=False))
+        self.assertTrue(await chat.say("echo yes", is_direct=False, mentions_me=True))
+        self.assertFalse(await chat.say("echo x", conversation="quiet"))
+        self.assertFalse(await chat.say("echo x", conversation="vip", sender="alice"))
+        self.assertTrue(await chat.say("echo vip", conversation="vip", sender="carol"))
+        await settle(core)
+        # The owner's commands bypass admission (for example $approve in a group).
+        self.assertTrue(await chat.say("$runs", conversation="quiet", sender="boss"))
+        await settle(core)
+        self.assertEqual(chat.texts("quiet", "text"), ["No open runs."])
+        self.assertIn("yes", chat.texts("room"))
+        self.assertIn("vip", chat.texts("vip"))
+        decisions = [event["decision"] for event in core.audit.events if event["event"] == "admission"]
+        self.assertEqual(decisions.count("not_mentioned"), 2)
+        self.assertIn("disabled", decisions)
+        self.assertIn("sender_not_allowed", decisions)
+
+    async def test_interface_cannot_submit_for_another_interface_or_as_routine(self):
+        core = await self.core()
+        chat = iface(core)
+        with self.assertRaises(ValueError):
+            await chat.port.submit(Request("x", Address("owner", "dm"), Sender("boss"), "hi", time.time()))
+        with self.assertRaises(ValueError):
+            await chat.port.submit(Request("y", Address("chat", "room"), Sender("boss"), "hi", time.time(),
+                                           origin="routine"))
+
+    # ---- run lifecycle ----------------------------------------------------------------------------
+    async def test_question_waits_for_the_next_message_and_resumes_the_same_run(self):
+        core = await self.core()
+        chat = iface(core)
+        await chat.say("ask")
+        await settle(core)
+        run = core.tank.runs(("waiting_input",))[0]
+        await chat.say("the blue one")
+        await settle(core)
+        self.assertEqual(chat.texts("room"), ["which one?", "got the blue one"])
+        self.assertEqual(core.tank.run(run.id).status, "done")
+        self.assertEqual(len(core.tank.runs(("done",))), 1)
+
+    async def test_messages_during_a_run_go_to_its_inbox(self):
+        core = await self.core()
+        chat = iface(core)
+        await chat.say("inbox")
+        await asyncio.sleep(0.03)
+        await chat.say("follow-up")
+        await settle(core)
+        self.assertEqual(chat.texts("room"), ["inbox follow-up"])
+        self.assertEqual(len(core.tank.runs(("done",))), 1)
+
+    async def test_unread_inbox_after_a_run_starts_a_new_run(self):
+        core = await self.core()
+        chat = iface(core)
+        await chat.say("hold")
+        await asyncio.sleep(0.01)
+        await chat.say("echo later")
+        extension_module(core, "probe").RELEASE.set()
+        await settle(core)
+        self.assertEqual(chat.texts("room"), ["released after 1 holds", "later"])
+        self.assertEqual(len(core.tank.runs(("done",))), 2)
+
+    async def test_engine_failures_notify_conversation_and_owner_without_raw_text(self):
+        core = await self.core()
+        chat, owner = iface(core), iface(core, "owner")
+        await chat.say("crash")
+        await chat.say("bad", conversation="other")
+        await settle(core)
+        codes = [notice.data["error_code"] for notice in chat.notices("run_failed")]
+        self.assertEqual(sorted(codes), ["engine_error", "engine_protocol"])
+        self.assertFalse([text for text in chat.texts() if "exploded" in text])
+        details = owner.notices("run_failed_detail")
+        self.assertTrue(any("engine exploded" in notice.text for notice in details))
+
+    async def test_running_run_resumes_after_restart(self):
+        core = await self.core()
+        await iface(core).say("hold")
+        await asyncio.sleep(0.02)
+        run = core.tank.runs(("running",))[0]
+        core = await self.restart(core)
+        probe = extension_module(core, "probe")
+        await asyncio.sleep(0.02)
+        self.assertEqual(core.tank.run(run.id).status, "running")
+        self.assertTrue(probe.RUNS[-1]["resumed"])
+        self.assertIn("resumed", probe.RUNS[-1]["events"])
+        probe.RELEASE.set()
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["released after 2 holds"])
+
+    async def test_model_call_budget_fails_the_run(self):
+        adapter = FakeAdapter(handler=lambda messages, schema: "ok")
+        core = await self.core({"assignments": {"*": {"budget": {"model_calls": 2}}}}, adapter)
+        await iface(core).say("models 2")
+        await iface(core).say("models 3", conversation="other")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["models done"])
+        self.assertEqual(iface(core).notices("run_failed")[0].data["error_code"], "budget_exceeded")
+        self.assertEqual(len(adapter.calls), 4)
+
+    # ---- tool policy ------------------------------------------------------------------------------
+    async def test_tool_policy_refusals_are_results_not_exceptions(self):
+        core = await self.core({"assignments": {"chat:limited": {"engine": "probe", "personas": ["p"],
+                                                                  "allow": ["tools.*"], "deny": ["tools.broken"]}},
+                                "extension_config": {"fake": {"interfaces": {"nofiles": {"files": False}}}}})
+        chat = iface(core)
+        await chat.say('tool tools.nope {}')
+        await chat.say('tool basic.now {}', conversation="limited")
+        await chat.say('tool tools.broken {}', conversation="limited2")
+        await chat.say('tool tools.secret {}', conversation="s1")
+        await chat.say('tool tools.secret {}', conversation="s2", sender="boss")
+        await chat.say('tool tools.read_value {"wrong": 1}', conversation="args")
+        await chat.say('tool tools.bad_result {}', conversation="bad")
+        await iface(core, "nofiles").say('tool tools.make_file {"name": "a.txt"}')
+        await settle(core)
+        texts = chat.texts()
+        self.assertTrue(texts[0].startswith("failed: No capability"))
+        self.assertTrue(chat.texts("limited")[0].startswith("failed: basic.now is not allowed"))
+        self.assertTrue(chat.texts("limited2")[0].startswith("failed: tools.broken failed: TimeoutError"))
+        self.assertIn("only to the owner", chat.texts("s1")[0])
+        self.assertEqual(chat.texts("s2"), ["success: owner secret"])
+        self.assertIn("Invalid arguments", chat.texts("args")[0])
+        self.assertIn("instead of a ToolResult", chat.texts("bad")[0])
+        self.assertIn("needs ['files']", iface(core, "nofiles").texts()[0])
+
+    async def test_tool_list_hides_internal_and_refused_capabilities(self):
+        core = await self.core()
+        await iface(core).say("hold")
+        await asyncio.sleep(0.01)
+        run = core.tank.runs(("running",))[0]
+        names = [tool["name"] for tool in core.manager.tool_schemas(run.id)]
+        self.assertIn("tools.read_value", names)
+        self.assertNotIn("tools.hidden", names)
+        self.assertNotIn("tools.secret", names)
+        self.assertNotIn("core.send_message", names)
+        extension_module(core, "probe").RELEASE.set()
+        await settle(core)
+
+    async def test_prepared_files_are_checked_against_the_conversation_limit(self):
+        core = await self.core()
+        chat = iface(core)
+        await chat.say('tool tools.make_file {"name": "out.txt"}')
+        await settle(core)
+        files = [reply for reply in chat.delivered if reply.kind == "file"]
+        self.assertEqual(files[0].file.name, "out.txt")
+        self.assertIn("file ready", chat.texts(kind="progress"))
+        big = core.config.data_dir / "big.bin"
+        big.write_bytes(b"x" * (2 * 1024 * 1024))
+        run = core.tank.runs(("done",))[0]
+        from contracts import FileRef
+        delivery = await core.manager.send_file(run.id, FileRef(str(big)))
+        self.assertEqual(delivery.detail, "too_large")
+
+    async def test_identical_write_in_one_run_executes_once(self):
+        core = await self.core({"assignments": {"*": {"preapprove": ["tools.write_value"]}}})
+        await iface(core).say('tool2 tools.write_value {"key": "k", "value": "v"}')
+        await iface(core).say('tool2 tools.read_value {"key": "k"}', conversation="reads")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["success|success|True"])
+        self.assertEqual(iface(core).texts("reads"), ["success|success|False"])
+        self.assertEqual(self.counts(), {"write_value": 1, "read_value": 2})
+
+    # ---- approvals --------------------------------------------------------------------------------
+    async def test_write_waits_for_owner_approval_then_runs_exactly_once(self):
+        core = await self.core()
+        chat, owner = iface(core), iface(core, "owner")
+        await chat.say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        run = core.tank.runs(("waiting_approval",))[0]
+        request = owner.notices("approval_request")[0]
+        approval_id = request.data["approval_id"]
+        self.assertEqual(json.loads(request.data["arguments"]), {"key": "k", "value": "v"})
+        self.assertEqual(self.counts(), {})
+        await chat.say(f"$approve {approval_id}", conversation="room", sender="alice")
+        await settle(core)
+        self.assertIn("Only the owner can decide approvals.", chat.texts("room"))
+        await owner.say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await owner.say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(self.counts(), {"write_value": 1})
+        self.assertEqual(core.tank.run(run.id).status, "done")
+        self.assertIn("approved: wrote k (execution 1)", chat.texts("room"))
+        self.assertEqual(owner.texts("dm")[-2:], [f"Approved {approval_id}: tools.write_value → success.",
+                                                  f"Approval {approval_id} is not pending."])
+
+    async def test_denied_approval_resumes_engine_without_running(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(core, "owner").say(f"$deny {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["denied"])
+        self.assertEqual(self.counts(), {})
+
+    async def test_pending_approval_survives_restart_and_executes_once(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        core = await self.restart(core)
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(self.counts(), {"write_value": 1})
+        self.assertIn("approved: wrote k (execution 1)", iface(core).texts("room"))
+
+    async def test_interrupted_write_is_never_repeated_after_restart(self):
+        core = await self.core({"assignments": {"*": {"preapprove": ["tools.write_value"]}}})
+        await iface(core).say("hold")
+        await asyncio.sleep(0.02)
+        run = core.tank.runs(("running",))[0]
+        # Simulate a crash after the action started but before its result was stored.
+        core.tank.start_action(run.id, "call:t1", "tools.write_value", {"key": "k", "value": "v"}, "write")
+        result = await core.manager.call_tool(run.id, "tools.write_value", {"key": "k", "value": "v"}, "t1")
+        self.assertEqual(result.error_code, "uncertain_previous_attempt")
+        again = await core.manager.call_tool(run.id, "tools.write_value", {"key": "k", "value": "v"}, "t1")
+        self.assertEqual(again.error_code, "uncertain_previous_attempt")
+        self.assertEqual(self.counts(), {})
+        extension_module(core, "probe").RELEASE.set()
+        await settle(core)
+
+    async def test_preapproved_write_runs_without_asking(self):
+        core = await self.core({"assignments": {"*": {"preapprove": ["tools.*"]}}})
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["success: wrote k (execution 1)"])
+        self.assertFalse(iface(core, "owner").notices("approval_request"))
+
+    async def test_without_a_control_route_only_the_owner_can_be_asked(self):
+        core = await self.core({"control": None})
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}', conversation="mine", sender="boss")
+        await settle(core)
+        self.assertIn("No owner approval route", iface(core).texts("room")[0])
+        self.assertEqual(iface(core).notices("approval_request")[0].address, Address("chat", "mine"))
+
+    # ---- commands ---------------------------------------------------------------------------------
+    async def test_commands_run_capabilities_directly_with_owner_as_approval(self):
+        core = await self.core()
+        chat = iface(core)
+        await chat.say("$now UTC")
+        await chat.say("$setvalue v1", conversation="boss-room", sender="boss")
+        await chat.say("$remember guest note", conversation="guest")
+        await chat.say("$nosuch")
+        await settle(core)
+        self.assertIn("UTC", chat.texts("room", "text")[0])
+        self.assertIn("Invalid arguments", chat.texts("boss-room")[0])
+        self.assertEqual(chat.notices("waiting_approval")[0].address, Address("chat", "guest"))
+        self.assertEqual(chat.notices("unknown_command")[0].data["command"], "nosuch")
+
+    async def test_owner_command_approval_executes_and_delivers_result(self):
+        core = await self.core()
+        await iface(core).say("$remember buy milk", conversation="guest")
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(iface(core).texts("guest", "text"), ["Saved note #1."])
+        await iface(core).say("$notes", conversation="guest")
+        await settle(core)
+        self.assertEqual(iface(core).texts("guest", "text")[-1], "1. buy milk")
+
+    async def test_cancel_stops_a_waiting_run_and_expires_its_approval(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(core).say("$cancel")
+        await settle(core)
+        self.assertTrue(iface(core).texts("room")[-1].startswith("Cancelled run"))
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(iface(core, "owner").texts("dm")[-1], f"Approval {approval_id} is not pending.")
+        self.assertEqual(self.counts(), {})
+
+    # ---- routing, routines, operations -------------------------------------------------------------
+    async def test_progress_goes_to_control_when_the_conversation_hides_it(self):
+        core = await self.core({"extension_config": {"fake": {"interfaces": {"quiet": {"progress": False}}}}})
+        await iface(core, "quiet").say("progress")
+        await settle(core)
+        self.assertEqual(iface(core, "quiet").texts(), ["done"])
+        progress = [reply for reply in iface(core, "owner").delivered if reply.kind == "progress"]
+        self.assertEqual(progress[0].data["origin_address"], "quiet:room")
+
+    async def test_routine_runs_unattended_and_reports_to_its_route(self):
+        now = [time.time()]
+        core = await self.core({
+            "routes": {"routine:*": {"target": "owner:reports"}},
+            "routines": {"daily": {"every_minutes": 60, "text": 'tool tools.secret {}'},
+                         "trusted": {"every_minutes": 60, "text": 'tool tools.secret {}'}},
+            "assignments": {"routine:trusted": {"engine": "probe", "personas": ["p"], "trusted": True}},
+        }, clock=lambda: now[0])
+        self.assertEqual(await core.gateway.tick(), [])
+        now[0] += 3601
+        self.assertEqual(sorted(await core.gateway.tick()), ["daily", "trusted"])
+        self.assertEqual(await core.gateway.tick(), [])
+        await settle(core)
+        reports = iface(core, "owner").texts("reports")
+        self.assertIn("success: owner secret", reports)
+        self.assertTrue(any("only to the owner" in text for text in reports))
+        run = core.tank.runs(("done",), address="routine:daily")[0]
+        self.assertEqual(run.origin, "routine")
+
+    async def test_routine_does_not_double_fire_after_a_crash_before_rescheduling(self):
+        now = [time.time() + 7200]
+        core = await self.core({"routines": {"r": {"every_minutes": 60, "text": "echo hi"}}}, clock=lambda: now[0])
+        routine = core.bottle.routines()["r"]
+        now[0] = routine["next_at"] + 1
+        request_id = f"r:{int(routine['next_at'])}"
+        core.bottle.mark_seen("routine:" + request_id)
+        await core.gateway.tick()
+        await settle(core)
+        self.assertEqual(core.tank.runs(("done",), address="routine:r"), [])
+        self.assertGreater(core.bottle.routines()["r"]["next_at"], routine["next_at"])
+
+    async def test_interface_operations_and_core_capabilities_are_owner_only(self):
+        core = await self.core({"assignments": {"*": {"preapprove": ["chat.reset"]}}})
+        chat = iface(core)
+        await chat.say('tool chat.echo {"value": "x"}', sender="boss")
+        await chat.say('tool chat.echo {"value": "x"}', conversation="guest")
+        await chat.say('tool chat.reset {}', conversation="boss2", sender="boss")
+        await chat.say('tool core.send_message {"address": "owner:dm", "text": "hey"}', conversation="b3", sender="boss")
+        await settle(core)
+        self.assertEqual(chat.texts("room"), ["success: echo x"])
+        self.assertIn("only to the owner", chat.texts("guest")[0])
+        self.assertEqual(chat.texts("boss2"), ["success: reset done"])
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertIn("hey", iface(core, "owner").texts("dm"))
+        self.assertIn(("out", "hey"), [(item.direction, item.text) for item in core.tank.recent_messages("owner:dm")])
+
+    async def test_core_rule_capability_validates_and_changes_admission(self):
+        core = await self.core({"assignments": {"*": {"preapprove": ["core.*"]}}})
+        chat = iface(core)
+        await chat.say('tool core.set_rule {"pattern": "chat:x", "rule": {"bogus": 1}}', sender="boss")
+        await chat.say('tool core.set_rule {"pattern": "chat:x", "rule": {"enabled": false}}',
+                       conversation="b2", sender="boss")
+        await settle(core)
+        self.assertIn("Unknown rule keys", chat.texts("room")[0])
+        self.assertFalse(await chat.say("echo nope", conversation="x"))
+
+    async def test_failed_interface_delivery_is_reported_as_uncertain(self):
+        core = await self.core({"extension_config": {"fake": {"interfaces": {"down": {"fail_delivery": True}}}}})
+        await iface(core, "down").say("echo x")
+        await settle(core)
+        deliveries = [event for event in core.audit.events if event["event"] == "delivery"
+                      and event["address"] == "down:room"]
+        self.assertTrue(deliveries and all(not item["ok"] and item["uncertain"] for item in deliveries))
+
+
+if __name__ == "__main__":
+    unittest.main()
