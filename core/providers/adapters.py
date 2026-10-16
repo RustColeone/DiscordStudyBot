@@ -110,7 +110,9 @@ class Gemini:
                                   parts=[types.Part(text=m["content"])])
                     for m in messages if m["role"] != "system"]
         config: dict[str, Any] = {"max_output_tokens": max_tokens,
-                                  "http_options": types.HttpOptions(timeout=int(timeout_s * 1000))}
+                                  "http_options": types.HttpOptions(timeout=int(timeout_s * 1000)),
+                                  # The core never passes Python functions; this also silences the SDK's AFC warning.
+                                  "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True)}
         if system:
             config["system_instruction"] = system
         if schema:
