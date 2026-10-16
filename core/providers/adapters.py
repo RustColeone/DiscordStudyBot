@@ -167,6 +167,34 @@ class Gemini:
                              "native" if schema else "")
 
 
+UNSUPPORTED_BY_CLAUDE = {"maxItems", "uniqueItems", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+                         "multipleOf", "minLength", "maxLength", "pattern"}
+
+
+def closed(value: Any) -> bool:
+    """Every object in the schema forbids extra properties (Claude's structured outputs require it)."""
+    if isinstance(value, Mapping):
+        if value.get("type") == "object" and value.get("additionalProperties") is not False:
+            return False
+        return all(closed(item) for item in value.values())
+    if isinstance(value, list):
+        return all(closed(item) for item in value)
+    return True
+
+
+def claude_schema(value: Any) -> Any:
+    """Claude's structured outputs reject numeric, length and most array limits; drop them there.
+    The registry still validates the reply against the full schema, so the limits keep applying."""
+    if isinstance(value, Mapping):
+        result = {key: claude_schema(item) for key, item in value.items() if key not in UNSUPPORTED_BY_CLAUDE}
+        if isinstance(result.get("minItems"), int) and result["minItems"] > 1:
+            result.pop("minItems")
+        return result
+    if isinstance(value, list):
+        return [claude_schema(item) for item in value]
+    return value
+
+
 class Anthropic:
     def __init__(self, settings: Mapping[str, Any], client: Any = None):
         self.settings = dict(settings)
@@ -180,6 +208,10 @@ class Anthropic:
 
     async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s,
                        images: Sequence[Image] = ()) -> AdapterResult:
+        native = bool(schema) and closed(schema)
+        if schema and not native:
+            # Open objects (free-form tool arguments) cannot be enforced natively: ask in the prompt.
+            messages = with_schema_instruction(messages, schema)
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         params: dict[str, Any] = {
             "model": model, "max_tokens": max_tokens,
@@ -196,13 +228,14 @@ class Anthropic:
             params["output_config"] = {"effort": effort}
             # Thinking consumes output tokens; keep the visible budget intact.
             params["max_tokens"] = max_tokens + int(self.settings.get("thinking_reserve", 2048))
-        if schema:
-            params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": dict(schema)}
+        if native:
+            params.setdefault("output_config", {})["format"] = {"type": "json_schema", "schema": claude_schema(schema)}
         response = await self.client().with_options(timeout=timeout_s).messages.create(**params)
         text = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
         usage = getattr(response, "usage", None)
         return AdapterResult(text, getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0,
-                             str(getattr(response, "stop_reason", "")) == "max_tokens", "native" if schema else "")
+                             str(getattr(response, "stop_reason", "")) == "max_tokens",
+                             "native" if native else "instruction" if schema else "")
 
 
 ADAPTERS = {"openai_compatible": OpenAICompatible, "gemini": Gemini, "anthropic": Anthropic}

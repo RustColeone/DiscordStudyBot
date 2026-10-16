@@ -115,6 +115,31 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["output_config"]["format"]["schema"], SCHEMA)
         self.assertEqual(result.text, '{"answer": "x"}')
 
+    def test_claude_schema_drops_limits_it_rejects_but_keeps_structure(self):
+        from core.providers.adapters import claude_schema
+        schema = {"type": "object", "properties": {
+            "actions": {"type": "array", "maxItems": 5, "minItems": 2, "items": {"type": "string", "maxLength": 9}},
+            "importance": {"type": "integer", "minimum": 1, "maximum": 5}, "status": {"enum": ["a", "b"]}},
+            "required": ["actions"], "additionalProperties": False}
+        self.assertEqual(claude_schema(schema), {"type": "object", "properties": {
+            "actions": {"type": "array", "items": {"type": "string"}}, "importance": {"type": "integer"},
+            "status": {"enum": ["a", "b"]}}, "required": ["actions"], "additionalProperties": False})
+
+    async def test_claude_asks_in_the_prompt_when_the_schema_has_open_objects(self):
+        captured = {}
+
+        async def create(**params):
+            captured.update(params)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"tool": "x", "arguments": {}}')],
+                                   usage=SimpleNamespace(input_tokens=1, output_tokens=1), stop_reason="end_turn")
+        client = SimpleNamespace(with_options=lambda **options: SimpleNamespace(messages=SimpleNamespace(create=create)))
+        schema = {"type": "object", "properties": {"tool": {"type": "string"}, "arguments": {"type": "object"}},
+                  "required": ["tool", "arguments"], "additionalProperties": False}
+        result = await Anthropic({}, client).complete("claude", REQUEST.messages, schema, "turn", "low", 100, 30)
+        self.assertNotIn("output_config", captured)
+        self.assertIn("JSON schema", captured["system"])
+        self.assertEqual(result.schema_mode, "instruction")
+
     async def test_gemini_maps_roles_and_schema(self):
         captured = {}
 
