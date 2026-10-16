@@ -6,6 +6,7 @@ It contains no feature logic; capabilities and engines are opaque objects regist
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import datetime as dt
 import hashlib
 import json
@@ -30,6 +31,9 @@ from core.storage.tank import RunRecord, Tank
 COMMAND_ENGINE = "$command"
 CORE_COMMANDS = ("help", "approve", "deny", "runs", "cancel", "tools", "call")
 
+
+# The run whose engine task (or a task it started) is executing; child tasks inherit it.
+DRIVING: contextvars.ContextVar[str | None] = contextvars.ContextVar("driving_run", default=None)
 
 class GatewayLink(Protocol):
     async def deliver(self, reply: Reply) -> Delivery: ...
@@ -316,6 +320,7 @@ class Manager:
 
     # ---- driving runs -----------------------------------------------------------------------------
     async def _drive(self, run_id: str, resumed: bool) -> None:
+        DRIVING.set(run_id)
         record = self.tank.run(run_id)
         if record is None or record.status != "running":
             return
@@ -924,7 +929,11 @@ class Manager:
             for approval in self.tank.approvals("pending", record.id):
                 self.tank.decide_approval(approval["id"], "expired", reason[:100])
         task = self._tasks.get(record.id)
-        if task is not None and task is not asyncio.current_task():
+        if task is not None and DRIVING.get() == record.id:
+            # Cancelled from inside its own work (an interface cancelling during delivery): waiting for
+            # the task would wait for ourselves, so cancel it once the current step returns.
+            asyncio.get_running_loop().call_soon(task.cancel)
+        elif task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         self.audit.record("run_cancelled", run=record.id)
