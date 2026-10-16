@@ -84,7 +84,7 @@ class AssistantEngine(Engine):
             for request in session.inbox():
                 self._add_input(session, state, request.text, request.sender.name or request.sender.id, request.id)
                 add_images(state, request.files)
-            if state["steps"] >= self.max_steps:
+            if state["steps"] >= int(session.options.get("max_steps") or self.max_steps):
                 await self._close(session, state)
                 return RunYield.DONE
             state["steps"] += 1
