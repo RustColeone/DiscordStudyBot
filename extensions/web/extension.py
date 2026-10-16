@@ -1,5 +1,6 @@
-"""Web extension: search and read public pages (ported from providers/google_query.py,
-providers/web_page_query.py and the Google grounding in providers/collaborative_agent.py)."""
+"""Web extension: search, read public pages, find images, Google Maps and Wolfram|Alpha (ported from
+providers/google_query.py, providers/web_page_query.py, providers/image_search.py,
+providers/wolfram_query.py and the Google grounding in providers/collaborative_agent.py)."""
 
 from __future__ import annotations
 
@@ -8,8 +9,10 @@ import os
 
 import requests
 
-from contracts import Capability, Contributions, Extension, Risk, ToolResult
+from contracts import Capability, Contributions, Extension, FileRef, Risk, ToolResult
 
+from . import wolfram
+from .images import ImageUnavailable, locate_image
 from .pages import PageUnavailable, fetch
 
 
@@ -35,8 +38,12 @@ class Searcher:
         return self._gemini or None
 
     def grounded(self, query: str) -> tuple[str, list[dict]]:
+        return self.ground(query, "google_search")
+
+    def ground(self, query: str, tool: str) -> tuple[str, list[dict]]:
         interaction = self.gemini().interactions.create(model=self.grounding_model, input=query,
-                                                        tools=[{"type": "google_search"}], timeout=25.0)
+                                                        tools=[{"type": tool}], timeout=25.0)
+        fallback = "Google Maps" if tool == "google_maps" else "Google Search"
         sources, seen = [], set()
         for step in interaction.steps or []:
             if getattr(step, "type", None) != "model_output":
@@ -46,7 +53,8 @@ class Searcher:
                     url = getattr(annotation, "url", None)
                     if url and url not in seen:
                         seen.add(url)
-                        sources.append({"title": getattr(annotation, "title", None) or "Google Search", "url": url})
+                        title = getattr(annotation, "title", None) or getattr(annotation, "name", None) or fallback
+                        sources.append({"title": title, "url": url})
         return interaction.output_text or "", sources
 
     def results(self, query: str, limit: int) -> list[dict]:
@@ -129,6 +137,59 @@ def setup(context) -> Contributions:
                                                                      "content_type": page["content_type"],
                                                                      "links": page["links"]})
 
+    async def image_search(arguments, tool) -> ToolResult:
+        query = arguments["query"].strip()
+        if not query:
+            return ToolResult.fail("What image should I look for?", "invalid_arguments")
+        await tool.progress(f"Looking for an image of {query}")
+        try:
+            found = await asyncio.to_thread(locate_image, query, tool.workspace,
+                                            int(tool.display.max_upload_mb * 1024 * 1024))
+        except ImageUnavailable as error:
+            context.log("image_search_failed", error=str(error))
+            return ToolResult.fail(str(error), "unavailable", retryable=True)
+        return ToolResult.ok(f"Supplementary image: {found['title']}\nSource: {found['source_url']}",
+                             files=(FileRef(found["path"], found["name"], found["mime"], found["size"]),),
+                             sources=(found["source_url"],),
+                             data={key: found[key] for key in ("title", "source_url", "image_url")})
+
+    async def maps(arguments, tool) -> ToolResult:
+        query = arguments["query"].strip()
+        if not query:
+            return ToolResult.fail("Which place or route should I look up?", "invalid_arguments")
+        if not searcher.gemini():
+            return ToolResult.fail("Google Maps is not configured (GEMINI_API_KEY is missing).", "not_configured")
+        try:
+            text, sources = await asyncio.to_thread(searcher.ground, query, "google_maps")
+        except Exception as error:
+            context.log("maps_failed", error=str(error))
+            return ToolResult.fail(f"Google Maps is unavailable right now: {error}", "unavailable", retryable=True)
+        if not text.strip():
+            return ToolResult.fail("Google Maps returned no grounded evidence.", "no_result")
+        lines = [text.strip()] + [f"- {item['title']}: {item['url']}" for item in sources]
+        return ToolResult.ok("\n".join(lines), sources=tuple(item["url"] for item in sources),
+                             data={"answer": text.strip(), "results": sources})
+
+    async def wolfram_query(arguments, tool) -> ToolResult:
+        query = wolfram.command_input(arguments["query"])
+        if not query:
+            return ToolResult.fail("What should I ask Wolfram|Alpha?", "invalid_arguments")
+        appid = os.getenv("WOLFRAM_APPID", "").strip().strip("\"'")
+        if not appid:
+            return ToolResult.fail("Wolfram|Alpha is not configured (WOLFRAM_APPID is missing).", "not_configured")
+        try:
+            pods = await asyncio.to_thread(wolfram.query, appid, query)
+        except wolfram.WolframNotUnderstood as error:
+            return ToolResult.fail(str(error), "not_understood")
+        except wolfram.WolframRejected as error:
+            context.log("wolfram_failed", error=str(error))
+            return ToolResult.fail(f"Wolfram|Alpha is not configured correctly: {error}", "not_configured")
+        except wolfram.WolframUnavailable as error:
+            context.log("wolfram_failed", error=str(error))
+            return ToolResult.fail(f"Wolfram|Alpha is unavailable right now: {error}", "unavailable", retryable=True)
+        summary = "\n\n".join(f"## {pod['title']}\n{pod['text']}".rstrip() for pod in pods)
+        return ToolResult.ok(summary, data={"query": query, "pods": pods})
+
     return Contributions(capabilities=[
         Capability("web.search", "Search the web for current information. Returns an answer with sources when "
                    "available, otherwise result links; read a page for detail.", search,
@@ -137,7 +198,22 @@ def setup(context) -> Contributions:
         Capability("web.read_page", "Read the text of a public web page or PDF by URL.", read_page,
                    {"url": {"type": "string"}, "max_links": {"type": "integer", "minimum": 0, "maximum": 100}},
                    ("url",), Risk.READ, command="read", command_argument="url", timeout_s=60),
+        Capability("web.image_search", "Find and send one relevant real image (diagram, object, place, artwork, "
+                   "visual comparison) when seeing it would materially improve the answer. Not for decoration or "
+                   "when text or a formula is enough. The image is sent to the conversation with its source.",
+                   image_search, {"query": {"type": "string", "description": "Specific image-search query"}},
+                   ("query",), Risk.READ, needs={"files"}, timeout_s=150),
+        Capability("web.maps", "Google Maps evidence for places, nearby businesses, opening hours, directions or "
+                   "location-specific recommendations. Use only for clear geographic intent; ask for a city, "
+                   "address or region when the request only says 'near me'. Write the query in English.", maps,
+                   {"query": {"type": "string", "description": "Concise English Google Maps query"}},
+                   ("query",), Risk.READ, timeout_s=60),
+        Capability("web.wolfram", "Calculate or answer a factual, mathematical or scientific query with "
+                   "Wolfram|Alpha.", wolfram_query,
+                   {"query": {"type": "string", "description": "Question or calculation"}},
+                   ("query",), Risk.READ, command="wolfram", command_argument="query", timeout_s=60),
     ])
 
 
-EXTENSION = Extension("web", setup, contracts="1", version="1", description="Web search and page reading")
+EXTENSION = Extension("web", setup, contracts="1", version="1",
+                      description="Web search, page reading, images, maps and Wolfram|Alpha")

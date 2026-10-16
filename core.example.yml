@@ -19,7 +19,8 @@
 #   - extensions/images          # $draw: Gemini or OpenAI images
 #   - extensions/system          # $status: host status
 #   - extensions/reminders       # $remind 10m drink water, $reminders, $unremind <id>
-#   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>
+#   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>,
+#                                #   image search, Google Maps, $wolfram <query> (needs WOLFRAM_APPID in .env)
 #   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
 #   - extensions/cli
 #   - ../AudioManager/bot_extension
