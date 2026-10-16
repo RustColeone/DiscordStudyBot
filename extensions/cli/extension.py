@@ -64,6 +64,8 @@ class CLIInterface(Interface):
             line = f"{prefix}bot> [file {reply.file.name or reply.file.path}: {reply.file.path}] {reply.text}".rstrip()
         elif reply.kind == "progress":
             line = f"{prefix}  ... {reply.text}"
+        elif reply.code == "reminder":
+            line = f"{prefix}⏰ {reply.text}"
         elif reply.code in NOTICES:
             line = prefix + NOTICES[reply.code].format(**{"approval_id": "", "command": "", "address": "", "ok": "",
                                                           **reply.data})

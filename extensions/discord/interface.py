@@ -274,6 +274,23 @@ class DiscordInterface(Interface):
                      f"Reply {inline_code('$approve ' + approval)} or {inline_code('$deny ' + approval)}.")
         return "\n".join(lines)
 
+    @staticmethod
+    def render_reminder(reply: Reply) -> str:
+        sender = reply.data.get("sender_id", "")
+        text = f"⏰ {f'<@{sender}> ' if sender.isdigit() else ''}{reply.text}"
+        try:
+            due = float(reply.data.get("at", ""))
+        except ValueError:
+            return text
+        return text + (f"\n-# due <t:{int(due)}:f>" if time.time() - due > 300 else "")
+
+    @staticmethod
+    def mentions_for(reply: Reply) -> discord.AllowedMentions | None:
+        sender = reply.data.get("sender_id", "")
+        if reply.kind == "notice" and reply.code == "reminder" and sender.isdigit():
+            return discord.AllowedMentions(everyone=False, roles=False, users=[discord.Object(int(sender))])
+        return None
+
     def render(self, reply: Reply) -> str:
         data = dict(reply.data)
         if reply.kind == "notice":
@@ -284,6 +301,8 @@ class DiscordInterface(Interface):
                 return self.render_approval(reply)
             if reply.code == "run_failed_detail":
                 return "⚠️ " + reply.text
+            if reply.code == "reminder":
+                return self.render_reminder(reply)
             if reply.code in NOTICES:
                 return NOTICES[reply.code].format(**{"approval_id": "", "command": "", **data})
             return reply.text or f"[{reply.code}]"
@@ -321,8 +340,10 @@ class DiscordInterface(Interface):
             else:
                 if not text.strip():
                     return Delivery(True, detail="suppressed")
+                mentions = self.mentions_for(reply)
                 for index, chunk in enumerate(split_text(text)):
-                    sent.append(await channel.send(content=chunk, reference=reference if index == 0 else None))
+                    sent.append(await channel.send(content=chunk, reference=reference if index == 0 else None,
+                                                   allowed_mentions=mentions if index == 0 else None))
         except (discord.Forbidden, discord.NotFound) as error:
             return Delivery(False, detail=f"{type(error).__name__}: {error}"[:300], uncertain=bool(sent))
         except discord.HTTPException as error:

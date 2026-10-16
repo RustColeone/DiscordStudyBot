@@ -19,9 +19,10 @@ ids = itertools.count(1000)
 
 
 class SentMessage:
-    def __init__(self, channel, content, file=None, reference=None):
+    def __init__(self, channel, content, file=None, reference=None, allowed_mentions=None):
         self.id = next(ids)
         self.channel, self.content, self.file, self.reference = channel, content, file, reference
+        self.allowed_mentions = allowed_mentions
         self.deleted = False
 
     async def edit(self, content):
@@ -40,10 +41,10 @@ class FakeChannel:
         self.fail = fail
         self.typed = 0
 
-    async def send(self, content=None, file=None, reference=None):
+    async def send(self, content=None, file=None, reference=None, allowed_mentions=None):
         if self.fail is not None:
             raise self.fail
-        message = SentMessage(self, content, file, reference)
+        message = SentMessage(self, content, file, reference, allowed_mentions)
         self.sent.append(message)
         return message
 
@@ -296,6 +297,20 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
                                                "address": "discord:555", "arguments": arguments}))
         self.assertTrue(text.startswith("🔐 Approval `ab12cd` · `basic.remember`\n```json\n"))
         self.assertTrue(text.endswith("Reply `$approve ab12cd` or `$deny ab12cd`."))
+
+    async def test_reminder_pings_only_the_person_who_set_it_and_marks_late_delivery(self):
+        import time
+        from contracts import Reply
+        await self.start()
+        reminder = Reply(Address("discord", "555"), "notice", "drink water @everyone", code="reminder",
+                         data={"sender_id": "42", "sender_name": "Ann", "at": str(time.time() - 3600)})
+        self.assertTrue((await self.discord.deliver(reminder)).ok)
+        message = self.client.channels[555].sent[-1]
+        self.assertTrue(message.content.startswith("⏰ <@42> drink water @everyone\n-# due <t:"))
+        self.assertEqual([user.id for user in message.allowed_mentions.users], [42])
+        self.assertFalse(message.allowed_mentions.everyone)
+        await self.discord.deliver(Reply(Address("discord", "555"), "text", "plain"))
+        self.assertIsNone(self.client.channels[555].sent[-1].allowed_mentions)
 
     async def test_missing_token_reports_not_ready_without_crashing(self):
         await self.start(token="", ready=False)
