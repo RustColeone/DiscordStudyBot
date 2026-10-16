@@ -11,7 +11,7 @@ from typing import Any, Callable, Mapping
 import jsonschema
 
 from contracts import ModelError, ModelRequest, ModelResult
-from core.providers.adapters import ADAPTERS, NotConfigured
+from core.providers.adapters import ADAPTERS, NotConfigured, load_images
 
 FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
 
@@ -40,6 +40,8 @@ class Providers:
                           for name, candidates in (profiles or {}).items()}
         self._adapters = dict(adapters or {})
         self._record = record or (lambda *args, **kwargs: None)
+        self._spacing: dict[str, asyncio.Lock] = {}
+        self._last_request: dict[str, float] = {}
         for name, candidates in self._profiles.items():
             for candidate in candidates:
                 if candidate.get("provider") not in self._settings and candidate.get("provider") not in self._adapters:
@@ -54,6 +56,21 @@ class Providers:
         used = {candidate["provider"] for candidates in self._profiles.values() for candidate in candidates}
         return sorted(name for name in used if name in self._adapters or os.getenv(
             str(self._settings.get(name, {}).get("api_key_env") or ""), "").strip())
+
+    def _sees(self, candidate: Mapping[str, Any]) -> bool:
+        return bool(candidate.get("vision", self._settings.get(candidate["provider"], {}).get("vision", True)))
+
+    async def _space(self, provider: str) -> None:
+        """Keep at least `min_interval_s` between requests to one provider (Gemini rate limits)."""
+        interval = float(self._settings.get(provider, {}).get("min_interval_s") or 0)
+        if interval <= 0:
+            return
+        lock = self._spacing.setdefault(provider, asyncio.Lock())
+        async with lock:
+            wait = self._last_request.get(provider, 0.0) + interval - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request[provider] = time.monotonic()
 
     def _adapter(self, name: str):
         if name not in self._adapters:
@@ -71,15 +88,26 @@ class Providers:
             raise ModelError("not_configured", f"Model profile {name!r} is not configured")
         failures: list[str] = []
         invalid: ModelError | None = None
-        for candidate in candidates:
+        images = await asyncio.to_thread(load_images, request.images) if request.images else []
+        attempts = [(candidate, bool(images) and self._sees(candidate)) for candidate in candidates]
+        # Candidates that can see the images go first; the others get a note instead of the images.
+        attempts.sort(key=lambda attempt: not attempt[1] and bool(images))
+        for candidate, with_images in attempts:
             provider, model = candidate["provider"], candidate["model"]
+            messages = [dict(m) for m in request.messages]
+            if images and not with_images and messages and messages[-1]["role"] == "user":
+                messages[-1]["content"] += (f"\n\n[{len(images)} image(s) attached, but you cannot see images; "
+                                            "say so if they matter.]")
             started = time.monotonic()
             try:
                 adapter = self._adapter(provider)
+                await self._space(provider)
+                extra = {"images": images} if with_images else {}
                 result = await asyncio.wait_for(
-                    adapter.complete(model, [dict(m) for m in request.messages], request.output_schema,
+                    adapter.complete(model, messages, request.output_schema,
                                      request.schema_name, candidate.get("effort") or request.effort,
-                                     int(candidate.get("max_tokens") or request.max_tokens), request.timeout_s),
+                                     int(candidate.get("max_tokens") or request.max_tokens), request.timeout_s,
+                                     **extra),
                     timeout=request.timeout_s + 5)
             except NotConfigured as error:
                 failures.append(f"{provider}: not configured ({error})")

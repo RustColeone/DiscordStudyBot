@@ -132,5 +132,66 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result.output_tokens, result.truncated), (7, False))
 
 
+    async def test_images_go_to_candidates_that_see_and_others_get_a_note(self):
+        import tempfile
+        from pathlib import Path
+        from contracts import FileRef
+        with tempfile.TemporaryDirectory() as directory:
+            png = Path(directory) / "a.png"
+            png.write_bytes(b"\x89PNG fake")
+            other = Path(directory) / "notes.txt"
+            other.write_text("x")
+            blind, seeing = FakeAdapter(["text only"]), FakeAdapter([ConnectionError("down")])
+            providers = Providers({"blind": {"vision": False}}, {"default": [
+                {"provider": "blind", "model": "b"}, {"provider": "seeing", "model": "s"}]},
+                adapters={"blind": blind, "seeing": seeing})
+            request = ModelRequest([{"role": "user", "content": "what is this?"}],
+                                   images=(FileRef(str(png), "a.png", "image/png"), FileRef(str(other), "notes.txt")))
+            result = await providers.generate(request)
+        self.assertEqual(result.text, "text only")
+        self.assertEqual([image.mime for image in seeing.calls[0]["images"]], ["image/png"])
+        self.assertEqual(blind.calls[0]["images"], [])
+        self.assertIn("1 image(s) attached, but you cannot see images", blind.calls[0]["messages"][-1]["content"])
+        self.assertEqual(request.messages[-1]["content"], "what is this?")
+
+    async def test_each_adapter_attaches_images_to_the_last_user_message(self):
+        from core.providers.adapters import Image
+        image = Image("image/png", b"png")
+        client = FakeOpenAIClient()
+        await OpenAICompatible({}, client).complete("m", REQUEST.messages, None, "x", "low", 50, 10, images=[image])
+        parts = client.calls[0]["messages"][-1]["content"]
+        self.assertEqual(parts[0], {"type": "text", "text": "hi"})
+        self.assertEqual(parts[1]["image_url"]["url"], "data:image/png;base64,cG5n")
+        captured = {}
+
+        async def create(**params):
+            captured.update(params)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")],
+                                   usage=SimpleNamespace(input_tokens=1, output_tokens=1), stop_reason="end_turn")
+        anthropic = SimpleNamespace(with_options=lambda **o: SimpleNamespace(messages=SimpleNamespace(create=create)))
+        await Anthropic({}, anthropic).complete("c", REQUEST.messages, None, "x", "low", 50, 10, images=[image])
+        content = captured["messages"][-1]["content"]
+        self.assertEqual((content[0]["source"]["data"], content[1]["text"]), ("cG5n", "hi"))
+        gemini_calls = {}
+
+        async def generate_content(**params):
+            gemini_calls.update(params)
+            return SimpleNamespace(text="ok", candidates=[], usage_metadata=None)
+        gemini = SimpleNamespace(aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
+        await Gemini({}, gemini).complete("g", REQUEST.messages, None, "x", "low", 50, 10, images=[image])
+        parts = gemini_calls["contents"][-1].parts
+        self.assertEqual((parts[0].text, parts[1].inline_data.mime_type), ("hi", "image/png"))
+
+    async def test_min_interval_spaces_requests_to_one_provider(self):
+        import time
+        adapter = FakeAdapter(["a", "b"])
+        providers = Providers({"g": {"min_interval_s": 0.2}}, {"default": [{"provider": "g", "model": "m"}]},
+                              adapters={"g": adapter})
+        started = time.monotonic()
+        await providers.generate(ModelRequest([{"role": "user", "content": "1"}]))
+        await providers.generate(ModelRequest([{"role": "user", "content": "2"}]))
+        self.assertGreaterEqual(time.monotonic() - started, 0.19)
+
+
 if __name__ == "__main__":
     unittest.main()

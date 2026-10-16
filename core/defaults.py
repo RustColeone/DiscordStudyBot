@@ -47,10 +47,11 @@ def default_config() -> dict:
                          "api_key_env": "DEEPSEEK_API_KEY", "schema_mode": "json_object", "effort_param": True},
             "openai": {"kind": "openai_compatible", "api_key_env": "OPENAI_API_KEY", "schema_mode": "native",
                        "token_param": "max_completion_tokens", "effort_param": True},
-            "gemini": {"kind": "gemini", "api_key_env": "GEMINI_API_KEY"},
+            # Legacy spacing between Gemini requests avoids its per-minute rate limits.
+            "gemini": {"kind": "gemini", "api_key_env": "GEMINI_API_KEY", "min_interval_s": 1.1},
             "claude": {"kind": "anthropic", "api_key_env": "CLAUDE_API_KEY", "adaptive_thinking": True},
             "openrouter": {"kind": "openai_compatible", "base_url": "https://openrouter.ai/api/v1",
-                           "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object"},
+                           "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object", "vision": False},
         },
         # Candidates without an API key are skipped, so any one configured provider works.
         "profiles": {"default": DEFAULT_CHAIN,
