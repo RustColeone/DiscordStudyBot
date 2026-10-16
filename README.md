@@ -68,7 +68,8 @@ Quick start from a fresh clone:
    owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands, including `$video <url>`
    (needs ffmpeg), `$draw <prompt>`, `$status`, `$remind 10m <text>`, `$search <query>`, `$read <url>` and
    `$memory` (what the bot remembers about you here);
-   the assistant also uses them when asked.
+   the assistant also uses them when asked. To give a channel the shared room of four characters,
+   assign it the `room` engine in `core.yml` (see the example).
 
 `core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
 channels it answers in, or to add extensions.
