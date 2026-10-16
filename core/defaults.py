@@ -44,6 +44,8 @@ def default_config() -> dict:
                        for name in ("discord", "assistant", "basic", "media", "images", "system", "reminders",
                                     "web", "room")],
         "extension_config": {},
+        # Drop-in extensions: every folder here with an extension.py loads without being listed.
+        "plugin_dirs": [str(ROOT / "plugins")],
         "providers": {
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",
                          "api_key_env": "DEEPSEEK_API_KEY", "schema_mode": "json_object", "effort_param": True},

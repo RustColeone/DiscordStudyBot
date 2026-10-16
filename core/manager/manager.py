@@ -103,6 +103,10 @@ class Manager:
             merged[pattern] = Assignment.from_dict(self._overrides.get(pattern))
         return merged
 
+    def default_assignment(self, pattern: str, value: Mapping[str, Any]) -> None:
+        """An extension's suggested assignment; configured ones of the same pattern win."""
+        self._config_assignments.setdefault(pattern, Assignment.from_config(pattern, dict(value)))
+
     def register_persona(self, persona: Persona, extension: str) -> None:
         # Configuration wins over an extension's default persona of the same name.
         self.personas.setdefault(persona.name, persona)

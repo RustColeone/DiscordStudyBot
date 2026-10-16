@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -26,10 +26,18 @@ class ExtensionContext(Protocol):
 
 @dataclass(frozen=True)
 class Contributions:
+    """What an extension adds. Besides interfaces, engines, capabilities and personas, an extension
+    may suggest defaults so it works when dropped in: model `profiles` (name → ordered candidates, as
+    in core.yml), and `assignments` and `admission` rules for its own interfaces' addresses
+    (`<interface>:*` or `<interface>:<conversation>`). core.yml and runtime edits always win."""
+
     interfaces: Sequence[Interface] = ()
     engines: Sequence[Engine] = ()
     capabilities: Sequence[Capability] = ()
     personas: Sequence[Persona] = ()
+    profiles: Mapping[str, Sequence[Mapping[str, Any]]] = field(default_factory=dict)
+    assignments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    admission: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
