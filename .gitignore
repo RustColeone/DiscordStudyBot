@@ -1,63 +1,18 @@
-# Configuration file with sensitive data
-config.yml
+# Secrets and local configuration
 .env
+core.yml
+config.yml
 
-# Local third-party experiments / clones
-pywechat/
-
-# Bridge implementations (user-specific)
-bridges/bridge_parser.py
-bridges/meiju_bridge.py
-bridges/*_bridge.py
-# Maintained implementations. Personal integrations remain ignored.
-!bridges/example_bridge.py
-!bridges/wechat_bridge.py
-
-# Database files
-bot_data.db
-bot_data.db-journal
+# Runtime data (core databases, extension data, logs, scratch files)
+data/
+temp/
 *.db
 *.db-journal
-bot_data_export.json
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-
-# Virtual environment
-venv/
-env/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs
 *.log
 
-# Generated clip outputs
-temp/
-
-# Core runtime
-core.yml
-data/
+# Personal integrations from before the core (kept locally, never committed)
+bridges/
+bot_data_export.json
 
 # Drop-in extensions are usually their own repositories; the README and the example are tracked
 plugins/*
@@ -67,3 +22,23 @@ plugins/*
 # Local extension settings
 extensions/*/config.yml
 plugins/*/config.yml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.so
+*.egg-info/
+dist/
+build/
+venv/
+env/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

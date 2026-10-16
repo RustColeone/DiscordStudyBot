@@ -445,7 +445,7 @@ commands of their own for this.
 ### The built-in `room` engine
 
 [`extensions/room`](../../extensions/room/engine.py) is the shared room: several personas own one
-request together on a work board (ported from the legacy `$agent` room). It also contributes the
+request together on a work board. It also contributes the
 four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of the same names).
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
@@ -459,7 +459,7 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
 * Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
   person's answer. Both keep the board in the run, so they survive restarts. New messages during a
   run answer waiting questions or open new jobs.
-* Guards from the legacy room: a successful write is never repeated in a run, a failed action is
+* Guards: a successful write is never repeated in a run, a failed action is
   retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
 * Extension options (`extension_config.room`): `max_steps`, `history_limit` (16), `max_tokens`

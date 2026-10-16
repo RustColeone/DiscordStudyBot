@@ -1,5 +1,5 @@
-"""The default WeChat persona: the legacy WeChat assistant's voice (llm_config.json `deepseek_default_prompt`
-plus the framing from providers/wechat_reply.py). A persona named `wechat` in core.yml replaces it."""
+"""The default WeChat persona: the whale-girl voice plus WeChat-assistant framing. A persona named
+`wechat` in core.yml replaces it."""
 
 from contracts import Persona
 

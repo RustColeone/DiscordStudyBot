@@ -330,25 +330,6 @@ class ReadingTests(WeChatCase):
         history = self.core.tank.recent_messages(FRIEND, 5)
         self.assertEqual((history[-1].direction, history[-1].text), ("out", "I'll answer myself"))
 
-    async def test_legacy_cursors_are_imported_once(self):
-        legacy = self.tmp / "bot_data.db"
-        with sqlite3.connect(legacy) as connection:
-            connection.execute("CREATE TABLE wechat_read_cursors (account_id, chat_id, sort_seq, local_id, revision, updated_at)")
-            connection.execute("CREATE TABLE wechat_native_bindings (account_id, chat_id, native_id)")
-            connection.execute("INSERT INTO wechat_native_bindings VALUES (?, 'name:Room', 'room@chatroom')", (ACCOUNT,))
-            seen = self.transport.add("room@chatroom", "@Me\u2005echo seen by legacy", mentions=True)
-            connection.execute("INSERT INTO wechat_read_cursors VALUES (?, 'name:Room', ?, ?, 1, 0)",
-                               (ACCOUNT, *seen["position"]))
-        connection.close()
-        # As `python -m core --check` before the switchover: the rules exist before the gap begins.
-        checked = Core(self.config(wechat={"legacy_database": str(legacy)}), provider_adapters={"fake": FakeAdapter()})
-        await checked.build()
-        for name in ("tank", "bottle", "audit"):
-            getattr(checked, name).close()
-        self.transport.add("room@chatroom", "@Me\u2005echo during switchover", mentions=True)
-        await self.start(wechat={"legacy_database": str(legacy)})
-        self.assertEqual(self.texts("room@chatroom"), ["during switchover"])
-        self.assertTrue(self.wechat.port.bottle.get("legacy_imported"))
 
 
 class DeliveryTests(WeChatCase):
@@ -780,7 +761,7 @@ class SplitTests(unittest.TestCase):
 
 
 class SettingsAndReaderTests(unittest.TestCase):
-    def test_settings_fall_back_to_the_legacy_environment(self):
+    def test_settings_fall_back_to_the_environment(self):
         module = __import__("core.loader", fromlist=["import_extension"]).import_extension(
             ROOT / "extensions" / "wechat")[1]
         settings = module.settings_from({"poll_seconds": 0.01}, Path("/data"), {

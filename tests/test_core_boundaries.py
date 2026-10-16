@@ -13,7 +13,6 @@ from core.storage.bottle import Bottle
 from core.storage.tank import RunRecord, Tank
 from tests.core_support import FakeAdapter, ROOT, make_config
 
-LEGACY = {"features", "services", "providers", "adapters", "app", "bridges", "parsers", "assets", "main"}
 THIRD_PARTY_ALLOWED = {"yaml", "jsonschema", "openai", "google", "anthropic"}
 
 
@@ -35,12 +34,12 @@ class BoundaryTests(unittest.TestCase):
                 self.assertTrue(level or module == "contracts" or module in sys.stdlib_module_names,
                                 f"{path.name} imports {module}")
 
-    def test_core_never_imports_legacy_code_or_extensions(self):
+    def test_core_never_imports_extensions(self):
         for path in (ROOT / "core").rglob("*.py"):
             for module, level in imports(path):
                 if level:
                     continue
-                self.assertNotIn(module, LEGACY | {"extensions", "tests"}, f"{path} imports {module}")
+                self.assertNotIn(module, {"extensions", "plugins", "tests"}, f"{path} imports {module}")
                 self.assertTrue(module in {"core", "contracts"} | THIRD_PARTY_ALLOWED
                                 or module in sys.stdlib_module_names, f"{path} imports {module}")
 
@@ -51,7 +50,7 @@ class BoundaryTests(unittest.TestCase):
                 for module, level in imports(path):
                     if level:
                         continue
-                    self.assertNotIn(module, LEGACY | {"core", "extensions", "plugins", "tests"}, f"{path} imports {module}")
+                    self.assertNotIn(module, {"core", "extensions", "plugins", "tests"}, f"{path} imports {module}")
 
 
 def new_core(config):

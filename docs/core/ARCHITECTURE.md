@@ -45,7 +45,7 @@ flowchart TB
 ## Rules
 
 1. Dependencies point inward only. `contracts` imports the standard library only; `core` imports no
-   extension and no legacy package; extensions import `contracts` plus their own code.
+   extension; extensions import `contracts` plus their own code.
    [`tests/test_core_boundaries.py`](../../tests/test_core_boundaries.py) enforces this.
 2. Only interfaces know platform details. Platform facts travel as `Request` fields
    (`is_direct`, `mentions_me`, `display`, `extra`).
@@ -177,11 +177,11 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Extension loading and assembly |
 | [`plugins/`](../../plugins) | Drop-in extensions, loaded without being listed; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek) |
-| [`extensions/`](../../extensions) | Included: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram); optional `wechat` (account interface and persona, see [WECHAT_BRIDGE.md](../WECHAT_BRIDGE.md)) |
+| [`extensions/`](../../extensions) | Included: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram); optional `wechat` (account interface and persona, see [WECHAT.md](../WECHAT.md)) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 
 Run with `python -m core` (`--check` validates extensions and exits). Without a `core.yml` the
 built-in defaults in [`core/defaults.py`](../../core/defaults.py) apply: Discord, the assistant engine and
 basic capabilities, any provider with a key in `.env`. A `core.yml` is merged over the defaults; see
-[`core.example.yml`](../../core.example.yml). The existing bot (`main.py`) is unchanged and does
-not use the core yet; the room engine, existing features and WeChat are to be ported as extensions. Extension authors should read [EXTENSIONS.md](EXTENSIONS.md).
+[`core.example.yml`](../../core.example.yml); drop-in extensions in [`plugins/`](../../plugins) load
+without being listed. Extension authors should read [EXTENSIONS.md](EXTENSIONS.md).

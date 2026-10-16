@@ -1,11 +1,11 @@
 """WeChat account extension: the logged-in Linux WeChat client as an interface, plus a default persona.
 
-Ported from the legacy bridge (bridges/wechat_bridge.py and services/wechat_*). Messages are read from the
-account's encrypted local databases with a private key file; replies, files and login use the desktop
-client through AT-SPI (`desktop_helper.py`). Which chats are answered, by whom and with which tools is
+Messages are read from the account's encrypted local
+databases with a private key file; replies, files and login use the desktop client through AT-SPI
+(`desktop_helper.py`). Which chats are answered, by whom and with which tools is
 core configuration (admission rules and assignments), not interface logic.
 
-`extension_config.wechat` (environment fallbacks in parentheses, from the legacy bridge):
+`extension_config.wechat` (environment fallbacks in parentheses):
   database_root      the account's `.../xwechat_files/wxid_…/db_storage`   (WECHAT_BRIDGE_DATABASE_ROOT)
   database_keys      private 0600 key file from key_setup.py               (WECHAT_BRIDGE_DATABASE_KEYS)
   python, display, wayland_display, runtime_dir    desktop helper environment (WECHAT_BRIDGE_PYTHON, …)
@@ -15,7 +15,6 @@ core configuration (admission rules and assignments), not interface logic.
   account_interval_s (20), chat_interval_s (20)   minimum spacing of the bot's own messages
   submit_media (false)     submit incoming images/files/stickers as requests instead of only recording them
   observe_chatter (false)  record group messages not addressed to the account in history
-  legacy_database          bot_data.db: import the legacy read positions once (switchover)
   image_key                private 0600 file from image_key.py; without it received images stay "[Image]"
   images_dir               where decrypted copies of received images are kept
 """
@@ -35,7 +34,7 @@ ENVIRONMENT = {"database_root": "WECHAT_BRIDGE_DATABASE_ROOT", "database_keys": 
 DEFAULTS = {"python": "/usr/bin/python3", "display": ":0", "wayland_display": "wayland-0", "runtime_dir": "",
             "max_upload_mb": 100.0, "max_text_chars": 500, "poll_seconds": 1.0, "status_seconds": 15.0,
             "coalesce_seconds": 1.0, "account_interval_s": 20.0, "chat_interval_s": 20.0, "submit_media": False,
-            "observe_chatter": False, "legacy_database": ""}
+            "observe_chatter": False}
 NUMBERS = {"max_upload_mb": (1, 100), "max_text_chars": (20, 4000), "poll_seconds": (0.2, 60),
            "status_seconds": (1, 300), "coalesce_seconds": (0, 5), "account_interval_s": (0, 3600),
            "chat_interval_s": (0, 3600)}

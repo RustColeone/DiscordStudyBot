@@ -19,7 +19,6 @@ from typing import Any
 from contracts import (Address, Delivery, Display, FileRef, Interface, Operation, Reply, Request, Risk, Sender,
                        ToolResult)
 
-from .handover import legacy_cursors
 from .images import mime_for
 from .native import strip_mention
 from .transport import SendFailed, WeChatTransport
@@ -128,7 +127,6 @@ class WeChatInterface(Interface):
                 port.set_ready(False, f"WeChat is not configured: {self._setup_error}")
                 return
         port.set_owners([self.transport.username])
-        self._import_legacy_cursors()
         self._task = asyncio.create_task(self._poll_loop(), name="wechat-poll")
 
     async def stop(self) -> None:
@@ -139,23 +137,6 @@ class WeChatInterface(Interface):
         if self.transport is not None:
             await self.transport.close()
 
-    def _import_legacy_cursors(self) -> None:
-        path = self.settings.get("legacy_database")
-        bottle = self.port.bottle
-        if not path or bottle.get("legacy_imported"):
-            return
-        try:
-            cursors = legacy_cursors(path, self.transport.account_id)
-        except Exception as error:
-            self.port.log("legacy_import_failed", error=type(error).__name__)
-            return
-        imported = 0
-        for native, cursor in cursors.items():
-            if bottle.get(f"cursor:{native}") is None:
-                bottle.set(f"cursor:{native}", [*cursor, 0])
-                imported += 1
-        bottle.set("legacy_imported", True)
-        self.port.log("legacy_cursors_imported", count=imported)
 
     # ---- addresses --------------------------------------------------------------------------------
     def address(self, native_id: str) -> Address:

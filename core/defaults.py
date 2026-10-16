@@ -64,7 +64,7 @@ def default_config() -> dict:
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
             # These only affect the requester's own conversation (or its server's voice channel), so
-            # members may use them without the owner's approval, as in the legacy bot.
+            # members may use them without the owner's approval.
             "*": {"engine": "assistant", "personas": ["assistant"], "preapprove": PREAPPROVED},
             "routine:*": {"engine": "assistant", "personas": ["assistant"], "allow": ["basic.*"],
                           "budget": {"model_calls": 8, "tool_calls": 8, "seconds": 300}},
