@@ -185,6 +185,13 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((trigger["reply_to"], trigger["quoted_text"], trigger["display"]["max_upload_mb"]),
                          ("12345", "earlier answer", 25.0))
 
+    def test_split_text_never_exceeds_discords_limit(self):
+        from core.loader import import_extension
+        _, module = import_extension(ROOT / "extensions" / "discord")
+        interface = __import__(module.__name__.rsplit(".", 1)[0] + ".interface", fromlist=["split_text"])
+        for text in ("a" * 2000 + " " + "b" * 50, "x" * 1999 + "\n\n" + "y" * 10, "word " * 900):
+            self.assertTrue(all(len(chunk) <= 2000 for chunk in interface.split_text(text)))
+
     async def test_talk_prefixes_address_the_bot_like_a_mention(self):
         await self.start({"extension_config": {"discord": {"talk_prefixes": ["$agent", "$chat"]}}})
         await self.say(incoming(self.room, self.alice, "$agent echo hi", self.guild))
