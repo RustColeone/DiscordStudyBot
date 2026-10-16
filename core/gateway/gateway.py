@@ -386,26 +386,28 @@ class Gateway:
         return self.bottle.move_scheduled(scheduled_id, "cancelled")
 
     async def fire_scheduled(self, now: float) -> None:
+        """Claim each due item, then deliver it in its own task so a slow interface never stalls the timer."""
         for item in self.bottle.due(now):
-            if not self.bottle.move_scheduled(item["id"], "firing"):
-                continue
-            address = Address.parse(item["address"])
-            if not self.rule_for(address).get("enabled", True):
-                self.bottle.move_scheduled(item["id"], "skipped", "firing")
-                continue
-            delivery = await self.deliver(Reply(address, "notice", text=item["text"], code="reminder", source="core",
-                                                data={"scheduled_id": item["id"], "sender_id": item["sender_id"],
-                                                      "sender_name": item["sender_name"], "at": str(item["at"])}))
-            if delivery.detail == "interface_not_ready":
-                self.bottle.move_scheduled(item["id"], "pending", "firing")
-                continue
-            status = "sent" if delivery.ok else "uncertain" if delivery.uncertain else "failed"
-            self.bottle.move_scheduled(item["id"], status, "firing")
-            if delivery.ok:
-                self.manager.tank.record_message(str(address), "out", item["text"], kind="reminder",
-                                                 message_id=delivery.message_id)
-            self.audit.record("scheduled_fired", scheduled=item["id"], status=status)
+            if self.bottle.move_scheduled(item["id"], "firing"):
+                self._spawn(self._fire_one(item))
 
+    async def _fire_one(self, item: dict) -> None:
+        address = Address.parse(item["address"])
+        if not self.rule_for(address).get("enabled", True):
+            self.bottle.move_scheduled(item["id"], "skipped", "firing")
+            return
+        delivery = await self.deliver(Reply(address, "notice", text=item["text"], code="reminder", source="core",
+                                            data={"scheduled_id": item["id"], "sender_id": item["sender_id"],
+                                                  "sender_name": item["sender_name"], "at": str(item["at"])}))
+        if delivery.detail == "interface_not_ready":
+            self.bottle.move_scheduled(item["id"], "pending", "firing")
+            return
+        status = "sent" if delivery.ok else "uncertain" if delivery.uncertain else "failed"
+        self.bottle.move_scheduled(item["id"], status, "firing")
+        if delivery.ok:
+            self.manager.tank.record_message(str(address), "out", item["text"], kind="reminder",
+                                             message_id=delivery.message_id)
+        self.audit.record("scheduled_fired", scheduled=item["id"], status=status)
 
 def next_fire(routine: Mapping[str, Any], now: float) -> float:
     if routine.get("every_minutes"):

@@ -400,9 +400,12 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         core.gateway.schedule(address, now[0] + 1200, "stretch", alice)
         self.assertEqual([item["text"] for item in core.gateway.scheduled_for(address)], ["drink water", "stretch"])
         await core.gateway.tick(now[0] + 599)
+        await settle(core)
         self.assertEqual(iface(core).notices("reminder"), [])
         await core.gateway.tick(now[0] + 600)
+        await settle(core)
         await core.gateway.tick(now[0] + 601)
+        await settle(core)
         notices = iface(core).notices("reminder")
         self.assertEqual([(n.text, n.data["scheduled_id"], n.data["sender_id"]) for n in notices],
                          [("drink water", first, "alice")])
@@ -421,6 +424,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(core.gateway.cancel_scheduled(address, scheduled_id))
         self.assertFalse(core.gateway.cancel_scheduled(address, scheduled_id))
         await core.gateway.tick(now[0] + 120)
+        await settle(core)
         self.assertEqual(iface(core).notices("reminder"), [])
         core.gateway.MAX_SCHEDULED_PER_CONVERSATION = 2
         core.gateway.schedule(address, now[0] + 60, "a", alice)
@@ -436,12 +440,25 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         closed = core.gateway.schedule(Address("chat", "closed"), now[0] + 60, "never", alice)
         iface(core).port.set_ready(False, "reconnecting")
         await core.gateway.tick(now[0] + 61)
+        await settle(core)
         self.assertEqual(iface(core).notices("reminder"), [])
         self.assertEqual(len(core.gateway.scheduled_for(Address("chat", "room"))), 1)
         iface(core).port.set_ready(True)
         await core.gateway.tick(now[0] + 62)
+        await settle(core)
         self.assertEqual([n.text for n in iface(core).notices("reminder")], ["later"])
         self.assertEqual(core.bottle.scheduled(status="skipped")[0]["id"], closed)
+
+    async def test_a_slow_interface_does_not_stall_the_timer(self):
+        now = [time.time()]
+        core = await self.core({"extension_config": {"fake": {"interfaces": {"slow": {"delay": 0.5}}}}},
+                               clock=lambda: now[0])
+        core.gateway.schedule(Address("slow", "room"), now[0] + 60, "later", Sender("alice", "Alice"))
+        started = time.monotonic()
+        await core.gateway.tick(now[0] + 61)
+        self.assertLess(time.monotonic() - started, 0.3)
+        await settle(core)
+        self.assertEqual([n.text for n in iface(core, "slow").notices("reminder")], ["later"])
 
     async def test_scheduled_message_interrupted_while_sending_is_never_sent_twice(self):
         core = await self.core()
@@ -450,6 +467,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         core.bottle.move_scheduled(scheduled_id, "firing")
         core = await self.restart(core)
         await core.gateway.tick(time.time() + 120)
+        await settle(core)
         self.assertEqual(iface(core).notices("reminder"), [])
         self.assertEqual(core.bottle.scheduled(status="uncertain")[0]["id"], scheduled_id)
 
