@@ -175,7 +175,10 @@ class Session(Protocol):
     async def save(self, state: dict) -> None:
         """Persist engine state (JSON). Call after each meaningful step so a restart can resume."""
 
-    async def reply(self, text: str, quote: str | None = None) -> Delivery: ...
+    async def reply(self, text: str, quote: str | None = None, persona: str | None = None,
+                    label: str = "") -> Delivery:
+        """Say `text` in the conversation. `persona` (one of the session's) marks who speaks, so the
+        interface can name them and history records them; `label` qualifies it, e.g. a work note."""
 
     async def send_file(self, file: FileRef, caption: str = "") -> Delivery: ...
 

@@ -657,7 +657,8 @@ class Manager:
                 self._delivery_seconds[record.id] = (self._delivery_seconds.get(record.id, 0.0)
                                                      + time.monotonic() - started)
 
-    async def reply(self, run_id: str, text: str, quote: str | None = None) -> Delivery:
+    async def reply(self, run_id: str, text: str, quote: str | None = None, speaker: str = "",
+                    label: str = "") -> Delivery:
         record = self.tank.run(run_id)
         trigger = request_from_dict(record.trigger)
         if not text.strip():
@@ -665,10 +666,12 @@ class Manager:
         source = "command" if record.engine == COMMAND_ENGINE else "run"
         delivery = await self._run_output(record, Reply(trigger.address, "text", text=text,
                                                         quote=quote if trigger.display.quotes else None,
-                                                        in_reply_to=trigger.id, run_id=run_id, source=source))
+                                                        in_reply_to=trigger.id, run_id=run_id, source=source,
+                                                        speaker=speaker, label=label))
         if delivery.ok:
             self.tank.record_message(record.address, "out", text, message_id=delivery.message_id, run_id=run_id,
-                                     reply_to=trigger.id)
+                                     reply_to=trigger.id, sender_name=speaker,
+                                     kind="note" if label else "text")
         return delivery
 
     async def send_file(self, run_id: str, file: FileRef, caption: str = "") -> Delivery:

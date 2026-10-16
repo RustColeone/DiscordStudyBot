@@ -375,6 +375,22 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(core.tank.runs(("done",), address="routine:r"), [])
         self.assertGreater(core.bottle.routines()["r"]["next_at"], routine["next_at"])
 
+    async def test_engine_can_speak_as_its_personas_and_history_records_the_speaker(self):
+        from core.manager.handles import SessionHandle
+        core = await self.core({"personas": {"q": {"display_name": "Quinn", "prompt": "You are Quinn."}}})
+        await iface(core).say("echo hi")
+        await settle(core)
+        record = core.tank.runs(("done",))[0]
+        core.tank.update_run(record.id, status="running")
+        session = SessionHandle(core.manager, core.tank.run(record.id), [], False)
+        self.assertTrue((await session.reply("I'll look", persona="p", label="Work note")).ok)
+        with self.assertRaises(ValueError):
+            await session.reply("x", persona="q")
+        delivered = iface(core).delivered[-1]
+        self.assertEqual((delivered.speaker, delivered.label, delivered.text), ("Pat", "Work note", "I'll look"))
+        latest = core.tank.recent_messages("chat:room")[-1]
+        self.assertEqual((latest.sender_name, latest.kind), ("Pat", "note"))
+
     # ---- scheduled messages ------------------------------------------------------------------------
     async def test_scheduled_message_fires_once_when_due_and_is_recorded(self):
         now = [time.time()]

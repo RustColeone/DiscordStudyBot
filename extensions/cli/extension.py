@@ -59,7 +59,8 @@ class CLIInterface(Interface):
         origin = reply.data.get("origin_address")
         prefix = f"[{origin}] " if origin else ""
         if reply.kind == "text":
-            line = f"{prefix}bot> {reply.text}"
+            speaker = (reply.speaker + (f" · {reply.label}" if reply.label else "")) if reply.speaker else "bot"
+            line = f"{prefix}{speaker}> {reply.text}"
         elif reply.kind == "file":
             line = f"{prefix}bot> [file {reply.file.name or reply.file.path}: {reply.file.path}] {reply.text}".rstrip()
         elif reply.kind == "progress":

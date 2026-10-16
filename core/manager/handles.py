@@ -86,8 +86,15 @@ class SessionHandle:
         self.state = dict(state)
         self._manager.save_state(self.run_id, self.state)
 
-    async def reply(self, text: str, quote: str | None = None) -> Delivery:
-        return await self._manager.reply(self.run_id, text, quote)
+    async def reply(self, text: str, quote: str | None = None, persona: str | None = None,
+                    label: str = "") -> Delivery:
+        speaker = ""
+        if persona is not None:
+            match = next((item for item in self.personas if item.name == persona), None)
+            if match is None:
+                raise ValueError("A session can only speak as its own personas")
+            speaker = match.display_name
+        return await self._manager.reply(self.run_id, text, quote, speaker, label)
 
     async def send_file(self, file: FileRef, caption: str = "") -> Delivery:
         return await self._manager.send_file(self.run_id, file, caption)
