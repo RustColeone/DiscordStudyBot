@@ -62,15 +62,34 @@ class WhaleChanBot(Interface):
         self.client.event(self.on_message)
         self._task = asyncio.create_task(self._run())
 
+    def invite_url(self) -> str:
+        """The bot's user ID is the token's first part (base64), which is also its application ID."""
+        import base64
+        head = self.token.split(".", 1)[0]
+        try:
+            client_id = base64.urlsafe_b64decode(head + "=" * (-len(head) % 4)).decode()
+        except ValueError:
+            return "https://discord.com/developers/applications"
+        permissions = discord.Permissions(view_channel=True, send_messages=True, send_messages_in_threads=True,
+                                          read_message_history=True, attach_files=True, embed_links=True)
+        return f"https://discord.com/oauth2/authorize?client_id={client_id}&scope=bot&permissions={permissions.value}"
+
+    def _not_ready(self, detail: str) -> None:
+        print(f"[{self.name}] {detail}", flush=True)
+        self.port.set_ready(False, detail)
+
     async def _run(self) -> None:
         try:
             await self.client.start(self.token)
         except discord.LoginFailure:
-            self.port.set_ready(False, "The bot token was rejected.")
+            self._not_ready("The bot token was rejected.")
+        except discord.PrivilegedIntentsRequired:
+            self._not_ready("Turn on Message Content Intent for this bot in the Discord Developer Portal "
+                            "(Bot → Privileged Gateway Intents), then restart.")
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            self.port.set_ready(False, f"Discord connection failed: {type(error).__name__}")
+            self._not_ready(f"Discord connection failed: {type(error).__name__}: {error}"[:300])
 
     async def stop(self) -> None:
         if self.client is not None:
@@ -87,7 +106,8 @@ class WhaleChanBot(Interface):
         except discord.HTTPException as error:
             self.port.log("owner_lookup_failed", error=type(error).__name__)
         self.port.set_ready(True, f"Logged in as {self.client.user}.")
-        print(f"[{self.name}] Logged in as {self.client.user} in {len(self.client.guilds)} server(s).", flush=True)
+        message = f"[{self.name}] Logged in as {self.client.user} in {len(self.client.guilds)} server(s)."
+        print(message + ("" if self.client.guilds else f" Invite it: {self.invite_url()}"), flush=True)
 
     # ---- incoming ---------------------------------------------------------------------------------
     async def on_message(self, message: discord.Message) -> None:
