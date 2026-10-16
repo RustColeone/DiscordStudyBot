@@ -48,6 +48,28 @@ The project is now organized around a small app core plus adapter-driven feature
 - The command router no longer depends on a monolithic `main.py` event body.
 - Future forks can add another adapter without rewriting the whole bot.
 
+### New core (in progress)
+
+A replacement core with three extension slots (interfaces, engines, capabilities), a gateway, a
+policy-enforcing manager, durable runs and owner approvals lives in `contracts/`, `core/` and
+`extensions/`. Discord is an included extension. The new core does not change the running bot
+(`main.py`) yet; the room engine, older features and WeChat are being ported as extensions. See
+[core architecture](docs/core/ARCHITECTURE.md) and [writing extensions](docs/core/EXTENSIONS.md).
+
+Quick start from a fresh clone:
+
+1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an
+   application, add a bot, copy its token and enable **Message Content Intent** (Bot → Privileged
+   Gateway Intents).
+2. `pip install -r requirements.txt`, then create `.env` with `DISCORD_TOKEN=...` and at least one model
+   key (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or `CLAUDE_API_KEY`).
+3. `python -m core`. It prints an invite link if the bot is in no server yet; invite it.
+4. DM the bot, or mention it (or reply to it) in a server channel. The application owner is the bot's
+   owner: approvals (`$approve <id>`) arrive in their DM. `$help` lists commands.
+
+`core.yml` is optional; copy [`core.example.yml`](core.example.yml) to change models, personas, which
+channels it answers in, or to add extensions.
+
 ### WeChat Adapter Notes
 
 - Run with `--mode wechat` to use the WeChat adapter.

@@ -1,0 +1,73 @@
+# Optional overrides for `python -m core`. Without a core.yml the built-in defaults are used
+# (core/defaults.py): Discord + the assistant engine + basic tools, any model provider whose key is
+# in .env, owner = DISCORD_OWNER_ID or else the Discord application's owner.
+#
+# Copy to core.yml and keep only what you change. Mappings merge with the defaults key by key;
+# lists and plain values replace them. Paths are relative to this file. Secrets stay in .env.
+
+# data_dir: data/core          # tank.db, gateway.db, workspaces/, extensions/, audit.log
+# env_files: [.env]            # KEY=VALUE files; never override variables already set
+# audit_echo: false            # also print audit events to stdout
+
+# Replaces the default list (discord, assistant, basic). Add the CLI for local testing,
+# or external extensions from other repositories.
+# extensions:
+#   - extensions/discord
+#   - extensions/assistant
+#   - extensions/basic
+#   - extensions/cli
+#   - ../AudioManager/bot_extension
+
+# extension_config:
+#   discord: {token_env: [DISCORD_TOKEN, TOKEN], attachment_max_mb: 25}
+#   assistant: {max_steps: 8, history_limit: 16, effort: low}
+#   cli: {conversation: local, user: local, user_name: you}
+
+# Owners per interface (sender IDs). Default: DISCORD_OWNER_ID, else the Discord application owner.
+# owners:
+#   discord: ["123456789012345678"]
+#   cli: [local]
+
+# Where approvals, failure details and interface events go. Default: the Discord owner's DM.
+# control: "discord:dm:123456789012345678"
+
+# Model profiles: ordered candidates; candidates without an API key are skipped.
+# profiles:
+#   default:
+#     - {provider: deepseek, model: deepseek-flash}
+#     - {provider: openai, model: gpt-6-luna}
+
+# personas:
+#   assistant:
+#     display_name: Assistant
+#     profile: default
+#     prompt: |
+#       You are a helpful, concise assistant for a small private server.
+
+# Which engine and personas handle a conversation, what it may use and its budget.
+# Most specific pattern wins: "interface:conversation", then "interface:*", then "*".
+# assignments:
+#   "*":
+#     engine: assistant
+#     personas: [assistant]
+#     allow: ["*"]
+#     preapprove: []          # write capabilities that run without asking the owner
+#     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
+#     lane: conversation      # or sender: members of a group are handled independently
+#     options: {instructions: "Keep replies short."}
+#   "discord:123456789012345678":   # a server channel
+#     engine: assistant
+#     persona: assistant
+#     enabled: false          # record messages, never answer
+
+# Gateway admission rules. In servers the bot answers mentions and replies to its messages.
+# admission:
+#   "*": {enabled: true, require_mention_in_groups: true}
+#   "discord:123456789012345678": {require_mention_in_groups: false}   # answer everything here
+
+# Reply routes, owner forwards and routines are usually edited at runtime with $call core.set_route,
+# core.set_forward and core.set_routine; they can also be given here.
+# routes:
+#   "routine:*": {target: "discord:dm:123456789012345678"}
+# routines:
+#   morning: {daily_at: "08:00", text: "Tell me today's date."}
