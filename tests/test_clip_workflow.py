@@ -11,6 +11,15 @@ from providers import clip_query
 
 
 class ClipWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_downloads_reserve_distinct_outputs_before_rendering(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(clip_query, 'CLIP_OUTPUT_DIR', Path(directory)):
+            clip = clip_query.ClipSpec('https://example.com/video', 0, 10, video_title='Same title')
+            first = Path(clip_query.allocate_clip_output_path(clip, 1))
+            second = Path(clip_query.allocate_clip_output_path(clip, 1))
+            self.assertNotEqual(first, second)
+            self.assertTrue(first.is_file() and second.is_file())
+            self.assertEqual(first.stat().st_size, 0)
+
     def setUp(self):
         clip_query.clear_pending_clips("channel")
         self.addCleanup(clip_query.clear_pending_clips, "channel")
@@ -123,6 +132,51 @@ class ClipWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answers[0].metadata["error_code"], "source_unavailable")
         self.assertIn("No video formats found", answers[0].text)
         self.assertIsNone(clip_query.get_pending_clips("channel"))
+
+    async def test_six_minute_video_fits_user_ten_mb_target_by_adapting_audio(self):
+        message = IncomingMessage(**{**self.message.__dict__, 'metadata': {
+            'platform':'wechat', 'upload_limit_mb':100, 'upload_limit_source':'bridge_policy'}})
+        with tempfile.TemporaryDirectory() as directory:
+            seen = []
+            async def render(clip, output):
+                seen.append(clip)
+                Path(output).write_bytes(b'video fixture')
+                return True
+            with patch.object(clip_query, 'CLIP_OUTPUT_DIR', Path(directory)), \
+                    patch.object(clip_query, 'get_video_info', return_value=('Example','BiliBili',385.45)), \
+                    patch.object(clip_query, 'create_clip', side_effect=render):
+                responses = await self.feature.download_for_agent(message, {
+                    'url':'https://example.com/video', 'max_size_mb':10})
+            self.assertEqual((seen[0].start,seen[0].end), (0,385.45))
+            self.assertEqual(seen[0].audio_bitrate, '64k')
+            encoding = responses[0].metadata['video_encoding']
+            self.assertEqual(encoding['budget_source'], 'user_target')
+            self.assertEqual(encoding['upload_limit_mb'], 10)
+            self.assertLessEqual(encoding['estimated_size_mb'], 9)
+            self.assertIsNotNone(responses[0].attachment)
+
+    async def test_infeasible_budget_reports_estimate_without_claiming_upload_rejection(self):
+        message = IncomingMessage(**{**self.message.__dict__, 'metadata': {
+            'platform':'wechat', 'upload_limit_mb':10, 'upload_limit_source':'bridge_policy'}})
+        with patch.object(clip_query, 'get_video_info', return_value=('Example','BiliBili',3600)), \
+                patch.object(clip_query, 'create_clip') as render:
+            responses = await self.feature.download_for_agent(message, {'url':'https://example.com/video'})
+        render.assert_not_called()
+        self.assertEqual(responses[0].metadata['tool_status'], 'needs_input')
+        self.assertEqual(responses[0].metadata['file_budget']['source'], 'bridge_policy')
+        self.assertIs(responses[0].metadata['upload_attempted'], False)
+        self.assertNotIn('WeChat limit', responses[0].text)
+
+    async def test_explicit_audio_bitrate_is_preserved_and_target_cannot_raise_channel_budget(self):
+        message = IncomingMessage(**{**self.message.__dict__, 'metadata': {
+            'platform':'wechat', 'upload_limit_mb':10, 'upload_limit_source':'bridge_policy'}})
+        with patch.object(clip_query, 'get_video_info', return_value=('Example','BiliBili',385.45)), \
+                patch.object(clip_query, 'create_clip') as render:
+            responses = await self.feature.download_for_agent(message, {
+                'url':'https://example.com/video', 'audio_bitrate':'128k', 'max_size_mb':100})
+        render.assert_not_called()
+        self.assertEqual(responses[0].metadata['tool_status'], 'needs_input')
+        self.assertEqual(responses[0].metadata['file_budget']['max_mb'], 10)
 
     async def test_explicit_30fps_keeps_full_duration_and_exposes_encoding_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
