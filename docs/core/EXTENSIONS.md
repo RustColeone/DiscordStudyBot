@@ -239,7 +239,9 @@ Return a `Delivery`:
 
 * `ok=True, message_id=...` once you have evidence the platform has it.
 * `ok=True, detail="suppressed"` if you deliberately do not show it (for example a notice you do not
-  want in a group).
+  want in a group). You may also merge items nobody explicitly asked for (progress routed from another
+  conversation, failure details, relay confirmations) into one edited message and return its ID; the
+  included Discord interface keeps one rolling code block per conversation for up to an hour.
 * `ok=False` if you know nothing was sent; `ok=False, uncertain=True` if it may have been sent.
   Raising counts as uncertain. The core never retries; the engine sees your `Delivery`.
 

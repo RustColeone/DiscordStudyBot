@@ -19,6 +19,8 @@ import discord
 from contracts import (Address, Delivery, Display, FileRef, Interface, Operation, Reply, Request, Sender,
                        ToolResult)
 
+from .status_log import StatusLog, code_safe
+
 DEFAULT_UPLOAD_BYTES = 10 * 1024 * 1024
 MESSAGE_LIMIT = 2000
 INVITE_PERMISSIONS = discord.Permissions(view_channel=True, send_messages=True, send_messages_in_threads=True,
@@ -47,6 +49,10 @@ def split_text(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
     if remaining or not chunks:
         chunks.append(remaining)
     return chunks
+
+
+def inline_code(text: str) -> str:
+    return "`" + str(text).replace("`", "ˋ") + "`"
 
 
 def attachment_kind(content_type: str) -> str:
@@ -78,6 +84,7 @@ class DiscordInterface(Interface):
         self._progress: OrderedDict[str, Any] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._owners: list[str] = []
+        self.status_log = StatusLog(self._send_status, self._edit_status)
 
     # ---- lifecycle --------------------------------------------------------------------------------
     async def start(self, port) -> None:
@@ -236,14 +243,45 @@ class DiscordInterface(Interface):
         self._remember(conversation, channel)
         return channel
 
+    @staticmethod
+    def is_status(reply: Reply) -> bool:
+        """Information nobody explicitly asked for: progress of work in another conversation, failure
+        details for the owner and relay confirmations. It goes into the rolling status block."""
+        if reply.kind == "progress":
+            return bool(reply.data.get("origin_address"))
+        if reply.kind == "notice":
+            return reply.code == "run_failed_detail" or (reply.code == "relayed" and reply.data.get("ok") == "true")
+        return False
+
+    def status_line(self, reply: Reply) -> str:
+        origin = reply.data.get("origin_address")
+        if reply.kind == "progress":
+            return f"{origin} · {reply.text}"
+        if reply.code == "relayed":
+            return f"sent to {reply.data.get('address')}"
+        return reply.text
+
+    def render_approval(self, reply: Reply) -> str:
+        data = dict(reply.data)
+        approval, arguments = data.get("approval_id", ""), data.get("arguments", "{}")
+        head = f"🔐 Approval {inline_code(approval)} · {inline_code(data.get('capability', ''))}"
+        if len(arguments) <= 300 and "\n" not in arguments:
+            lines = [f"{head} {inline_code(arguments)}"]
+        else:
+            lines = [head, "```json\n" + code_safe(arguments[:1500]) + "\n```"]
+        run = f" (run {inline_code(reply.run_id)})" if reply.run_id else ""
+        lines.append(f"Requested in {inline_code(data.get('address', ''))}{run}. "
+                     f"Reply {inline_code('$approve ' + approval)} or {inline_code('$deny ' + approval)}.")
+        return "\n".join(lines)
+
     def render(self, reply: Reply) -> str:
         data = dict(reply.data)
         if reply.kind == "notice":
             if reply.code == "relayed":
                 return (f"↪️ Sent to `{data.get('address')}`." if data.get("ok") == "true"
                         else f"⚠️ Not sent to `{data.get('address')}`: {data.get('detail') or 'unknown error'}")
-            if reply.code == "approval_request":
-                return "🔐 " + reply.text
+            if reply.code == "approval_request" and data.get("approval_id"):
+                return self.render_approval(reply)
             if reply.code == "run_failed_detail":
                 return "⚠️ " + reply.text
             if reply.code in NOTICES:
@@ -262,6 +300,12 @@ class DiscordInterface(Interface):
         channel = await self._channel(reply.address.conversation)
         if channel is None:
             return Delivery(False, detail="unknown_conversation")
+        if self.is_status(reply):
+            try:
+                message = await self.status_log.append(reply.address.conversation, self.status_line(reply))
+            except discord.HTTPException as error:
+                return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}")
+            return Delivery(message is not None, message_id=str(message.id) if message is not None else None)
         if reply.kind == "progress":
             return await self._show_progress(channel, reply)
         reference = None
@@ -288,6 +332,14 @@ class DiscordInterface(Interface):
             return Delivery(False, detail=f"{type(error).__name__}: {error}"[:300], uncertain=True)
         await self._clear_progress(reply.run_id)
         return Delivery(True, message_id=str(sent[0].id))
+
+    async def _send_status(self, conversation: str, text: str):
+        channel = await self._channel(conversation)
+        return None if channel is None else await channel.send(content=text)
+
+    @staticmethod
+    async def _edit_status(message, text: str) -> None:
+        await message.edit(content=text)
 
     async def _show_progress(self, channel, reply: Reply) -> Delivery:
         key = reply.run_id or reply.in_reply_to or reply.address.conversation

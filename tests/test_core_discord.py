@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import itertools
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -202,8 +203,13 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         dm = FakeChannel(78, private=True)
         await self.say(incoming(dm, self.alice, 'tool tools.write_value {"key": "k", "value": "v"}'))
         approval = self.owner.dm_channel.texts()[0]
-        self.assertTrue(approval.startswith("🔐 Approval "))
-        approval_id = approval.split()[2].rstrip(":")
+        first, second = approval.split("\n")
+        match = re.fullmatch(r'🔐 Approval `(\w+)` · `tools\.write_value` `\{"key": "k", "value": "v"\}`', first)
+        self.assertIsNotNone(match, first)
+        approval_id = match.group(1)
+        run_id = self.core.tank.runs(("waiting_approval",))[0].id
+        self.assertEqual(second, f"Requested in `discord:dm:1` (run `{run_id}`). "
+                                 f"Reply `$approve {approval_id}` or `$deny {approval_id}`.")
         owner_dm = self.owner.dm_channel
         await self.say(incoming(owner_dm, self.owner, f"$approve {approval_id}"))
         self.assertIn("approved: wrote k (execution 1)", dm.texts())
@@ -257,10 +263,39 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
                          reference=SimpleNamespace(message_id=int(delivery.message_id), resolved=event))
         await self.say(reply)
         self.assertEqual(self.room.texts(), ["on my way"])
+        self.assertTrue(owner_dm.texts()[-1].startswith("```") and "sent to discord:555" in owner_dm.texts()[-1])
         await self.say(incoming(owner_dm, self.owner, "$invite"))
         self.assertIn("discord.com/oauth2/authorize?client_id=999", owner_dm.texts()[-1])
         await self.say(incoming(owner_dm, self.owner, "$discord_status"))
         self.assertIn("1 server(s): Home", owner_dm.texts()[-1])
+
+    async def test_unrequested_status_shares_one_rolling_block_in_the_owner_dm(self):
+        from contracts import Reply
+        await self.start()
+        dm = FakeChannel(81, private=True)
+        await self.say(incoming(dm, self.alice, "crash"))
+        self.assertEqual(dm.texts(), ["⚠️ Sorry, I couldn't finish that."])
+        owner = Address("discord", "dm:42")
+        await self.discord.deliver(Reply(owner, "progress", "converting video", run_id="r9",
+                                         data={"origin_address": "wechat:room"}))
+        await self.discord.deliver(Reply(owner, "progress", "uploading", run_id="r9",
+                                         data={"origin_address": "wechat:room"}))
+        blocks = self.owner.dm_channel.texts()
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(blocks[0].startswith("```\n") and blocks[0].endswith("\n```"))
+        self.assertIn("engine exploded", blocks[0])
+        self.assertIn("wechat:room · converting video", blocks[0])
+        self.assertIn("wechat:room · uploading", blocks[0])
+
+    async def test_long_approval_arguments_are_shown_in_a_json_block(self):
+        from contracts import Reply
+        await self.start()
+        arguments = '{"text": "' + "x" * 400 + '"}'
+        text = self.discord.render(Reply(Address("discord", "dm:42"), "notice", code="approval_request", run_id="r1",
+                                         data={"approval_id": "ab12cd", "capability": "basic.remember",
+                                               "address": "discord:555", "arguments": arguments}))
+        self.assertTrue(text.startswith("🔐 Approval `ab12cd` · `basic.remember`\n```json\n"))
+        self.assertTrue(text.endswith("Reply `$approve ab12cd` or `$deny ab12cd`."))
 
     async def test_missing_token_reports_not_ready_without_crashing(self):
         await self.start(token="", ready=False)
