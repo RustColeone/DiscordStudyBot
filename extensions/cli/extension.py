@@ -6,7 +6,7 @@ import asyncio
 import sys
 import time
 
-from contracts import (Address, Contributions, Delivery, Display, Extension, Interface, Reply, Request, Sender)
+from contracts import (Address, Contributions, Delivery, Display, Extension, Setting, Interface, Reply, Request, Sender)
 
 NOTICES = {
     "run_failed": "[this request could not be finished]",
@@ -33,6 +33,14 @@ class CLIInterface(Interface):
 
     async def start(self, port) -> None:
         self._port = port
+        isatty = getattr(self._stdin, "isatty", None)
+        if isatty is not None and isatty():
+            # Whoever is at this machine's console can edit its files anyway: they are the creator here,
+            # and approvals come here when no other interface (a Discord DM) takes them.
+            port.set_owners([self.user], control=Address(self.name, self.conversation), fallback=True)
+            self._stdout.write("[cli] You are the creator at this console. Type to talk to the bot; $help lists "
+                               "commands, $setup shows modules and settings.\n")
+            self._stdout.flush()
         self._task = asyncio.create_task(self._read_loop(), name="cli-input")
 
     async def stop(self) -> None:
@@ -86,4 +94,6 @@ def setup(context) -> Contributions:
                                                   str(config.get("user_name", "you")))])
 
 
-EXTENSION = Extension("cli", setup, contracts="1", version="1", description="Local stdin/stdout conversation")
+EXTENSION = Extension("cli", setup, contracts="1", version="1", description="Local stdin/stdout conversation", settings=(
+    Setting("user_name", "Your name in the local chat", "text", "you"),
+))

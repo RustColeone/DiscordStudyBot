@@ -17,7 +17,7 @@ import atexit
 import platform
 from pathlib import Path
 
-from contracts import (Capability, Command, Contributions, Engine, EngineSpec, Extension, Option, Persona, Risk,
+from contracts import (Capability, Command, Contributions, Engine, EngineSpec, Extension, Setting, Option, Persona, Risk,
                        RunYield, ToolResult)
 
 from .shell import INTERRUPT, Terminals
@@ -103,4 +103,8 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("terminal", setup, contracts="1", version="1",
-                      description="A shell on this machine for the creator (Windows and Linux)")
+                      description="A shell on this machine for the creator (Windows and Linux)", settings=(
+    Setting("cwd", "Folder new shells start in", "path", "~"),
+    Setting("max_wait_s", "Longest wait for a command's output before replying, in seconds", "number", 20),
+    Setting("idle_minutes", "Minutes without input before a shell ends", "number", 60),
+))

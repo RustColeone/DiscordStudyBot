@@ -12,7 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from contracts import Capability, Contributions, Extension, FileRef, Risk, ToolResult
+from contracts import Capability, Contributions, Extension, Setting, FileRef, Risk, ToolResult
 
 SUFFIXES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
 MAX_REFERENCE_BYTES = 20 * 1024 * 1024
@@ -150,4 +150,6 @@ def setup(context) -> Contributions:
         timeout_s=300)])
 
 
-EXTENSION = Extension("images", setup, contracts="1", version="1", description="Image generation (Gemini, OpenAI)")
+EXTENSION = Extension("images", setup, contracts="1", version="1", description="Image generation (Gemini, OpenAI)", settings=(
+    Setting("default_provider", "Who draws by default: gemini or openai", "text", "gemini"),
+))

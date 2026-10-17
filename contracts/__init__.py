@@ -4,7 +4,7 @@ from contracts.capability import Capability, Handler, Risk, ToolContext, ToolRes
 from contracts.commands import Command, Option
 from contracts.engine import (DIARY_KINDS, Activity, Diary, DiaryNote, Engine, EngineSpec, Event, History,
                               HistoryItem, Persona, RunYield, Session, Tools)
-from contracts.extension import Contributions, Extension, ExtensionContext
+from contracts.extension import Contributions, Extension, ExtensionContext, Setting
 from contracts.interface import Interface, InterfacePort, Operation
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
 from contracts.models import ModelError, ModelRequest, ModelResult, Models
@@ -17,6 +17,6 @@ __all__ = [
     "DiaryNote", "Display", "Engine",
     "EngineSpec", "Event", "Extension", "ExtensionContext", "FileRef", "Handler", "History", "HistoryItem",
     "Interface", "InterfacePort", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
-    "Persona", "Reply", "Request", "Risk", "RunYield", "Sender", "Session", "Store", "SubmitResult", "ToolContext",
+    "Persona", "Reply", "Request", "Risk", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolResult", "Tools",
 ]

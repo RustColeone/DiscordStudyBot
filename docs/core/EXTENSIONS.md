@@ -148,6 +148,19 @@ extension_config:                     # rarely needed: the module's own config.y
   `config.example.yml`, and the machine's copy is `config.yml` next to it (git-ignored). `core.yml`
   holds what is shared (owners, models, personas, admission, assignments); `extension_config.<name>`
   there, when present, is merged over the folder's `config.yml` into `context.config`.
+* **Declaring settings** makes them settable by `python -m core setup` and `$setup` (and documents
+  them). `Extension(..., settings=(Setting(...), ...))`; the declaration is read without running `setup`:
+
+```python
+Setting("token", "The bot's token (Developer Portal → Bot)", "secret",
+        env=("MY_BOT_TOKEN",), ask=True, check=check_token)   # async check(value) -> note, or ValueError
+Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, secret, number, boolean, list, path
+```
+
+  `key` is the key in your `config.yml` (read it from `context.config` as usual). A `secret` goes only
+  to `.env` under the first `env` name (read it with `os.getenv`), is typed hidden, and is never shown
+  or accepted in a chat. `ask=True` puts it in the first-run questions; `check` tries a new value (the
+  Discord module logs in with a token and returns the bot's name). Declare what people actually change.
 * **Secrets:** prefer `.env` and name the variable in the config (for example
   `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Putting a secret directly in the folder's `config.yml`
   (`token: …`) is supported for people who would rather not edit the environment; then
@@ -188,7 +201,7 @@ class MyInterface(Interface):
 | `await cancel_all(reason) -> int` | The same for every conversation of your interface (account switched, signed out). |
 | `check(reply) -> str \| None` | Re-check a reply right before you commit it, after waiting for spacing or a lock: `None` means send; otherwise `run_closed`, `conversation_disabled` or `not_admitted`, and you must not send (return `Delivery(ok=False, detail=reason)`). |
 | `policy(address)` | Read-only `{"admission": rule, "assignment": assignment or None}` for one of your conversations, for status displays. |
-| `set_owners(ids, control=None)` | Report the platform's own owner, e.g. a bot application's owner. Used only when `core.yml` lists no owners for your interface; `control` (one of your addresses, such as the owner's DM) is used only when no control route is configured. This is how a fresh Discord setup routes approvals to the bot owner's DM without configuration. |
+| `set_owners(ids, control=None, *, fallback=False)` | Report the platform's own owner, e.g. a bot application's owner. Used only when `core.yml` lists no owners for your interface; `control` (one of your addresses, such as the owner's DM) is used only when no control route is configured. This is how a fresh Discord setup routes approvals to the bot owner's DM without configuration. `fallback=True` offers `control` only for when nothing else does: the CLI, at an interactive terminal, reports its user as the owner and itself as the fallback, so a machine with nothing connected still gets approvals at its console. |
 | `set_ready(ready, detail="")` | Report whether you can send. The first call with `False`, and every change, sends an `interface_ready` / `interface_not_ready` event (with `data["detail"]`) to the owner. While not ready, deliveries to you are refused (`Delivery(ok=False, detail="interface_not_ready")`, not uncertain). Interfaces start ready. |
 | `bottle` | Your private persistent store (below). |
 | `commands()` | The command catalog (`Command` declarations: built-ins, capability and operation commands) for a native command menu or your own help. Translate a menu selection into its `$` text with `command.render(values)` and submit that as the request's text. |
@@ -225,6 +238,8 @@ be submitted concurrently. Messages starting with `$` and a letter are commands 
 `$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
 `$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins),
 `$routine` (anyone: repeat a message or command on a schedule; see Routine examples),
+`$setup` (the creator: modules on or off, and their declared settings; secrets only on the machine with
+`python -m core setup`; `$setup` lines are not kept in history; changes apply after a restart),
 `$help [command]`, `$call <capability> <json arguments>` (owners only: run any capability directly, for
 example `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
 capability and operation commands (`$help` lists them). The core only understands this `$` text;

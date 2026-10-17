@@ -78,10 +78,13 @@ class InterfacePort(Protocol):
         """Report whether the platform can send. While not ready, deliveries are refused (not uncertain)
         and the owner is told about each transition."""
 
-    def set_owners(self, sender_ids: Sequence[str], control: Address | None = None) -> None:
+    def set_owners(self, sender_ids: Sequence[str], control: Address | None = None, *,
+                   fallback: bool = False) -> None:
         """Report the platform's own notion of the owner (for example a bot application's owner).
         Used only when core.yml lists no owners for this interface; `control` (one of your addresses,
-        such as the owner's direct conversation) is used only when core.yml sets no control route."""
+        such as the owner's direct conversation) is used only when core.yml sets no control route.
+        `fallback=True` offers `control` only for when no other interface offers one (a local console
+        receiving approvals while nothing else is connected)."""
 
     def commands(self) -> list[Command]:
         """Every `$command` people can run here (built-in, capability and operation commands), for

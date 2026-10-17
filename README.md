@@ -20,20 +20,22 @@ that touches a platform, decides what to say or does work is a module.
 
 ## Quick start
 
-1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an
-   application, add a bot, copy its token and enable **Message Content Intent** (Bot → Privileged
-   Gateway Intents).
-2. `python3 -m venv venv && venv/bin/pip install -r requirements.txt` (install `ffmpeg` for videos and
+1. `python3 -m venv venv && venv/bin/pip install -r requirements.txt` (install `ffmpeg` for videos and
    music, and `libopus0` for voice).
-3. `cp .env.example .env` and set `DISCORD_BOT_TOKEN` plus at least one model key (`DEEPSEEK_API_KEY`,
-   `OPENAI_API_KEY`, `GEMINI_API_KEY` or `CLAUDE_API_KEY`).
-4. `venv/bin/python -m core`. It prints an invite link if the bot is in no server yet.
-5. DM the bot, or mention it (or reply to it) in a server. The application's owner is the bot's owner:
-   approvals (`$approve <id>`) arrive in their DM.
+2. `venv/bin/python -m core setup`. It asks for a model key (DeepSeek, OpenAI, Gemini or Claude) and tests
+   it, lets you switch modules on or off, and asks what the modules need: for Discord, the token of a bot
+   from the [Developer Portal](https://discord.com/developers/applications) (Bot → Reset Token, and turn
+   on **Message Content Intent**), which it logs in with to check and gives you the invite link. Secrets
+   are typed hidden and kept only in `.env`.
+3. `venv/bin/python -m core`. At that console you are the bot's creator and can talk to it right away,
+   even with nothing else connected.
+4. DM the bot on Discord, or mention it (or reply to it) in a server. The Discord application's owner is
+   the bot's creator there; approvals arrive in their DM with Approve and Deny buttons.
 
-`core.yml` is optional. Copy [`core.example.yml`](core.example.yml) to change models, personas, which
-channels the bot answers in and how, or to turn modules off. `venv/bin/python -m core --check` validates
-the configuration and every module without starting anything.
+Later changes: run the setup again, or type `$setup` to the bot as its creator (modules and their
+settings; never secrets). Shared settings (owners, models, personas, which channels it answers in) live
+in `core.yml` (see [`core.example.yml`](core.example.yml)); `venv/bin/python -m core --check` validates
+everything without starting.
 
 ## What it can do
 

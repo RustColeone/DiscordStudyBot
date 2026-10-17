@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from contracts import Capability, Command, Contributions, Extension, FileRef, Option, Risk, ToolResult
+from contracts import Capability, Command, Contributions, Extension, Setting, FileRef, Option, Risk, ToolResult
 
 from . import clip, video
 
@@ -231,4 +231,6 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("media", setup, contracts="1", version="1",
-                      description="Video downloads and clips fitted to upload limits")
+                      description="Video downloads and clips fitted to upload limits", settings=(
+    Setting("keep_dir", "Where --keep-file copies go (relative to the module's data folder)", "path", "clips"),
+))

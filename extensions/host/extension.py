@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-from contracts import Capability, Command, Contributions, Extension, FileRef, Option, Risk, ToolResult
+from contracts import Capability, Command, Contributions, Extension, Setting, FileRef, Option, Risk, ToolResult
 
 from .desktop import Desktop, DesktopError, free_name
 
@@ -193,4 +193,6 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("host", setup, contracts="1", version="1",
-                      description="This computer's screen, files, clipboard and apps, for the creator")
+                      description="This computer's screen, files, clipboard and apps, for the creator", settings=(
+    Setting("downloads_dir", "Where $savefile puts attachments", "path", "~/Downloads"),
+))

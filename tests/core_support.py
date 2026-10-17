@@ -64,7 +64,10 @@ def make_config(tmp: Path, overrides: dict | None = None) -> CoreConfig:
     raw = merge(raw, overrides or {})
     # Tests name exactly the modules they load (`extensions`: a list of folders), with no folder scanning.
     raw["modules"] = {"dirs": [], "paths": raw.pop("extensions"), **(raw.get("modules") or {})}
-    return CoreConfig(raw, tmp)
+    config = CoreConfig(raw, tmp)
+    config.file = tmp / "core.yml"  # $setup must never edit the repository's own core.yml
+    config.env_file = tmp / ".env"
+    return config
 
 
 async def start_core(tmp: Path, overrides: dict | None = None, adapter: FakeAdapter | None = None,

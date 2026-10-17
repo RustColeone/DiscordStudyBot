@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contracts import Contributions, Extension
+from contracts import Contributions, Extension, Setting
 
 from .engine import RoomEngine
 from .personas import PERSONAS
@@ -18,4 +18,7 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("room", setup, contracts="1", version="1",
-                      description="Shared room: several personas work one request together")
+                      description="Shared room: several personas work one request together", settings=(
+    Setting("max_steps", "Most work-board steps per request", "number", 24),
+    Setting("history_limit", "Earlier messages the room reads", "number", 16),
+))

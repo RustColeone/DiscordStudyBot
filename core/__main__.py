@@ -1,4 +1,4 @@
-"""Run the core: `python -m core --config core.yml`."""
+"""Run the core: `python -m core --config core.yml`, or set it up: `python -m core setup`."""
 
 from __future__ import annotations
 
@@ -17,11 +17,15 @@ def describe(core: Core) -> None:
           f"interfaces: {', '.join(core.gateway.interfaces) or 'none'}; "
           f"model providers with keys: {', '.join(configured) or 'none'}", flush=True)
     if not configured:
-        print("[core] No model provider key found. Set one of DEEPSEEK_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY "
-              "or CLAUDE_API_KEY in .env; until then requests fail.", flush=True)
+        print("[core] No model key yet, so questions cannot be answered (commands still work). Run "
+              "`venv/bin/python -m core setup` to add one.", flush=True)
 
 
 async def main(arguments: argparse.Namespace) -> int:
+    if arguments.command == "setup":
+        from core.wizard import Wizard
+        # A --config that does not exist yet is created by the setup.
+        return await Wizard(arguments.config or config_path(None)).run()
     path = config_path(arguments.config)
     core = Core(CoreConfig.load(path))
     print(f"[core] configuration: {path or 'built-in defaults (no core.yml)'}", flush=True)
@@ -57,7 +61,9 @@ async def main(arguments: argparse.Namespace) -> int:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the bot core with its configured extensions.")
+    parser = argparse.ArgumentParser(description="Run the bot core with its configured modules.")
+    parser.add_argument("command", nargs="?", choices=("run", "setup"), default="run",
+                        help="run the bot (default), or set it up: keys, modules and settings, step by step")
     parser.add_argument("--config", default=None,
                         help="configuration merged over the built-in defaults (default: ./core.yml if present)")
     parser.add_argument("--check", action="store_true", help="load and validate extensions, then exit")

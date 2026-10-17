@@ -168,7 +168,8 @@ class DiscordInterface(Interface):
         self.port = port
         self._prune_attachments()
         if not self.token:
-            print("[discord] No bot token: set DISCORD_BOT_TOKEN in .env. Discord is not connected.", flush=True)
+            print("[discord] No bot token, so Discord is not connected. Run `venv/bin/python -m core setup` "
+                  "(or set DISCORD_BOT_TOKEN in .env).", flush=True)
             port.log("token_missing")
             port.set_ready(False, "No Discord bot token is configured.")
             return

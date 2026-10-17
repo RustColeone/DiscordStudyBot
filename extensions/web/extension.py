@@ -9,7 +9,7 @@ import os
 
 import requests
 
-from contracts import Capability, Contributions, Extension, FileRef, Risk, ToolResult
+from contracts import Capability, Contributions, Extension, Setting, FileRef, Risk, ToolResult
 
 from . import wolfram
 from .images import ImageUnavailable, locate_image
@@ -216,4 +216,9 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("web", setup, contracts="1", version="1",
-                      description="Web search, page reading, images, maps and Wolfram|Alpha")
+                      description="Web search, page reading, images, maps and Wolfram|Alpha", settings=(
+    Setting("wolfram_appid", "Wolfram|Alpha AppID for $wolfram (developer.wolframalpha.com)", "secret",
+            env="WOLFRAM_APPID"),
+    Setting("searxng_url", "A SearXNG server for $search, e.g. http://localhost:8080", "text", ""),
+    Setting("grounding", "Search with Google through Gemini first", "boolean", True),
+))

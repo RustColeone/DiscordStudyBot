@@ -74,7 +74,13 @@ ROUTINE_COMMAND = Command(
               "weekdays 09:00 what's on my reminders?", "delete r1a2b3"),
     admin_help="Admins see and manage every conversation's routines (`$routine` lists them all), have no "
                "limits, and can add one elsewhere with `--chat <address>`.")
-BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND)
+SETUP_COMMAND = Command(
+    "setup", "Modules and their settings: show, switch on or off, change (creator)",
+    (Option("args", "[module] [setting] [value] | on|off <module>"),), access="creator",
+    examples=("", "discord", "discord thread_channels 123456789012345678", "off terminal", "on terminal"),
+    admin_help="Changes are saved to the module's config.yml (switching modules: core.yml) and take effect after "
+               "a restart. Secrets (tokens, keys) are only set on the machine: python -m core setup.")
+BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND, SETUP_COMMAND)
 CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
 LEVELS = {"member": 0, "admin": 1, "creator": 2}
 
@@ -116,7 +122,9 @@ class Manager:
         self.settings = tank.store("core:settings")
         self.owners = owners
         self._control_config = control
+        self.setup_desk = None  # core.setup.Setup, attached by the app for `$setup`
         self._control_reported: Address | None = None
+        self._control_fallback: Address | None = None
         self.data_dir = Path(data_dir)
         self.audit = audit or Audit()
         self.engines: dict[str, Engine] = {}
@@ -136,11 +144,13 @@ class Manager:
 
     @property
     def control(self) -> Address | None:
-        return self._control_config or self._control_reported
+        return self._control_config or self._control_reported or self._control_fallback
 
-    def report_owners(self, interface: str, ids, control: Address | None) -> None:
+    def report_owners(self, interface: str, ids, control: Address | None, fallback: bool = False) -> None:
         self.owners.report(interface, ids)
-        if control is not None:
+        if control is not None and fallback:
+            self._control_fallback = control
+        elif control is not None:
             self._control_reported = control
         self.audit.record("owners_reported", interface=interface, count=len(list(ids)),
                           control=str(self.control) if self.control else None)
@@ -852,8 +862,9 @@ class Manager:
         name, rest = name.strip().lower(), rest.strip()
         owner = self.is_owner(request)
         level = LEVELS[self.access_of(request)]
-        self.tank.record_message(str(request.address), "in", request.text, sender_id=request.sender.id,
-                                 sender_name=request.sender.name, message_id=request.id, at=request.received_at)
+        if name != "setup":  # $setup lines stay out of history, in case one carries a pasted secret
+            self.tank.record_message(str(request.address), "in", request.text, sender_id=request.sender.id,
+                                     sender_name=request.sender.name, message_id=request.id, at=request.received_at)
 
         async def say(message: str, private: bool = False) -> None:
             await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id, private=private))
@@ -861,7 +872,7 @@ class Manager:
         # A routine a model set up acts as its creator but cannot speak for them: its $commands are not
         # their approval, and the creator-only built-ins are closed to it.
         vouched = self.vouched(request)
-        if not vouched and name in ("approve", "deny", "admin", "call"):
+        if not vouched and name in ("approve", "deny", "admin", "call", "setup"):
             await say(f"A routine set up through a tool cannot use ${name}; type `$routine` yourself for that.")
             return
         if name in ("approve", "deny"):
@@ -908,6 +919,13 @@ class Manager:
                     await self._command_run(request, capability, "", owner, arguments)
         elif name == "help":
             await say(self.help_text(rest, request), private=True)
+        elif name == "setup":
+            if level < LEVELS["creator"] or self.setup_desk is None:
+                await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
+                return
+            from core.setup import command as setup_command
+            await say(await setup_command(self.setup_desk, rest, request.address.interface,
+                                          request.display.markdown), private=True)
         else:
             capability = next((c for c in self.capabilities.values() if c.command and c.command.name == name), None)
             if capability is None:

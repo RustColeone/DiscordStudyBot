@@ -1,3 +1,4 @@
+# `venv/bin/python -m core setup` writes what it needs here for you; edit by hand for the rest.
 # Optional overrides for `python -m core`. Without a core.yml the built-in defaults are used
 # (core/defaults.py): every module, any model provider whose key is
 # in .env, owner = DISCORD_OWNER_ID or else the Discord application's owner.

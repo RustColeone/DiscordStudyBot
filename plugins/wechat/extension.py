@@ -22,7 +22,7 @@ core configuration (admission rules and assignments), not interface logic.
 import os
 from pathlib import Path
 
-from contracts import Contributions, Extension
+from contracts import Contributions, Extension, Setting
 
 from .interface import WeChatInterface
 from .persona import PERSONA
@@ -70,4 +70,8 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("wechat", setup, contracts="1", version="1",
-                      description="WeChat account: native database reads, desktop sends, owner operations")
+                      description="WeChat account: native database reads, desktop sends, owner operations", settings=(
+    Setting("database_root", "The account's …/xwechat_files/wxid_…/db_storage folder (see docs/WECHAT.md)", "path"),
+    Setting("database_keys", "Key file from key_setup (default: in the module's data folder)", "path"),
+    Setting("max_text_chars", "Length replies aim for", "number", 500),
+))

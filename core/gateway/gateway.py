@@ -75,10 +75,10 @@ class Port:
     def set_ready(self, ready: bool, detail: str = "") -> None:
         self._gateway.set_ready(self.name, ready, detail)
 
-    def set_owners(self, sender_ids, control: Address | None = None) -> None:
+    def set_owners(self, sender_ids, control: Address | None = None, *, fallback: bool = False) -> None:
         if control is not None:
             self._own(control)
-        self._gateway.manager.report_owners(self.name, list(sender_ids), control)
+        self._gateway.manager.report_owners(self.name, list(sender_ids), control, fallback=fallback)
 
     def _own(self, address: Address) -> None:
         if address.interface != self.name:

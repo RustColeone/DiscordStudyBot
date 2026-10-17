@@ -71,6 +71,8 @@ class Core:
                               engines=[e.spec.name for e in loaded.contributions.engines],
                               capabilities=[c.name for c in loaded.contributions.capabilities])
         self.manager.attach_gateway(self.gateway)
+        from core.setup import Setup
+        self.manager.setup_desk = Setup(config)
         problems = self.manager.problems()
         if config.control is not None and config.control.interface not in self.gateway.interfaces:
             problems.append(f"control route {config.control} uses an interface that is not loaded")

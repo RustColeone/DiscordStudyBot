@@ -128,7 +128,8 @@ assignment was set do not start runs under it. The most specific pattern wins
 
 Owners and the control route come from `core.yml`. An interface may report the platform's own owner
 (`port.set_owners`, e.g. the Discord application owner and their DM); that is used only for interfaces
-with no configured owners and when no control route is configured.
+with no configured owners and when no control route is configured. A reported control route marked
+`fallback` (the CLI at an interactive terminal) is used only when no interface reports a real one.
 
 ## Access levels
 
@@ -198,6 +199,7 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
 | [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
+| [`core/setup.py`](../../core/setup.py), [`core/wizard.py`](../../core/wizard.py) | Setting up: module settings, file edits (one key at a time), `$setup`, and the guided `python -m core setup` |
 
 Run with `python -m core` (`--check` validates the modules and exits). Without a `core.yml` the
 built-in defaults in [`core/defaults.py`](../../core/defaults.py) apply: every module in `extensions/`

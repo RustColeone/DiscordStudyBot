@@ -1,6 +1,6 @@
 """Built-in reference engine extension."""
 
-from contracts import Contributions, Extension
+from contracts import Contributions, Extension, Setting
 
 from .engine import AssistantEngine
 
@@ -13,4 +13,8 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("assistant", setup, contracts="1", version="1",
-                      description="Single-persona tool-using engine (reference implementation)")
+                      description="Single-persona tool-using engine (reference implementation)", settings=(
+    Setting("max_steps", "Most tool rounds per request", "number", 8),
+    Setting("history_limit", "Earlier messages the assistant reads", "number", 16),
+    Setting("effort", "Reasoning effort: low, medium or high", "text", "low"),
+))

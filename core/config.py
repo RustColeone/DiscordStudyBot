@@ -40,6 +40,9 @@ class CoreConfig:
 
     def __init__(self, raw: dict[str, Any], base_dir: Path):
         self.raw, self.base_dir = raw, base_dir
+        # Where setup writes: the core.yml this came from (None: built-in defaults only) and the .env file.
+        self.file: Path | None = None
+        self.env_file: Path = base_dir / ".env"
         for legacy in ("extensions", "plugin_dirs"):
             if legacy in raw:
                 raise ConfigError(f"`{legacy}:` is no longer used: every module in extensions/ and plugins/ loads. "
@@ -70,8 +73,8 @@ class CoreConfig:
         except (KeyError, TypeError) as error:
             raise ConfigError(f"Invalid persona or assignment: {error}") from error
 
-    def modules(self) -> list[Path]:
-        """The module folders to load, built-in ones first, each once, without the excluded ones."""
+    def all_modules(self) -> list[Path]:
+        """Every module folder, excluded ones too, built-in ones first, each once."""
         candidates = []
         for directory in self.module_dirs:
             if directory.is_dir():
@@ -79,11 +82,14 @@ class CoreConfig:
         candidates.extend(self.module_paths)
         found, seen = [], set()
         for path in candidates:
-            if path.resolve() in seen or self.excluded(path):
-                continue
-            seen.add(path.resolve())
-            found.append(path)
+            if path.resolve() not in seen:
+                seen.add(path.resolve())
+                found.append(path)
         return found
+
+    def modules(self) -> list[Path]:
+        """The module folders to load: all of them except the excluded ones."""
+        return [path for path in self.all_modules() if not self.excluded(path)]
 
     def excluded(self, path: Path) -> bool:
         parts = path.resolve().parts
@@ -115,9 +121,9 @@ class CoreConfig:
             if not isinstance(raw, dict):
                 raise ConfigError("The core configuration must be a mapping")
             base = path.parent
-        for env_file in raw.get("env_files", [".env"]):
-            path_value = Path(os.path.expanduser(str(env_file)))
-            load_env_file(path_value if path_value.is_absolute() else (base / path_value))
+        env_files = [cls._resolve(item, base) for item in raw.get("env_files", [".env"])]
+        for env_file in env_files:
+            load_env_file(env_file)
         if base != ROOT and "env_files" not in raw:
             load_env_file(ROOT / ".env")
         defaults = default_config()
@@ -130,7 +136,10 @@ class CoreConfig:
             for key in ("dirs", "paths"):
                 if key in modules:
                     modules[key] = [str(cls._resolve(item, base)) for item in modules[key]]
-        return cls(merge(defaults, raw), base)
+        config = cls(merge(defaults, raw), base)
+        config.file = path if path is not None and Path(path).is_file() else None
+        config.env_file = env_files[0] if env_files else base / ".env"
+        return config
 
     @staticmethod
     def _resolve(value, base: Path) -> Path:

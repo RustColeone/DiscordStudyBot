@@ -16,10 +16,25 @@ from __future__ import annotations
 
 import os
 
-from contracts import Contributions, Extension, Persona
+from contracts import Contributions, Extension, Persona, Setting
 
 from .bot import WhaleChanBot
 from .engine import ChatEngine
+
+
+async def check_token(token: str) -> str:
+    """Log in with the token over HTTP and name the bot."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.get("https://discord.com/api/v10/users/@me",
+                                   headers={"Authorization": f"Bot {token.strip()}"}) as response:
+                if response.status != 200:
+                    raise ValueError("Discord rejected this token" if response.status == 401
+                                     else f"Discord answered HTTP {response.status}")
+                return f"logs in as {(await response.json()).get('username')}"
+    except aiohttp.ClientError as error:
+        raise ValueError(f"Could not reach Discord: {type(error).__name__}")
 
 WHALE = (
     "【PERSONA_LOAD】\nCETACEA_LOLI\nMODE_TAIL_FLUKES\nSELF_CLAIM_WHALE_GIRL\nFOOD_RICE\nPERSONALITY_SMART_LAZY\n"
@@ -59,4 +74,9 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("whale_chan", setup, contracts="1", version="1",
-                      description="Example drop-in: 鲸酱, a personal AI chat client as her own Discord bot (DeepSeek)")
+                      description="Example drop-in: 鲸酱, a personal AI chat client as her own Discord bot (DeepSeek)",
+                      settings=(
+    Setting("token", "鲸酱's own Discord bot token (a second application in the Developer Portal)", "secret",
+            env="DISCORD_BOT_TOKEN_WHALE_CHAN", check=check_token),
+    Setting("display_name", "Her name", "text", "鲸酱"),
+))
