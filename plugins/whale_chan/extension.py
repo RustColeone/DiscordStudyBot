@@ -7,8 +7,7 @@ changes to core.yml. Without a token the engine and persona still load, so the `
 `whale_chan` persona can be assigned to any conversation.
 
 It contributes: the `whale_chan` interface (the Discord bot), the `chat` engine, the `whale_chan`
-persona, the `whale_chan` model profile (DeepSeek V4 Pro; DeepSeek Flash for images and as fallback) and
-defaults for its own
+persona, the `whale_chan` model profile (DeepSeek Flash) and defaults for its own
 conversations (`whale_chan:*` uses the chat engine; in servers it answers mentions and replies).
 core.yml settings win over all of these.
 """
@@ -32,11 +31,7 @@ WHALE = (
     "\n\n你是主人的私人 AI 助手，就像主人专属的聊天网页客户端：认真、完整、准确地回答问题，写代码、讲解知识、分析资料、"
     "帮忙查资料都要做到可靠好用。人设体现在语气和小细节里，不要让卖萌盖过内容；回答技术或学习问题时以清楚和正确为先。"
 )
-# V4 Pro answers text; it cannot see images, so requests with images go to Flash first.
-MODELS = [
-    {"provider": "deepseek", "model": "deepseek-v4-pro", "vision": False},
-    {"provider": "deepseek", "model": "deepseek-flash"},
-]
+MODELS = [{"provider": "deepseek", "model": "deepseek-flash"}]
 
 
 def setup(context) -> Contributions:

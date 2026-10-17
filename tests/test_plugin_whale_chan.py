@@ -108,7 +108,7 @@ class WhaleChanSetupTests(unittest.TestCase):
         self.assertEqual(([e.spec.name for e in contributions.engines], [p.name for p in contributions.personas],
                           list(contributions.interfaces)), (["chat"], ["whale_chan"], []))
         self.assertEqual([(c["model"], c.get("vision", True)) for c in contributions.profiles["whale_chan"]],
-                         [("deepseek-v4-pro", False), ("deepseek-flash", True)])
+                         [("deepseek-flash", True)])
 
     def test_the_token_comes_from_the_environment_or_the_local_config(self):
         from_env = self.setup_with({}, {"DISCORD_BOT_TOKEN_WHALE_CHAN": "secret"})
