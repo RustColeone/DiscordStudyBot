@@ -13,7 +13,7 @@ class ReminderTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         tmp = Path(self._tmp.name)
-        extensions = [*make_config(tmp).raw["extensions"], str(ROOT / "extensions" / "reminders")]
+        extensions = [*make_config(tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "reminders")]
         self.core = await start_core(tmp, {"extensions": extensions, "assignments": {
             "*": {"engine": "probe", "personas": ["p"], "preapprove": ["reminders.create", "reminders.cancel"]}}})
         self.chat = iface(self.core)

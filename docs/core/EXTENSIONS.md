@@ -1,6 +1,9 @@
-# Writing extensions
+# Writing modules
 
-An extension is a directory with an `extension.py`. It can add **interfaces** (platform
+A module is a directory with an `extension.py` (the contract still calls the declaration an
+`Extension`). Built-in modules live in [`extensions/`](../../extensions) and are maintained and tested
+with the core; external ones are dropped into [`plugins/`](../../plugins) or live elsewhere. Every
+module loads unless `core.yml` excludes it. A module can add **interfaces** (platform
 connections), **engines** (turn loops), **capabilities** (actions) and default **personas**, in any
 combination. The core treats your code as a black box and you treat the core as one: the only shared
 code is the [`contracts`](../../contracts) package, which is the complete public API. This guide
@@ -124,16 +127,19 @@ EXTENSION = Extension("my_extension", setup, contracts="1", version="1", descrip
 * `setup` may be `async`. It runs once at startup; start network loops in `Interface.start`, not here.
   Objects created in `setup` may be shared by your interface, engines and capabilities.
 * `contracts="1"` is the contracts major version you target; a mismatch refuses to load.
-* **Drop-in:** put the folder into `plugins/` and restart; every folder there with an `extension.py`
-  loads without touching `core.yml` (`plugin_dirs` lists the drop-in directories; default `plugins/`).
-  Folders in `plugins/` and every `config.yml` are git-ignored; an extension that is its own repository
-  should also ship a `.gitignore` listing `config.yml`. [`plugins/whale_chan`](../../plugins/whale_chan)
-  is a complete example: a second Discord bot with its own engine and persona.
-* Or list a folder from any repository in `core.yml`:
+* **Loading:** every folder with an `extension.py` in `extensions/` (built-in) and `plugins/`
+  (external) loads at startup, built-in ones first; drop a folder into `plugins/` and restart. Folders
+  in `plugins/` and every `config.yml` are git-ignored (except the tracked `whale_chan` example and
+  `wechat`); a module that is its own repository should also ship a `.gitignore` listing `config.yml`.
+  [`plugins/whale_chan`](../../plugins/whale_chan) is a complete example: a second Discord bot with
+  its own engine and persona. A module every install gets but few use should stay dormant until it is
+  configured (as `wechat` does: no contributions without settings).
+* `core.yml` turns modules off and adds folders from elsewhere (external):
 
 ```yaml
-extensions:
-  - ../MusicManager/bot_extension
+modules:
+  exclude: [extensions/terminal, whale_chan]   # a path ending or a folder name; never imported
+  paths: [../MusicManager/bot_extension]
 extension_config:
   my_extension: {some_option: 1}      # merged over the folder's config.yml into context.config
 ```
@@ -149,8 +155,8 @@ extension_config:
   interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load).
   core.yml and runtime edits always win.
 
-`python -m core --config core.yml --check` loads and validates every extension and lists what each
-contributes, without starting anything.
+`python -m core --config core.yml --check` loads and validates every module, marks it built-in or
+external, and lists what each contributes, without starting anything.
 
 ## Interfaces
 
@@ -551,7 +557,8 @@ to the bot like a mention, without the prefix), `thread_channels` (channel IDs w
 ### The included terminal
 
 [`extensions/terminal`](../../extensions/terminal/extension.py) is a shell on the bot's machine for the
-creator only. It is off unless listed in `core.yml`. Each conversation has its own long-lived shell
+creator only. It loads with the other built-in modules; turn it off with
+`modules: {exclude: [extensions/terminal]}`. Each conversation has its own long-lived shell
 (PowerShell on Windows, bash on Linux), so `cd` and variables persist between inputs. There are three
 ways in:
 
@@ -569,7 +576,6 @@ ways in:
   Nobody but the creator can reach the shell, by command, terminal conversation or model.
 
 ```yaml
-extensions: [..., extensions/terminal]
 assignments:
   "discord:123456789012345678": {engine: terminal, persona: terminal}
 admission:

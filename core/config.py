@@ -31,11 +31,27 @@ def load_env_file(path: Path) -> None:
 
 
 class CoreConfig:
+    """`modules` decides what loads: every module folder (one with an `extension.py`) in `modules.dirs`
+    (default: `extensions/`, the built-in modules, then `plugins/`, external ones), plus the folders
+    in `modules.paths` (external), except those in `modules.exclude` (a folder name such as `terminal`,
+    or a path ending such as `extensions/terminal`). Excluded modules are not imported."""
+
+    MODULE_KEYS = frozenset({"dirs", "paths", "exclude"})
+
     def __init__(self, raw: dict[str, Any], base_dir: Path):
         self.raw, self.base_dir = raw, base_dir
+        for legacy in ("extensions", "plugin_dirs"):
+            if legacy in raw:
+                raise ConfigError(f"`{legacy}:` is no longer used: every module in extensions/ and plugins/ loads. "
+                                  "Remove it; list modules not to load under `modules: {exclude: [...]}` and folders "
+                                  "elsewhere under `modules: {paths: [...]}`.")
+        modules = raw.get("modules") or {}
+        if not isinstance(modules, dict) or set(modules) - self.MODULE_KEYS:
+            raise ConfigError(f"`modules:` takes only {sorted(self.MODULE_KEYS)}")
         self.data_dir = self.path(raw.get("data_dir", "data/core"))
-        self.extensions = [self.path(item) for item in raw.get("extensions", [])]
-        self.plugin_dirs = [self.path(item) for item in raw.get("plugin_dirs", [])]
+        self.module_dirs = [self.path(item) for item in modules.get("dirs", [])]
+        self.module_paths = [self.path(item) for item in modules.get("paths", [])]
+        self.exclude = [str(item).strip().strip("/") for item in modules.get("exclude", []) if str(item).strip()]
         self.extension_config = dict(raw.get("extension_config") or {})
         self.providers = dict(raw.get("providers") or {})
         self.profiles = dict(raw.get("profiles") or {})
@@ -54,15 +70,34 @@ class CoreConfig:
         except (KeyError, TypeError) as error:
             raise ConfigError(f"Invalid persona or assignment: {error}") from error
 
-    def plugins(self) -> list[Path]:
-        """Drop-in extensions: every folder with an extension.py in a plugin directory, not listed already."""
-        listed = {path.resolve() for path in self.extensions}
-        found = []
-        for directory in self.plugin_dirs:
+    def modules(self) -> list[Path]:
+        """The module folders to load, built-in ones first, each once, without the excluded ones."""
+        candidates = []
+        for directory in self.module_dirs:
             if directory.is_dir():
-                found.extend(path for path in sorted(directory.iterdir())
-                             if (path / "extension.py").is_file() and path.resolve() not in listed)
+                candidates.extend(path for path in sorted(directory.iterdir()) if (path / "extension.py").is_file())
+        candidates.extend(self.module_paths)
+        found, seen = [], set()
+        for path in candidates:
+            if path.resolve() in seen or self.excluded(path):
+                continue
+            seen.add(path.resolve())
+            found.append(path)
         return found
+
+    def excluded(self, path: Path) -> bool:
+        parts = path.resolve().parts
+        for entry in self.exclude:
+            wanted = Path(entry).parts
+            if parts[-len(wanted):] == wanted or (len(wanted) > 1 and path.resolve() == self.path(entry)):
+                return True
+        return False
+
+    @staticmethod
+    def builtin(path: Path) -> bool:
+        """Built-in modules are the ones shipped in this repository's `extensions/`."""
+        from core.defaults import ROOT
+        return path.resolve().parent == ROOT / "extensions"
 
     def path(self, value: str) -> Path:
         path = Path(os.path.expanduser(str(value)))
@@ -90,9 +125,11 @@ class CoreConfig:
         for key in ("data_dir",):
             if key in raw:
                 raw[key] = str(cls._resolve(raw[key], base))
-        for key in ("extensions", "plugin_dirs"):
-            if key in raw:
-                raw[key] = [str(cls._resolve(item, base)) for item in raw[key]]
+        modules = raw.get("modules")
+        if isinstance(modules, dict):
+            for key in ("dirs", "paths"):
+                if key in modules:
+                    modules[key] = [str(cls._resolve(item, base)) for item in modules[key]]
         return cls(merge(defaults, raw), base)
 
     @staticmethod

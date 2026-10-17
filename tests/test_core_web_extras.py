@@ -75,7 +75,7 @@ class WebExtrasCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.tmp = Path(self._tmp.name)
-        extensions = [*make_config(self.tmp).raw["extensions"], str(ROOT / "extensions" / "web")]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "web")]
         self.core = await start_core(self.tmp, {"extensions": extensions})
         self.module = extension_module(self.core, "web")
         package = self.module.__name__.rsplit(".", 1)[0]

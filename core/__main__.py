@@ -13,7 +13,7 @@ from core.config import CoreConfig
 
 def describe(core: Core) -> None:
     configured = core.providers.configured()
-    print(f"[core] extensions: {', '.join(item.extension.name for item in core.extensions)}; "
+    print(f"[core] modules: {', '.join(item.extension.name for item in core.extensions)}; "
           f"interfaces: {', '.join(core.gateway.interfaces) or 'none'}; "
           f"model providers with keys: {', '.join(configured) or 'none'}", flush=True)
     if not configured:
@@ -29,7 +29,8 @@ async def main(arguments: argparse.Namespace) -> int:
         await core.build()
         for loaded in core.extensions:
             contributions = loaded.contributions
-            print(f"{loaded.extension.name} ({loaded.path}): "
+            kind = "built-in" if core.config.builtin(loaded.path) else "external"
+            print(f"{loaded.extension.name} ({kind}, {loaded.path}): "
                   f"interfaces={[i.name for i in contributions.interfaces]} "
                   f"engines={[e.spec.name for e in contributions.engines]} "
                   f"capabilities={[c.name for c in contributions.capabilities]}")

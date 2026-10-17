@@ -90,7 +90,7 @@ class LoaderTests(unittest.IsolatedAsyncioTestCase):
             EXTENSION = Extension("music", lambda ctx: Contributions(capabilities=[
                 Capability("music.hello", "Say hello", hello)]))
             """, "def greeting():\n    return 'hi from helper'\n")
-        core = new_core(make_config(self.tmp, {"extensions": [*make_config(self.tmp).raw["extensions"], str(path)]}))
+        core = new_core(make_config(self.tmp, {"extensions": [*make_config(self.tmp).raw["modules"]["paths"], str(path)]}))
         await core.build()
         self.assertIn("music.hello", core.manager.capabilities)
         self.assertEqual((await core.manager.capabilities["music.hello"].run({}, None)).summary, "hi from helper")

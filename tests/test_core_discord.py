@@ -460,14 +460,18 @@ class TokenTests(unittest.TestCase):
 
 
 class DefaultConfigurationTests(unittest.TestCase):
-    def test_fresh_clone_defaults_load_discord_assistant_and_basic(self):
+    def test_fresh_clone_defaults_load_every_built_in_module_then_the_external_ones(self):
         import os
         from unittest.mock import patch
         from core.config import CoreConfig
         with patch.dict(os.environ, {"DISCORD_OWNER_ID": "", "CREATOR_USER_ID": ""}):
             config = CoreConfig.load(None)
-        self.assertEqual([Path(path).name for path in config.extensions],
-                         ["discord", "assistant", "basic", "media", "images", "system", "reminders", "web", "room"])
+        modules = config.modules()
+        built_in = sorted(path.name for path in (ROOT / "extensions").iterdir() if (path / "extension.py").is_file())
+        self.assertEqual([path.name for path in modules if config.builtin(path)], built_in)
+        self.assertTrue({"discord", "assistant", "terminal", "cli"} <= set(built_in))
+        self.assertEqual(modules[:len(built_in)], [path for path in modules if config.builtin(path)])
+        self.assertTrue({"wechat", "whale_chan"} <= {path.name for path in modules if not config.builtin(path)})
         self.assertEqual(config.profiles["gemini"][:2], [{"provider": "gemini", "model": "gemini-3.8-flash"},
                                                          {"provider": "gemini", "model": "gemini-3.6-flash"}])
         self.assertEqual(len(config.profiles["luna"]), 4)
@@ -486,6 +490,25 @@ class DefaultConfigurationTests(unittest.TestCase):
         self.assertIn("*", config.assignments)
         self.assertFalse(config.assignments["discord:123"].enabled)
         self.assertEqual(str(config.control), "discord:dm:77")
+
+    def test_modules_are_excluded_by_name_or_path_added_by_path_and_old_keys_explain_themselves(self):
+        from core.config import ConfigError, CoreConfig
+        with tempfile.TemporaryDirectory() as directory:
+            extra = Path(directory) / "elsewhere" / "mine"
+            extra.mkdir(parents=True)
+            (extra / "extension.py").write_text("")
+            override = Path(directory) / "core.yml"
+            override.write_text("env_files: []\nmodules:\n  exclude: [extensions/terminal, cli, plugins/wechat]\n"
+                                "  paths: [elsewhere/mine]\n")
+            config = CoreConfig.load(override)
+            names = [path.name for path in config.modules()]
+            self.assertFalse({"terminal", "cli", "wechat"} & set(names))
+            self.assertIn("discord", names)
+            self.assertEqual(names[-1], "mine")
+            self.assertFalse(config.builtin(config.modules()[-1]))
+            override.write_text("env_files: []\nextensions: [extensions/discord]\n")
+            with self.assertRaisesRegex(ConfigError, "no longer used"):
+                CoreConfig.load(override)
 
 
 if __name__ == "__main__":

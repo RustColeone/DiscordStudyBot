@@ -1,5 +1,5 @@
 # Optional overrides for `python -m core`. Without a core.yml the built-in defaults are used
-# (core/defaults.py): Discord + the assistant engine + basic tools, any model provider whose key is
+# (core/defaults.py): every module, any model provider whose key is
 # in .env, owner = DISCORD_OWNER_ID or else the Discord application's owner.
 #
 # Copy to core.yml and keep only what you change. Mappings merge with the defaults key by key;
@@ -9,28 +9,19 @@
 # env_files: [.env]            # KEY=VALUE files; never override variables already set
 # audit_echo: false            # also print audit events to stdout
 
-# Replaces the default list (discord, assistant, basic, media, images, system, reminders, web, room). Add the CLI for
-# local testing, or external extensions from other repositories.
-# extensions:
-#   - extensions/discord
-#   - extensions/assistant
-#   - extensions/basic
-#   - extensions/media           # $video downloads and $clip previews/clips, fitted to the upload limit (yt-dlp + ffmpeg)
-#   - extensions/images          # $draw: Gemini or OpenAI images
-#   - extensions/system          # $status: host status
-#   - extensions/reminders       # $remind 10m drink water, $reminders, $unremind <id>
-#   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>,
-#                                #   image search, Google Maps, $wolfram <query> (needs WOLFRAM_APPID in .env)
-#   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
-#   (WeChat is the drop-in plugins/wechat: it loads by itself once extension_config.wechat is set; docs/WECHAT.md)
-#   - extensions/cli
-#   - extensions/terminal        # creator-only shell on this machine: $t <line>, or a terminal channel
-#                                #   (assignment {engine: terminal, persona: terminal}); see docs/core/EXTENSIONS.md
-#   - ../AudioManager/bot_extension
-
-# Drop-in folders: every subfolder with an extension.py loads automatically (default [plugins]).
-# Each extension folder may keep a git-ignored config.yml; extension_config below overrides it.
-# plugin_dirs: [plugins]
+# Modules: every folder with an extension.py loads, the built-in ones in extensions/ first, then the
+# external ones in plugins/. Turn one off by folder (extensions/terminal) or by name (terminal), and
+# add module folders that live elsewhere (they count as external). Built-in modules:
+#   discord, assistant, basic, cli (stdin chat, for local testing), room (luna, gemini, claude, deepseek),
+#   media ($video, $clip; yt-dlp + ffmpeg), images ($draw), system ($status), reminders ($remind),
+#   web ($search, $read, image search, maps, $wolfram with WOLFRAM_APPID), terminal (creator-only shell:
+#   $t <line>, a terminal channel, or the assistant with your approval; docs/core/EXTENSIONS.md).
+# External ones here: whale_chan (鲸酱), wechat (dormant until extension_config.wechat is set; docs/WECHAT.md).
+# modules:
+#   exclude: [extensions/terminal, extensions/cli]
+#   paths: [../AudioManager/bot_extension]
+#
+# Each module folder may keep a git-ignored config.yml; extension_config below overrides it.
 
 # extension_config:
 #   discord: {token_env: [DISCORD_BOT_TOKEN, DISCORD_TOKEN, TOKEN], attachment_max_mb: 25,

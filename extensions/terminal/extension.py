@@ -7,7 +7,8 @@ Three ways in, one shell per conversation:
 * models, in runs the creator started, call `terminal.send` (each line waits for the creator's
   approval) and `terminal.peek`.
 After each input the output is shown as it arrives (every few seconds), then the last screenful once
-it goes quiet. Off unless listed in core.yml; see docs/core/EXTENSIONS.md.
+it goes quiet. Loads with the built-in modules; exclude it in core.yml to turn it off. See
+docs/core/EXTENSIONS.md.
 """
 
 from __future__ import annotations

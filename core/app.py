@@ -49,12 +49,12 @@ class Core:
         self.gateway = Gateway(self.bottle, self.manager, audit=self.audit, rules=config.rules,
                                routes=config.routes, routines=config.routines, **options)
         names = set()
-        for path in [*config.extensions, *config.plugins()]:
+        for path in config.modules():
             loaded = await load_extension(path, lambda name: config.extension_config.get(name, {}),
                                           config.data_dir / "extensions", self.audit.record)
             name = loaded.extension.name
             if name in names:
-                raise ConfigError(f"Two extensions are named {name!r}")
+                raise ConfigError(f"Two modules are named {name!r}; exclude one (`modules: {{exclude: [...]}}`)")
             names.add(name)
             for interface in loaded.contributions.interfaces:
                 self.gateway.register_interface(interface, name)
@@ -66,7 +66,7 @@ class Core:
                 self.manager.register_persona(persona, name)
             self._register_defaults(loaded)
             self.extensions.append(loaded)
-            self.audit.record("extension_loaded", extension=name, path=str(path),
+            self.audit.record("extension_loaded", extension=name, path=str(path), builtin=config.builtin(path),
                               interfaces=[i.name for i in loaded.contributions.interfaces],
                               engines=[e.spec.name for e in loaded.contributions.engines],
                               capabilities=[c.name for c in loaded.contributions.capabilities])

@@ -41,12 +41,10 @@ def default_config() -> dict:
     owner = (os.getenv("DISCORD_OWNER_ID") or os.getenv("CREATOR_USER_ID") or "").strip()
     config = {
         "data_dir": str(ROOT / "data" / "core"),
-        "extensions": [str(ROOT / "extensions" / name)
-                       for name in ("discord", "assistant", "basic", "media", "images", "system", "reminders",
-                                    "web", "room")],
+        # Every module folder (one with an extension.py) loads: the built-in ones in extensions/, then
+        # the external ones dropped into plugins/. core.yml turns some off with `modules: {exclude: [...]}`.
+        "modules": {"dirs": [str(ROOT / "extensions"), str(ROOT / "plugins")]},
         "extension_config": {},
-        # Drop-in extensions: every folder here with an extension.py loads without being listed.
-        "plugin_dirs": [str(ROOT / "plugins")],
         "providers": {
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",
                          "api_key_env": "DEEPSEEK_API_KEY", "schema_mode": "json_object", "effort_param": True},

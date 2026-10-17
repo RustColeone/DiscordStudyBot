@@ -425,7 +425,7 @@ class PluginTests(CoreCase):
 
     async def test_dropped_in_folder_loads_with_its_local_config_and_defaults(self):
         self.plugin("interface: sage_bot\n")
-        core = await self.core({"plugin_dirs": [str(self.tmp / "plugins")],
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]},
                                 "assignments": {"sage_bot:vip": {"engine": "probe", "personas": ["p"]}}})
         self.assertIn("sage_bot", core.gateway.interfaces)
         self.assertEqual(core.manager.assignment_for(Address("sage_bot", "x")).personas, ("sage",))
@@ -440,7 +440,7 @@ class PluginTests(CoreCase):
 
     async def test_core_yml_settings_override_the_local_config(self):
         self.plugin("interface: sage_bot\n")
-        core = await self.core({"plugin_dirs": [str(self.tmp / "plugins")],
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]},
                                 "extension_config": {"dropin": {"interface": "renamed"}}})
         self.assertIn("renamed", core.gateway.interfaces)
 
@@ -449,4 +449,4 @@ class PluginTests(CoreCase):
         folder = self.plugin("interface: sage_bot\n")
         (folder / "extension.py").write_text(DROP_IN.replace('name + ":*": {"engine"', '"chat:*": {"engine"'))
         with self.assertRaisesRegex(ConfigError, "only cover its own interfaces"):
-            await self.core({"plugin_dirs": [str(self.tmp / "plugins")]})
+            await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})

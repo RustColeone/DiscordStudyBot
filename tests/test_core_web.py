@@ -46,7 +46,7 @@ class WebCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         tmp = Path(self._tmp.name)
-        extensions = [*make_config(tmp).raw["extensions"], str(ROOT / "extensions" / "web")]
+        extensions = [*make_config(tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "web")]
         self.core = await start_core(tmp, {"extensions": extensions,
                                            "extension_config": {"web": {"searxng_url": "http://searx.local"}}})
         self.module = extension_module(self.core, "web")

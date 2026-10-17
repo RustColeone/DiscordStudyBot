@@ -1,7 +1,7 @@
 # Core architecture
 
 The core is a small, fixed runtime. Everything that talks to a platform, decides what to say, or
-does work is an extension plugged into one of three slots. The core and each extension see each
+does work is a module (built-in in `extensions/`, external in `plugins/`) plugged into one of three slots. The core and each extension see each
 other as black boxes; the only shared code is the [`contracts`](../../contracts) package.
 
 ```mermaid
@@ -194,13 +194,13 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`core/manager/core_capabilities.py`](../../core/manager/core_capabilities.py) | `core.*` capabilities and interface operations |
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
-| [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Extension loading and assembly |
-| [`plugins/`](../../plugins) | Drop-in extensions, loaded without being listed; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured) |
-| [`extensions/`](../../extensions) | Included: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram); optional `wechat` (account interface and persona, see [WECHAT.md](../WECHAT.md)) |
+| [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
+| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
+| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas), `terminal` (creator-only shell, also an engine); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 
-Run with `python -m core` (`--check` validates extensions and exits). Without a `core.yml` the
-built-in defaults in [`core/defaults.py`](../../core/defaults.py) apply: Discord, the assistant engine and
-basic capabilities, any provider with a key in `.env`. A `core.yml` is merged over the defaults; see
-[`core.example.yml`](../../core.example.yml); drop-in extensions in [`plugins/`](../../plugins) load
-without being listed. Extension authors should read [EXTENSIONS.md](EXTENSIONS.md).
+Run with `python -m core` (`--check` validates the modules and exits). Without a `core.yml` the
+built-in defaults in [`core/defaults.py`](../../core/defaults.py) apply: every module in `extensions/`
+(built-in) and then `plugins/` (external), any provider with a key in `.env`. A `core.yml` is merged
+over the defaults (`modules: {exclude: [...]}` turns modules off); see
+[`core.example.yml`](../../core.example.yml). Module authors should read [EXTENSIONS.md](EXTENSIONS.md).

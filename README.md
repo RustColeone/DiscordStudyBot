@@ -2,7 +2,21 @@
 
 A personal AI bot for Discord (and optionally WeChat) built on a small plug-in core. Models from
 DeepSeek, OpenAI, Gemini and Claude talk, use tools, remember people and work together; everything
-that touches a platform, decides what to say or does work is an extension.
+that touches a platform, decides what to say or does work is a module.
+
+## Design in short
+
+* **The core stays small.** It runs conversations, approvals, routines and history. It knows no platform.
+* **Everything else is a module**: an interface (Discord), an engine (the assistant), or tools.
+* **Don't touch the core if it can be a module.** If a module needs something new, add it to the
+  contracts for every module, never for one platform.
+* **Interfaces translate.** A platform's habits (slash commands, threads, reactions) become the core's
+  plain facts in its interface, so the core never special-cases a platform.
+* **`extensions/` is built-in**: maintained and tested here, trusted like the core.
+  **`plugins/` is external**: someone else's code, or code for one person or machine.
+* **Everything loads; you exclude.** Both kinds load by default; `modules: {exclude: [...]}` turns one off.
+* **Your machine is yours.** Anything that touches the computer is creator-only, and a model's
+  actions on it wait for your approval.
 
 ## Quick start
 
@@ -18,8 +32,8 @@ that touches a platform, decides what to say or does work is an extension.
    approvals (`$approve <id>`) arrive in their DM.
 
 `core.yml` is optional. Copy [`core.example.yml`](core.example.yml) to change models, personas, which
-channels the bot answers in and how, or to add extensions. `venv/bin/python -m core --check` validates
-the configuration and every extension without starting anything.
+channels the bot answers in and how, or to turn modules off. `venv/bin/python -m core --check` validates
+the configuration and every module without starting anything.
 
 ## What it can do
 
@@ -39,24 +53,25 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images; progress with a Cancel button, reactions (✅/❌/🛑) that press buttons, and optional per-task threads (`thread_channels`) |
 | Host | `$status` |
-| Terminal | Optional, creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
+| Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
 Writes (sending elsewhere, changing settings, saving notes) need the owner's approval unless an
 assignment pre-approves them. Every run is durable: approvals and questions wait across restarts.
 
-## Extensions
+## Modules
 
-Extensions live in [`extensions/`](extensions) (included) or are dropped into [`plugins/`](plugins):
-every folder there with an `extension.py` loads at startup, with its own git-ignored `config.yml`.
+A module is a folder with an `extension.py`. Built-in ones live in [`extensions/`](extensions), external
+ones are dropped into [`plugins/`](plugins); all load at startup unless `core.yml` excludes them
+(`modules: {exclude: [extensions/terminal]}`), each with its own git-ignored `config.yml`.
 [`plugins/whale_chan`](plugins/whale_chan) is a complete example: 鲸酱, a second Discord bot that chats
 like a personal AI web client on DeepSeek.
 
 * [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md): how the core is built (interfaces, gateway,
   manager, engines, capabilities, storage) and its rules.
-* [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing extensions, configuration, policy.
-* [plugins/README.md](plugins/README.md): drop-in extensions, settings and secrets.
+* [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy.
+* [plugins/README.md](plugins/README.md): external modules, settings and secrets.
 
 ## Running as a service
 
@@ -80,7 +95,7 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Runtime data (databases, extension data, the audit log) lives in `data/core/`.
+Runtime data (databases, module data, the audit log) lives in `data/core/`.
 
 ## Development
 
@@ -88,14 +103,14 @@ Runtime data (databases, extension data, the audit log) lives in `data/core/`.
 venv/bin/python -m unittest discover -s tests -t .
 ```
 
-`contracts/` is the only code shared between the core and extensions; `core/` never imports an
-extension and extensions never import the core ([`tests/test_core_boundaries.py`](tests/test_core_boundaries.py)).
+`contracts/` is the only code shared between the core and modules; `core/` never imports a
+module and modules never import the core ([`tests/test_core_boundaries.py`](tests/test_core_boundaries.py)).
 
 ```
-contracts/    public API between the core and extensions
+contracts/    public API between the core and modules
 core/         gateway, manager, providers, storage, loader
-extensions/   included extensions (discord, cli, assistant, room, basic, media, images, web, reminders, system, wechat)
-plugins/      drop-in extensions (whale_chan example, wechat)
+extensions/   built-in modules (discord, cli, assistant, room, terminal, basic, media, images, web, reminders, system)
+plugins/      external modules (whale_chan example, wechat)
 tests/        tests and fixtures
-docs/         architecture, extension guide, WeChat
+docs/         architecture, module guide, WeChat
 ```

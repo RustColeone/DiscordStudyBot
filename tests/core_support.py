@@ -61,7 +61,10 @@ def make_config(tmp: Path, overrides: dict | None = None) -> CoreConfig:
         "personas": {"p": {"display_name": "Pat", "prompt": "You are Pat.", "profile": "default"}},
         "assignments": {"*": {"engine": "probe", "personas": ["p"]}},
     }
-    return CoreConfig(merge(raw, overrides or {}), tmp)
+    raw = merge(raw, overrides or {})
+    # Tests name exactly the modules they load (`extensions`: a list of folders), with no folder scanning.
+    raw["modules"] = {"dirs": [], "paths": raw.pop("extensions"), **(raw.get("modules") or {})}
+    return CoreConfig(raw, tmp)
 
 
 async def start_core(tmp: Path, overrides: dict | None = None, adapter: FakeAdapter | None = None,

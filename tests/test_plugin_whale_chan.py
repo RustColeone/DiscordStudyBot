@@ -33,7 +33,7 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
 
     async def start(self, responses, options=None):
         self.adapter = FakeAdapter(responses)
-        extensions = [*make_config(self.tmp).raw["extensions"], str(PLUGIN)]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN)]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "profiles": {"whale_chan": [{"provider": "fake", "model": "pro"}]},
             "assignments": {"*": {"engine": "chat", "personas": ["whale_chan"], "options": options or {}}}},

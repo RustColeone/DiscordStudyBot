@@ -15,7 +15,7 @@ from tests.core_support import ROOT, extension_module, iface, settle, start_core
 
 def config(tmp):
     from tests.core_support import make_config
-    base = make_config(Path(tmp)).raw["extensions"]
+    base = make_config(Path(tmp)).raw["modules"]["paths"]
     return {"extensions": [*base, str(ROOT / "extensions" / "media"), str(ROOT / "extensions" / "images"),
                            str(ROOT / "extensions" / "system")],
             "extension_config": {"fake": {"interfaces": {"chat": {"quotes": True, "max_upload_mb": 1},
