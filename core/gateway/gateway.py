@@ -82,6 +82,9 @@ class Port:
         if address.interface != self.name:
             raise ValueError(f"Interface {self.name!r} cannot act for {address.interface!r}")
 
+    def commands(self):
+        return self._gateway.manager.commands()
+
     def log(self, event: str, **fields: Any) -> None:
         self._gateway.audit.record("interface", interface=self.name, detail=event, **fields)
 

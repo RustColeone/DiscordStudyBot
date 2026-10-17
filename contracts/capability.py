@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Mapping, Protocol
 
+from contracts.commands import Command, derive
 from contracts.messages import Address, Display, FileRef, Origin, Sender
 from contracts.models import Models
 from contracts.stores import Store
@@ -113,7 +114,9 @@ class Capability:
     mandatory ones. `needs` lists Display features the conversation must support (for example `files`).
     `internal` capabilities are callable by engines but not offered to models as tools.
     `command`, when set, makes the capability available as `$<command> <text>`, with the text passed
-    as `command_argument`.
+    as `command_argument`. It may be a name or a `Command` declaring options and a template for
+    interfaces with native command menus; a name becomes a `Command` with one option for
+    `command_argument`.
     """
 
     name: str
@@ -125,11 +128,14 @@ class Capability:
     internal: bool = False
     owner_only: bool = False
     needs: frozenset[str] = frozenset()
-    command: str | None = None
+    command: Command | str | None = None
     command_argument: str | None = None
     timeout_s: float = 600.0
 
     def __post_init__(self):
+        if isinstance(self.command, str):
+            object.__setattr__(self, "command", derive(self.command, self.description, self.command_argument,
+                                                       self.parameters, tuple(self.required)))
         if not NAME_PATTERN.match(self.name):
             raise ValueError(f"Capability name must look like extension.action, got {self.name!r}")
         object.__setattr__(self, "required", tuple(self.required))

@@ -110,6 +110,15 @@ class Request:
 
 
 @dataclass(frozen=True)
+class Action:
+    """A button: `label` shown, `command` (`$approve ea947b`) run as whoever presses it."""
+
+    label: str
+    command: str
+    style: Literal["primary", "secondary", "success", "danger"] = "secondary"
+
+
+@dataclass(frozen=True)
 class Reply:
     """One outbound item. Interfaces render it in their platform's form.
 
@@ -119,6 +128,9 @@ class Reply:
     `source` says who produced it: `run` (an engine), `command`, `owner` (an owner's relay or send),
     or `core`. `speaker` is the display name of the persona talking, set by engines with several
     personas; `label` qualifies it (for example a work note). Interfaces show both in their own way.
+    `actions` are buttons, each running a `$command` as the person who presses it (interfaces without
+    buttons show the commands as text). `private` asks to show the reply only to the person it answers,
+    where the platform can (otherwise it is sent normally).
     """
 
     address: Address
@@ -134,10 +146,13 @@ class Reply:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     speaker: str = ""
     label: str = ""
+    actions: tuple["Action", ...] = ()
+    private: bool = False
 
     def __post_init__(self):
         if self.kind == "file" and self.file is None:
             raise ValueError("A file reply needs a file")
+        object.__setattr__(self, "actions", tuple(self.actions))
         object.__setattr__(self, "data", _frozen_mapping(self.data))
 
 

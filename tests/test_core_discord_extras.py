@@ -144,7 +144,7 @@ class MusicTests(ExtrasTestBase):
                                     ("discord.clock_stop", "write", "stop")]:
             capability = capabilities[name]
             self.assertFalse(capability.owner_only, name)
-            self.assertEqual((capability.risk.value, capability.command), (risk, command))
+            self.assertEqual((capability.risk.value, capability.command and capability.command.name), (risk, command))
         self.assertTrue(capabilities["discord.status"].owner_only)
 
     async def test_music_plays_the_playlist_in_the_requesters_voice_channel(self):

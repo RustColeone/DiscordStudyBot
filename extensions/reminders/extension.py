@@ -6,7 +6,7 @@ import datetime as dt
 import re
 import time
 
-from contracts import Capability, Contributions, Extension, Risk, ToolResult
+from contracts import Capability, Command, Contributions, Extension, Option, Risk, ToolResult
 
 UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 DURATION = re.compile(r"^(\d+(?:\.\d+)?)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)(?=\d|\s|$)",
@@ -96,11 +96,18 @@ def setup(context) -> Contributions:
                    "computed from the current time) or `in_minutes`. `spec` is the $remind form, e.g. '10m drink water'.",
                    create, {"text": {"type": "string"}, "at": {"type": "string"},
                             "in_minutes": {"type": "number", "exclusiveMinimum": 0}, "spec": {"type": "string"}},
-                   risk=Risk.WRITE, command="remind", command_argument="spec"),
+                   risk=Risk.WRITE, command=Command(
+                       "remind", "Set a one-time reminder here",
+                       (Option("when", "In how long or when: 10m, 2h30m, 18:30, or a date and time", required=True),
+                        Option("text", "What to remind you of", required=True)),
+                       template="{when} {text}", examples=("10m drink water", "18:30 call mom")),
+                   command_argument="spec"),
         Capability("reminders.list", "List pending reminders in this conversation.", list_reminders,
                    risk=Risk.READ, command="reminders"),
         Capability("reminders.cancel", "Cancel a pending reminder by its ID.", cancel, {"id": {"type": "string"}},
-                   ("id",), Risk.WRITE, command="unremind", command_argument="id"),
+                   ("id",), Risk.WRITE, command=Command("unremind", "Cancel one of your reminders",
+                                                        (Option("id", "Reminder ID", required=True),)),
+                   command_argument="id"),
     ])
 
 

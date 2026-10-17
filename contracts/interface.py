@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from contracts.capability import Risk, ToolContext, ToolResult
+from contracts.commands import Command
 from contracts.messages import Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
 from contracts.stores import Store
 
@@ -26,7 +27,7 @@ class Operation:
     parameters: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     required: tuple[str, ...] = ()
     risk: Risk = Risk.READ
-    command: str | None = None
+    command: Command | str | None = None
     command_argument: str | None = None
     timeout_s: float = 120.0
     owner_only: bool = True
@@ -81,6 +82,11 @@ class InterfacePort(Protocol):
         """Report the platform's own notion of the owner (for example a bot application's owner).
         Used only when core.yml lists no owners for this interface; `control` (one of your addresses,
         such as the owner's direct conversation) is used only when core.yml sets no control route."""
+
+    def commands(self) -> list[Command]:
+        """Every `$command` people can run here (built-in, capability and operation commands), for
+        interfaces that offer a native command menu or their own help. Access is still checked per
+        request; `Command.access` says the lowest level that may run each one."""
 
     def log(self, event: str, **fields: Any) -> None: ...
 

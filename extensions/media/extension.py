@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from contracts import Capability, Contributions, Extension, FileRef, Risk, ToolResult
+from contracts import Capability, Command, Contributions, Extension, FileRef, Option, Risk, ToolResult
 
 from . import clip, video
 
@@ -183,8 +183,25 @@ def clip_capabilities(keep_dir: Path) -> list[Capability]:
             "media.clip_command",
             "The $clip command: preview, adjust, confirm or cancel clips with legacy flags.",
             clip_command, parameters={"text": {"type": "string"}}, risk=Risk.PREPARE, internal=True,
-            needs={"files"}, command="clip", command_argument="text", timeout_s=1800),
+            needs={"files"}, command=CLIP_COMMAND, command_argument="text", timeout_s=1800),
     ]
+
+
+CLIP_COMMAND = Command(
+    "clip", "Preview a clip of a video with size estimates, then confirm to send it",
+    (Option("url", "Video link (leave empty to adjust, confirm or list pending clips)"),
+     Option("start", "Start, e.g. 1:05"), Option("end", "End, e.g. 1:20"),
+     Option("resolution", "Resolution", choices=("360p", "480p", "720p", "1080p")),
+     Option("format", "Output format", choices=("mp4", "webm", "mov", "mkv", "gif", "mp3", "m4a", "wav", "aac",
+                                                 "ogg", "flac")),
+     Option("clip", "Which pending clip to adjust (1, 2, …)", "integer"),
+     Option("fit", "Shrink it to fit the upload limit", "boolean", flag="--fit"),
+     Option("keep_file", "Also keep the full-quality file on the host", "boolean", flag="--keep-file"),
+     Option("confirm", "Render and send the pending clips", "boolean", flag="--confirm"),
+     Option("cancel", "Discard the pending clips", "boolean", flag="--cancel")),
+    template="[-u {url}][ -s {start}][ -e {end}][ --clip {clip}][ -r {resolution}][ -f {format}][ {fit}]"
+             "[ {keep_file}][ {confirm}][ {cancel}]",
+    examples=("-u https://youtu.be/… -s 1:05 -e 1:20", "--confirm", "--clip 1 --fit", "--cancel"))
 
 
 def setup(context) -> Contributions:

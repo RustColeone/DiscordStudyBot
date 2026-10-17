@@ -16,8 +16,8 @@ from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Any
 
-from contracts import (Address, Delivery, Display, FileRef, Interface, Operation, Reply, Request, Risk, Sender,
-                       ToolResult)
+from contracts import (Address, Command, Delivery, Display, FileRef, Interface, Operation, Option, Reply, Request,
+                       Risk, Sender, ToolResult)
 
 from .images import mime_for
 from .native import strip_mention
@@ -77,11 +77,18 @@ class WeChatInterface(Interface):
         Operation("send", "Send a text message as the owner to a WeChat conversation (cancels its open runs)",
                   {"chat": {"type": "string"}, "text": {"type": "string"},
                    "spec": {"type": "string", "description": "$wechat_send form: `chat | text`"}},
-                  risk=Risk.WRITE, command="wechat_send", command_argument="spec"),
+                  risk=Risk.WRITE, command=Command(
+                      "wechat_send", "Send a WeChat message as the account owner",
+                      (Option("chat", "Chat name or ID", required=True), Option("text", "Message", required=True)),
+                      template="{chat} | {text}", access="creator"), command_argument="spec"),
         Operation("notify", "Tell the owner about incoming messages of a conversation (`*` = all): on, off or inherit",
                   {"chat": {"type": "string"}, "mode": {"type": "string", "enum": ["on", "off", "inherit"]},
                    "spec": {"type": "string", "description": "$wechat_notify form: `on|off|inherit chat`"}},
-                  risk=Risk.WRITE, command="wechat_notify", command_argument="spec"),
+                  risk=Risk.WRITE, command=Command(
+                      "wechat_notify", "Send a WeChat chat's incoming messages to the owner",
+                      (Option("mode", "on, off or inherit", required=True, choices=("on", "off", "inherit")),
+                       Option("chat", "Chat name or ID, or * for all", required=True)),
+                      template="{mode} {chat}", access="creator"), command_argument="spec"),
         Operation("configure", "Set the minimum seconds between the bot's messages in one conversation",
                   {"chat": {"type": "string"}, "send_interval_s": {"type": "number", "minimum": 5, "maximum": 3600}},
                   ("chat", "send_interval_s"), risk=Risk.WRITE),

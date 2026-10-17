@@ -183,6 +183,7 @@ class MyInterface(Interface):
 | `set_owners(ids, control=None)` | Report the platform's own owner, e.g. a bot application's owner. Used only when `core.yml` lists no owners for your interface; `control` (one of your addresses, such as the owner's DM) is used only when no control route is configured. This is how a fresh Discord setup routes approvals to the bot owner's DM without configuration. |
 | `set_ready(ready, detail="")` | Report whether you can send. The first call with `False`, and every change, sends an `interface_ready` / `interface_not_ready` event (with `data["detail"]`) to the owner. While not ready, deliveries to you are refused (`Delivery(ok=False, detail="interface_not_ready")`, not uncertain). Interfaces start ready. |
 | `bottle` | Your private persistent store (below). |
+| `commands()` | The command catalog (`Command` declarations: built-ins, capability and operation commands) for a native command menu or your own help. Translate a menu selection into its `$` text with `command.render(values)` and submit that as the request's text. |
 | `log(event, **fields)` | Audit log entry (no message text, please). |
 
 All port methods act only on your own interface's addresses; anything else raises `ValueError`.
@@ -214,9 +215,10 @@ after `submit` returns.** Submit messages of one conversation in order; differen
 be submitted concurrently. Messages starting with `$` and a letter are commands (subject to the
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
 `$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
-`$help`, `$call <capability> <json arguments>` (owners only: run any capability directly, for example
-`$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
-capability and operation commands (`$help` lists them).
+`$help [command]`, `$call <capability> <json arguments>` (owners only: run any capability directly, for
+example `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
+capability and operation commands (`$help` lists them). The core only understands this `$` text;
+platforms with their own command menus (Discord slash commands) translate into it.
 
 ### Interface settings
 
@@ -246,6 +248,11 @@ ten-minute upload is fine. Before calling you for a run's output, the core re-ch
 still open, its assignment is enabled and the conversation (and any routed target) is still admitted.
 Cancelling a run does not interrupt a `deliver` already in progress: if you wait before committing
 (spacing, a desktop lock), call `port.check(reply)` immediately before the irreversible step.
+
+`reply.actions` are buttons (`Action(label, command, style)`): a press runs `command` (`$approve
+ea947b`) as the person who pressed it, so submit it as a request from them. Without buttons, show the
+commands as text. `reply.private` asks to show the reply only to the person it answers (Discord:
+ephemeral); otherwise send it normally.
 
 Outbound replies are not queued durably. If the process stops during `deliver`, the core does not
 call `deliver` again for that reply after a restart (engines prefer at-most-once). `reply.id` is
@@ -287,6 +294,30 @@ conversation carry `data["origin_address"]`.
 | `unknown_command` | Unknown `$command`. | `command` |
 | `not_permitted` | The command is not available here. | |
 
+### Declaring commands
+
+A plain `command="remind"` is enough: it becomes a `Command` with one option for `command_argument`.
+Declare a `Command` to describe the command better for help and native menus:
+
+```python
+from contracts import Command, Option
+
+Command("remind", "Set a one-time reminder here",
+        (Option("when", "10m, 2h30m, 18:30 or a date", required=True),
+         Option("text", "What to remind you of", required=True)),
+        template="{when} {text}", examples=("10m drink water",))
+```
+
+* `options`: typed arguments (`string`, `integer`, `number`, `boolean`, `attachment`), with
+  `required` and `choices`. A boolean with `flag="--fit"` renders as that flag when true.
+* `template` turns option values back into the text after `$name` (`{option}` placeholders; `[...]`
+  sections are dropped when an option inside has no value), so `/clip url:… start:1:05` becomes
+  `$clip -u … -s 1:05`. Without one, values are joined with spaces. The text is what reaches your
+  handler in `command_argument`, whichever way the command was typed.
+* `examples`, `admin_help` (extra help for admins and the creator), `access` (`member`, `admin` or
+  `creator`: the lowest level that may run it; `owner_only` capabilities are `creator`), and
+  `message_action` (a label for running the command on an existing message where platforms support it).
+
 ### Operations
 
 `operate(operation, arguments, context)` receives the same `ToolContext` as a capability: who asked
@@ -320,7 +351,7 @@ Capability("music.find_tracks", "Search the library by artist or title.", find_t
 | `owner_only` | Only owners (or trusted routines) may use it. |
 | `needs` | `Display` features the conversation must have, e.g. `{"files"}`. Whether incoming attachments exist is not a feature; capabilities that read them check the request's `files` themselves. |
 | `internal` | Callable by engines but not shown to models. |
-| `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call. |
+| `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call. `command` is a name, or a `Command` declaration (below). |
 | `timeout_s` | Hard limit for one call (default 600). |
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,

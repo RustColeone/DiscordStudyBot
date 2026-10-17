@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -19,8 +20,9 @@ from typing import Any, Mapping, Protocol
 
 import jsonschema
 
-from contracts import (Address, Capability, Delivery, Display, Engine, FileRef, ModelError, ModelRequest,
-                       ModelResult, Operation, Persona, Reply, Request, Risk, RunYield, Sender, ToolResult)
+from contracts import (Action, Address, Capability, Command, Delivery, Display, Engine, FileRef, ModelError,
+                       ModelRequest, ModelResult, Operation, Option, Persona, Reply, Request, Risk, RunYield, Sender,
+                       ToolResult)
 from core.audit import Audit
 from core.manager.handles import SessionHandle, ToolContextHandle
 from core.manager.policy import Assignment, Owners, most_specific
@@ -29,7 +31,26 @@ from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
 
 COMMAND_ENGINE = "$command"
-CORE_COMMANDS = ("help", "approve", "deny", "runs", "cancel", "tools", "call")
+BUILTIN_COMMANDS = (
+    Command("help", "List commands, or explain one", (Option("command", "A command name"),),
+            examples=("", "remind")),
+    Command("approve", "Approve a pending action (owner)", (Option("id", "Approval ID", required=True),),
+            access="creator"),
+    Command("deny", "Deny a pending action (owner)", (Option("id", "Approval ID", required=True),),
+            access="creator"),
+    Command("runs", "Show open work in this conversation"),
+    Command("cancel", "Cancel your open work here, or a run by ID",
+            (Option("target", "A run ID (or, for the owner, a conversation address)"),)),
+    Command("tools", "List the tools available here"),
+    Command("memory", "Read, forget or clear what personas keep about you here",
+            (Option("args", "[persona] [page] | forget <note-id> | clear [persona]"),),
+            examples=("", "forget 12", "clear")),
+    Command("call", "Run any capability directly with JSON arguments (owner)",
+            (Option("capability", "Capability name, e.g. core.set_rule", required=True),
+             Option("arguments", "JSON object")), template="{capability}[ {arguments}]", access="creator",
+            examples=('core.list_rules', 'basic.now {"timezone": "Asia/Tokyo"}')),
+)
+CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
 
 
 # The run whose engine task (or a task it started) is executing; child tasks inherit it.
@@ -163,9 +184,10 @@ class Manager:
             raise ValueError(f"Capability {capability.name!r} is already registered")
         if capability.extension != extension:
             raise ValueError(f"Capability {capability.name!r} must use its extension's namespace {extension!r}")
-        if capability.command and (capability.command in CORE_COMMANDS or any(
-                other.command == capability.command for other in self.capabilities.values())):
-            raise ValueError(f"Command ${capability.command} is already taken")
+        if capability.command and (capability.command.name in CORE_COMMANDS or any(
+                other.command and other.command.name == capability.command.name
+                for other in self.capabilities.values())):
+            raise ValueError(f"Command ${capability.command.name} is already taken")
         self.capabilities[capability.name] = capability
 
     def attach_gateway(self, gateway: GatewayLink) -> None:
@@ -575,6 +597,8 @@ class Manager:
             text=(f"Approval {approval_id}: {capability.name} {json.dumps(arguments, ensure_ascii=False)}\n"
                   f"Requested in {record.address} (run {record.id}). Reply $approve {approval_id} or "
                   f"$deny {approval_id}."),
+            actions=(Action("Approve", f"$approve {approval_id}", "success"),
+                     Action("Deny", f"$deny {approval_id}", "danger")),
             data={"approval_id": approval_id, "capability": capability.name, "address": record.address,
                   "arguments": json.dumps(arguments, ensure_ascii=False)}))
         return ToolResult("needs_approval", f"Waiting for owner approval {approval_id}.",
@@ -810,18 +834,51 @@ class Manager:
                 else:
                     await self._command_run(request, capability, "", owner, arguments)
         elif name == "help":
-            commands = [f"${c.command}" for c in self.capabilities.values() if c.command]
-            await say("Commands: " + ", ".join(["$approve <id>", "$deny <id>", "$runs", "$cancel [run|address]", "$tools",
-                                                "$memory",
-                                                "$call <capability> <json>",
-                                                *sorted(commands)]))
+            await say(self.help_text(rest, request))
         else:
-            capability = next((c for c in self.capabilities.values() if c.command == name), None)
+            capability = next((c for c in self.capabilities.values() if c.command and c.command.name == name), None)
             if capability is None:
                 await self._deliver(Reply(request.address, "notice", code="unknown_command", in_reply_to=request.id,
                                           data={"command": name}))
                 return
             await self._command_run(request, capability, rest, owner)
+
+    def commands(self) -> list[Command]:
+        """The command catalog: built-ins, then capability and operation commands by name."""
+        declared = []
+        for capability in self.capabilities.values():
+            if capability.command is None:
+                continue
+            command = capability.command
+            if capability.owner_only and command.access != "creator":
+                command = dataclasses.replace(command, access="creator")
+            declared.append(command)
+        return [*BUILTIN_COMMANDS, *sorted(declared, key=lambda command: command.name)]
+
+    def access_of(self, request: Request) -> str:
+        return "creator" if self.is_owner(request) else "member"
+
+    def help_text(self, text: str, request: Request) -> str:
+        level = {"member": 0, "admin": 1, "creator": 2}[self.access_of(request)]
+        visible = [command for command in self.commands()
+                   if {"member": 0, "admin": 1, "creator": 2}[command.access] <= level]
+        code = (lambda value: f"`{value}`") if request.display.markdown else str
+        wanted = text.strip().lstrip("$/").lower()
+        if not wanted:
+            lines = [f"{code(command.usage())} {command.description}".rstrip() for command in visible]
+            return "Commands:\n" + "\n".join(lines) + f"\n{code('$help <command>')} for details."
+        command = next((command for command in visible if command.name == wanted), None)
+        if command is None:
+            return f"No command {code('$' + wanted)} here. {code('$help')} lists them."
+        lines = [code(command.usage()), command.description]
+        lines += [f"• {option.name}: {option.description}" + (f" ({', '.join(option.choices)})" if option.choices else "")
+                  for option in command.options if option.description or option.choices]
+        examples = [example for example in command.examples if example]
+        if examples:
+            lines.append("Examples: " + ", ".join(code(f"${command.name} {example}") for example in examples))
+        if command.admin_help and level >= 1:
+            lines.append("Admin: " + command.admin_help)
+        return "\n".join(line for line in lines if line)
 
     def memory_command(self, text: str, request: Request) -> str:
         """`$memory`: what personas keep about the sender in this conversation; only theirs, only here."""
