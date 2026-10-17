@@ -854,8 +854,8 @@ class Manager:
         self.tank.record_message(str(request.address), "in", request.text, sender_id=request.sender.id,
                                  sender_name=request.sender.name, message_id=request.id, at=request.received_at)
 
-        async def say(message: str) -> None:
-            await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id))
+        async def say(message: str, private: bool = False) -> None:
+            await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id, private=private))
 
         if name in ("approve", "deny"):
             await say(await self.decide(rest, name == "approve", request) if rest else f"Usage: ${name} <id>")
@@ -864,20 +864,21 @@ class Manager:
             pending = {item["run_id"]: item["id"] for item in self.tank.approvals("pending")}
             lines = [f"{run.id} {run.status} {run.address} {run.engine}"
                      + (f" approval={pending[run.id]}" if run.id in pending else "") for run in runs]
-            await say("\n".join(lines) or "No open runs.")
+            await say("\n".join(lines) or "No open runs.", private=level >= 1)
         elif name == "cancel":
             await say(await self.cancel(rest or None, request))
         elif name == "memory":
-            await say(self.memory_command(rest, request))
+            await say(self.memory_command(rest, request), private=True)
         elif name == "admin":
-            await say(self.admin_command(rest, request))
+            await say(self.admin_command(rest, request), private=True)
         elif name == "routine":
-            await say(self.routines.command(self.caller(request), rest))
+            caller = self.caller(request)
+            await say(self.routines.command(caller, rest), private=caller.admin)
         elif name == "tools":
             assignment = self.assignment_for(request.address)
             names = [c.name for c in self.capabilities.values()
                      if assignment and assignment.allows(c.name) and level >= LEVELS[c.access]]
-            await say(", ".join(sorted(names)) or "No tools here.")
+            await say(", ".join(sorted(names)) or "No tools here.", private=True)
         elif name == "call":
             target, _, raw = rest.partition(" ")
             capability = self.capabilities.get(target)
@@ -895,7 +896,7 @@ class Manager:
                 else:
                     await self._command_run(request, capability, "", owner, arguments)
         elif name == "help":
-            await say(self.help_text(rest, request))
+            await say(self.help_text(rest, request), private=True)
         else:
             capability = next((c for c in self.capabilities.values() if c.command and c.command.name == name), None)
             if capability is None:

@@ -134,3 +134,33 @@ class WhaleChanSetupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WhaleSlashTests(unittest.IsolatedAsyncioTestCase):
+    async def test_her_commands_are_new_plus_a_short_catalog_and_new_becomes_a_message(self):
+        import discord
+        from contracts import Command, Delivery, Option, Reply, Address
+        from tests.test_core_discord_slash import FakeChannel, FakeInteraction
+        from tests.test_core_discord import FakeUser
+        from core.loader import import_extension
+        _, module = import_extension(PLUGIN)
+        bot_module = __import__(module.__name__.rsplit(".", 1)[0] + ".bot", fromlist=["WhaleChanBot"])
+        bot = bot_module.WhaleChanBot("whale_chan", "token", Path(tempfile.mkdtemp()))
+        submitted = []
+
+        async def submit(request):
+            submitted.append(request)
+            return SimpleNamespace(__bool__=lambda self: True, reason="accepted")
+        bot.port = SimpleNamespace(commands=lambda: [Command("help", "Help"), Command("call", "Owner", access="creator"),
+                                                     Command("remind", "Remind", (Option("when"), Option("text")))],
+                                   submit=submit, log=lambda *a, **k: None, bottle={})
+        self.assertEqual([command.name for command in bot.commands()], ["new", "help", "remind"])
+        channel = FakeChannel(70, private=True)
+        interaction = FakeInteraction(discord.InteractionType.application_command, {"type": 1, "name": "new"},
+                                      FakeUser(1, "Alice"), channel)
+        await bot.on_interaction(interaction)
+        self.assertEqual(submitted[0].text, "/new")
+        bot.client = SimpleNamespace(is_ready=lambda: True)
+        delivery = await bot.deliver(Reply(Address("whale_chan", "dm:1"), "text", "🐳 新的对话", in_reply_to=submitted[0].id))
+        self.assertTrue(delivery.ok)
+        self.assertEqual(interaction.log[-1], ("edit", "🐳 新的对话", False))

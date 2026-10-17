@@ -25,6 +25,7 @@ from contracts import (Address, Delivery, Display, FileRef, Interface, Operation
 from .clock import LiveClocks, clock_text
 from .math_render import MathRenderer, fallback_text, split_math
 from .music import CONTROL_ACTIONS, MusicCommand, MusicPlayer, is_url, parse_music_command
+from . import slash
 from .status_log import StatusLog, code_safe
 
 DEFAULT_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -39,6 +40,15 @@ NOTICES = {
     "not_permitted": "That command isn't available here.",
     "locked": "🔧 The bot is in maintenance right now; please try again later.",
 }
+
+
+REFUSALS = {
+    "disabled": "I don't answer in this channel.",
+    "sender_not_allowed": "I can't take requests from you here.",
+    "owner_only": "Only the owner can use me here.",
+}
+BUTTON_STYLES = {"primary": discord.ButtonStyle.primary, "secondary": discord.ButtonStyle.secondary,
+                 "success": discord.ButtonStyle.success, "danger": discord.ButtonStyle.danger}
 
 
 def split_text(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
@@ -126,6 +136,8 @@ class DiscordInterface(Interface):
                                  str(config.get("ffmpeg") or "ffmpeg"))
         self.clocks = LiveClocks(self._channel, float(config.get("clock_interval_s", 1.0)),
                                  int(config.get("clock_max", 10)))
+        self.slash_commands = bool(config.get("slash_commands", True))
+        self.interactions = slash.Interactions()
 
     # ---- lifecycle --------------------------------------------------------------------------------
     async def start(self, port) -> None:
@@ -142,6 +154,7 @@ class DiscordInterface(Interface):
             self.client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.client.event(self.on_ready)
         self.client.event(self.on_message)
+        self.client.event(self.on_interaction)
         self._task = asyncio.create_task(self._run(), name="discord-client")
 
     async def _run(self) -> None:
@@ -193,6 +206,7 @@ class DiscordInterface(Interface):
             self._owners = owners
             self.port.set_owners(owners, control=Address(self.name, f"dm:{owners[0]}"))
         self.port.set_ready(True, f"Logged in as {user}.")
+        await self.sync_commands()
         guilds = len(getattr(self.client, "guilds", []) or [])
         message = f"[discord] Logged in as {user} in {guilds} server(s)."
         if not guilds:
@@ -251,9 +265,7 @@ class DiscordInterface(Interface):
         kind = kinds[0] if kinds else "text"
         if not content and kinds:
             content = " ".join(f"[{item}]" for item in kinds)
-        limit = getattr(guild, "filesize_limit", DEFAULT_UPLOAD_BYTES) if guild else DEFAULT_UPLOAD_BYTES
-        display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
-                          max_upload_mb=round(limit / 1024 / 1024, 2), max_text_chars=MESSAGE_LIMIT)
+        display = self.display_for_guild(guild)
         name = getattr(message.author, "display_name", None) or message.author.name
         return Request(
             id=str(message.id), address=Address(self.name, conversation), sender=Sender(str(message.author.id), name),
@@ -263,6 +275,133 @@ class DiscordInterface(Interface):
             quoted_text=(resolved_message.content or "")[:1000] if resolved_message is not None else "",
             kind=kind, files=tuple(files), display=display,
             extra={"guild_id": str(guild.id) if guild else "", "channel_name": getattr(channel, "name", "") or ""})
+
+    @staticmethod
+    def display_for_guild(guild) -> Display:
+        limit = getattr(guild, "filesize_limit", DEFAULT_UPLOAD_BYTES) if guild else DEFAULT_UPLOAD_BYTES
+        return Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
+                       max_upload_mb=round(limit / 1024 / 1024, 2), max_text_chars=MESSAGE_LIMIT)
+
+    # ---- slash commands, message actions and buttons -----------------------------------------------
+    async def sync_commands(self) -> None:
+        """Register the core's command catalog as application commands (only when it changed)."""
+        http = getattr(self.client, "http", None)
+        if not self.slash_commands or http is None:
+            return
+        definitions = slash.payload(self.port.commands())
+        digest = slash.fingerprint(definitions)
+        if self.port.bottle.get("slash_fingerprint") == digest:
+            return
+        try:
+            await http.bulk_upsert_global_commands(self.client.application_id, definitions)
+        except Exception as error:
+            # Commands keep working as `$` messages; the next start tries again.
+            self.port.log("slash_sync_failed", error=type(error).__name__, detail=str(error)[:200])
+            print(f"[discord] Could not register slash commands: {type(error).__name__}: {error}"[:300], flush=True)
+            return
+        self.port.bottle.set("slash_fingerprint", digest)
+        self.port.log("slash_synced", commands=len(definitions))
+
+    def _interaction_conversation(self, interaction) -> str:
+        if interaction.guild is None:
+            return f"dm:{interaction.user.id}"
+        return str(interaction.channel_id)
+
+    async def on_interaction(self, interaction) -> None:
+        try:
+            if interaction.type == discord.InteractionType.application_command:
+                await self._on_command(interaction)
+            elif (interaction.type == discord.InteractionType.component
+                  and str((interaction.data or {}).get("custom_id", "")).startswith(slash.BUTTON_PREFIX)):
+                await self._on_button(interaction)
+        except Exception as error:
+            self.port.log("interaction_failed", error=type(error).__name__, detail=str(error)[:200])
+
+    async def _on_command(self, interaction) -> None:
+        data = interaction.data or {}
+        command = slash.find(self.port.commands(), data)
+        if command is None:
+            await interaction.response.send_message("That command is no longer available.", ephemeral=True)
+            return
+        await interaction.response.defer(thinking=True)
+        values, attachments = slash.values(command, data)
+        files = [await self._download_raw(interaction.id, item) for item in attachments
+                 if int(item.get("size") or 0) <= self.attachment_max_bytes]
+        await self._submit_interaction(interaction, command.render(values), tuple(file for file in files if file),
+                                       placeholder=True)
+
+    async def _on_button(self, interaction) -> None:
+        await interaction.response.defer()
+        command = str(interaction.data["custom_id"])[len(slash.BUTTON_PREFIX):]
+        await self._submit_interaction(interaction, command, (), placeholder=False)
+
+    async def _submit_interaction(self, interaction, text: str, files: tuple, placeholder: bool) -> None:
+        conversation = self._interaction_conversation(interaction)
+        if interaction.channel is not None and hasattr(interaction.channel, "send"):
+            self._remember(conversation, interaction.channel)
+        pending = self.interactions.add(str(interaction.id), interaction, conversation, placeholder)
+        user = interaction.user
+        request = Request(
+            id=str(interaction.id), address=Address(self.name, conversation),
+            sender=Sender(str(user.id), getattr(user, "display_name", None) or user.name), text=text,
+            received_at=interaction.created_at.timestamp(), is_direct=interaction.guild is None, mentions_me=True,
+            files=files, display=self.display_for_guild(interaction.guild),
+            extra={"guild_id": str(interaction.guild.id) if interaction.guild else "", "via": "interaction"})
+        async with self._locks[conversation]:
+            result = await self.port.submit(request)
+        if not result and result.reason in REFUSALS and pending.placeholder:
+            pending.placeholder = False
+            await interaction.edit_original_response(content=REFUSALS[result.reason])
+
+    async def _download_raw(self, interaction_id, attachment: dict) -> FileRef | None:
+        directory = self.attachments_dir / str(interaction_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        name = re.sub(r"[^\w.\-]+", "_", str(attachment.get("filename") or "attachment"))[:120] or "attachment"
+        try:
+            data = await self.client.http.get_from_cdn(attachment["url"])
+        except (discord.HTTPException, KeyError) as error:
+            self.port.log("attachment_failed", error=type(error).__name__)
+            return None
+        path = directory / name
+        path.write_bytes(data)
+        return FileRef(str(path), str(attachment.get("filename") or name), str(attachment.get("content_type") or ""),
+                       len(data))
+
+    def _view(self, reply: Reply):
+        if not reply.actions:
+            return None
+        view = discord.ui.View(timeout=None)
+        for action in reply.actions[:5]:
+            view.add_item(discord.ui.Button(label=action.label[:80], style=BUTTON_STYLES.get(action.style,
+                                                                                            discord.ButtonStyle.secondary),
+                                            custom_id=(slash.BUTTON_PREFIX + action.command)[:100]))
+        return view
+
+    def _poster(self, reply: Reply, channel):
+        """How to post this reply: answering its interaction while that is possible, else to the channel."""
+        pending = self.interactions.get(reply.in_reply_to)
+        if pending is not None and pending.conversation != reply.address.conversation:
+            pending = None
+
+        async def post(content=None, file=None, reference=None, allowed_mentions=None, view=None):
+            options = {key: value for key, value in (("content", content), ("file", file), ("view", view),
+                                                     ("allowed_mentions", allowed_mentions)) if value is not None}
+            if pending is None:
+                return await channel.send(reference=reference, **options)
+            interaction = pending.interaction
+            if pending.placeholder:
+                pending.placeholder = False
+                if not reply.private:
+                    edit = {key: value for key, value in options.items() if key != "file"}
+                    if file is not None:
+                        edit["attachments"] = [file]
+                    return await interaction.edit_original_response(**edit)
+                try:
+                    await interaction.delete_original_response()
+                except discord.HTTPException:
+                    pass
+            return await interaction.followup.send(ephemeral=reply.private, wait=True, **options)
+        return post, pending
 
     async def _download(self, message_id, attachment) -> FileRef:
         directory = self.attachments_dir / str(message_id)
@@ -383,10 +522,17 @@ class DiscordInterface(Interface):
             except discord.HTTPException as error:
                 return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}")
             return Delivery(message is not None, message_id=str(message.id) if message is not None else None)
+        post, pending = self._poster(reply, channel)
         if reply.kind == "progress":
+            if pending is not None and pending.placeholder:
+                try:
+                    message = await pending.interaction.edit_original_response(content=("⏳ " + self.render(reply))[:MESSAGE_LIMIT])
+                except discord.HTTPException as error:
+                    return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}")
+                return Delivery(True, message_id=str(message.id))
             return await self._show_progress(channel, reply)
         reference = None
-        if reply.quote and str(reply.quote).isdigit():
+        if pending is None and reply.quote and str(reply.quote).isdigit():
             reference = discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
                                                  fail_if_not_exists=False)
         text = self.render(reply)
@@ -394,20 +540,22 @@ class DiscordInterface(Interface):
         try:
             if reply.kind == "file":
                 file = discord.File(reply.file.path, filename=reply.file.name or Path(reply.file.path).name)
-                sent.append(await channel.send(content=text[:MESSAGE_LIMIT] or None, file=file, reference=reference))
+                sent.append(await post(content=text[:MESSAGE_LIMIT] or None, file=file, reference=reference))
             else:
                 if not text.strip():
                     return Delivery(True, detail="suppressed")
                 mentions = self.mentions_for(reply)
+                view = self._view(reply)
                 items = await self._text_items(reply, text)
                 for index, (kind, value) in enumerate(items):
-                    first = index == 0
+                    first, last = index == 0, index == len(items) - 1
                     if kind == "image":
-                        sent.append(await channel.send(file=discord.File(value, filename="formula.png"),
-                                                       reference=reference if first else None))
+                        sent.append(await post(file=discord.File(value, filename="formula.png"),
+                                               reference=reference if first else None))
                     else:
-                        sent.append(await channel.send(content=value, reference=reference if first else None,
-                                                       allowed_mentions=mentions if first else None))
+                        sent.append(await post(content=value, reference=reference if first else None,
+                                               allowed_mentions=mentions if first else None,
+                                               view=view if last else None))
         except (discord.Forbidden, discord.NotFound) as error:
             return Delivery(False, detail=f"{type(error).__name__}: {error}"[:300], uncertain=bool(sent))
         except discord.HTTPException as error:

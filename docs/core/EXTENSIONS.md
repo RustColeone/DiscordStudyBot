@@ -509,6 +509,16 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
 
 ### The included Discord interface
 
+**Slash commands.** At login the interface registers the core's command catalog as Discord
+application commands (global, so they work in servers and DMs; re-registered only when the catalog
+changes). An invocation is deferred within Discord's 3 seconds ("thinking…"), translated into the
+command's `$` text with `Command.render` and submitted as the invoking user's request; the first reply
+replaces the placeholder (progress edits it), later replies follow up, `private` replies are
+ephemeral, and after 15 minutes replies go to the channel as usual. Commands with a `message_action`
+appear under Apps on a message (`/video`: "Download video"). `Reply.actions` become buttons whose
+presses run their `$command` as the presser. Creator-only commands are hidden from members in servers.
+Typed `$` commands keep working. Option `slash_commands: false` turns registration off.
+
 [`extensions/discord`](../../extensions/discord/interface.py) renders replies with Markdown, speaker
 labels, a rolling status block for unrequested notices, and math: inline `$…$` becomes Unicode and
 display `$$…$$` is sent as PNG images between the text parts. Its public operations (usable by

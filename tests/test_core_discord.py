@@ -19,10 +19,10 @@ ids = itertools.count(1000)
 
 
 class SentMessage:
-    def __init__(self, channel, content, file=None, reference=None, allowed_mentions=None):
+    def __init__(self, channel, content, file=None, reference=None, allowed_mentions=None, view=None):
         self.id = next(ids)
         self.channel, self.content, self.file, self.reference = channel, content, file, reference
-        self.allowed_mentions = allowed_mentions
+        self.allowed_mentions, self.view = allowed_mentions, view
         self.deleted = False
 
     async def edit(self, content):
@@ -41,10 +41,10 @@ class FakeChannel:
         self.fail = fail
         self.typed = 0
 
-    async def send(self, content=None, file=None, reference=None, allowed_mentions=None):
+    async def send(self, content=None, file=None, reference=None, allowed_mentions=None, view=None):
         if self.fail is not None:
             raise self.fail
-        message = SentMessage(self, content, file, reference, allowed_mentions)
+        message = SentMessage(self, content, file, reference, allowed_mentions, view)
         self.sent.append(message)
         return message
 
@@ -225,6 +225,8 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, f"Requested in `discord:dm:1` (run `{run_id}`). "
                                  f"Reply `$approve {approval_id}` or `$deny {approval_id}`.")
         owner_dm = self.owner.dm_channel
+        buttons = [(button.label, button.custom_id) for button in owner_dm.sent[0].view.children]
+        self.assertEqual(buttons, [("Approve", f"cmd:$approve {approval_id}"), ("Deny", f"cmd:$deny {approval_id}")])
         await self.say(incoming(owner_dm, self.owner, f"$approve {approval_id}"))
         self.assertIn("approved: wrote k (execution 1)", dm.texts())
 

@@ -39,7 +39,9 @@ whale-girl personality, on DeepSeek Flash:
 * full Markdown answers, math rendered as images, image attachments understood;
 * the core's tools when useful (web search, reading pages, drawing, videos, reminders, …), with a
   progress line while she works; only the answer is posted;
-* her own diary about each person (`$memory`).
+* her own diary about each person (`$memory`);
+* slash commands: `/new` plus a short list from the core (`slash_commands` in her config:
+  help, memory, remind, reminders, routine, draw, search, read, video by default).
 
 To run it:
 

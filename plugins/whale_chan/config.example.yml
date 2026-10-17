@@ -29,6 +29,9 @@ models:
   - {provider: deepseek, model: deepseek-flash}
 #  - {provider: deepseek, model: deepseek-v4-pro, vision: false}   # stronger text model that cannot see images
 
+# Slash commands besides /new (names from the core's catalog; [] for none).
+# slash_commands: [help, memory, remind, reminders, routine, draw, search, read, video]
+
 # Math rendering ($$…$$ as images): math, math_width_px, math_dpi, math_font_size_pt, math_max_images.
 # math: true
 

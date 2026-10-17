@@ -223,7 +223,10 @@ def setup(context) -> Contributions:
             "bitrate": {"type": "string", "pattern": "^[0-9]{2,5}k$"},
             "audio_bitrate": {"type": "string", "pattern": "^(32|48|64|96|128|160|192|256|320)k$"},
         },
-        required=("url",), risk=Risk.PREPARE, needs={"files"}, command="video", command_argument="url",
+        required=("url",), risk=Risk.PREPARE, needs={"files"},
+        command=Command("video", "Download a video, fitted to the upload limit",
+                        (Option("url", "Video page link", required=True),), message_action="Download video"),
+        command_argument="url",
         timeout_s=1800), *clip_capabilities(keep_dir)])
 
 

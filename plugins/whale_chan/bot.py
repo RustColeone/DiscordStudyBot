@@ -11,9 +11,14 @@ from pathlib import Path
 
 import discord
 
-from contracts import Address, Delivery, Display, FileRef, Interface, Reply, Request, Sender
+from contracts import Address, Command, Delivery, Display, FileRef, Interface, Reply, Request, Sender
 
+from . import slash
 from .math_render import MathRenderer, fallback_text, split_math
+
+# Her own commands become plain messages her engine understands; the rest come from the core's catalog.
+LOCAL = {"new": (Command("new", "Start a fresh chat (earlier messages stop being context)"), "/new")}
+SLASH_DEFAULT = ("help", "memory", "remind", "reminders", "routine", "draw", "search", "read", "video")
 
 LIMIT = 2000
 NOTICES = {
@@ -48,7 +53,10 @@ class WhaleChanBot(Interface):
         self.display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
                                max_upload_mb=10, max_text_chars=LIMIT)
         self.operations = ()
-        self.math = MathRenderer(Path(data_dir) / "math", config or {})
+        config = dict(config or {})
+        self.math = MathRenderer(Path(data_dir) / "math", config)
+        self.slash_names = tuple(config.get("slash_commands", SLASH_DEFAULT) or ())
+        self.interactions = slash.Interactions()
         self.client: discord.Client | None = None
         self._task: asyncio.Task | None = None
         self._channels: dict[str, object] = {}
@@ -61,6 +69,7 @@ class WhaleChanBot(Interface):
         self.client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.client.event(self.on_ready)
         self.client.event(self.on_message)
+        self.client.event(self.on_interaction)
         self._task = asyncio.create_task(self._run())
 
     def invite_url(self) -> str:
@@ -106,6 +115,7 @@ class WhaleChanBot(Interface):
             self.port.set_owners([str(member.id) for member in team.members] if team else [str(application.owner.id)])
         except discord.HTTPException as error:
             self.port.log("owner_lookup_failed", error=type(error).__name__)
+        await self.sync_commands()
         self.port.set_ready(True, f"Logged in as {self.client.user}.")
         message = f"[{self.name}] Logged in as {self.client.user} in {len(self.client.guilds)} server(s)."
         print(message + ("" if self.client.guilds else f" Invite it: {self.invite_url()}"), flush=True)
@@ -167,37 +177,123 @@ class WhaleChanBot(Interface):
         speaker = f"**{reply.speaker}**\n" if reply.speaker else ""
         return speaker + (reply.text or "")
 
+    # ---- slash commands and buttons ----------------------------------------------------------------
+    def commands(self) -> list[Command]:
+        catalog = {command.name: command for command in self.port.commands()}
+        chosen = [catalog[name] for name in self.slash_names if name in catalog]
+        return [*(command for command, _ in LOCAL.values()), *chosen]
+
+    async def sync_commands(self) -> None:
+        definitions = slash.payload(self.commands())
+        digest = slash.fingerprint(definitions)
+        if self.port.bottle.get("slash_fingerprint") == digest:
+            return
+        try:
+            await self.client.http.bulk_upsert_global_commands(self.client.application_id, definitions)
+        except Exception as error:
+            self.port.log("slash_sync_failed", error=type(error).__name__, detail=str(error)[:200])
+            return
+        self.port.bottle.set("slash_fingerprint", digest)
+
+    async def on_interaction(self, interaction) -> None:
+        try:
+            if interaction.type == discord.InteractionType.application_command:
+                data = interaction.data or {}
+                command = slash.find(self.commands(), data)
+                if command is None:
+                    await interaction.response.send_message("That command is no longer available.", ephemeral=True)
+                    return
+                await interaction.response.defer(thinking=True)
+                values, _ = slash.values(command, data)
+                text = LOCAL[command.name][1] if command.name in LOCAL else command.render(values)
+                await self._submit_interaction(interaction, text, placeholder=True)
+            elif (interaction.type == discord.InteractionType.component
+                  and str((interaction.data or {}).get("custom_id", "")).startswith(slash.BUTTON_PREFIX)):
+                await interaction.response.defer()
+                await self._submit_interaction(interaction, interaction.data["custom_id"][len(slash.BUTTON_PREFIX):],
+                                               placeholder=False)
+        except Exception as error:
+            self.port.log("interaction_failed", error=type(error).__name__, detail=str(error)[:200])
+
+    async def _submit_interaction(self, interaction, text: str, placeholder: bool) -> None:
+        conversation = f"dm:{interaction.user.id}" if interaction.guild is None else str(interaction.channel_id)
+        if interaction.channel is not None and hasattr(interaction.channel, "send"):
+            self._channels[conversation] = interaction.channel
+        pending = self.interactions.add(str(interaction.id), interaction, conversation, placeholder)
+        limit = interaction.guild.filesize_limit if interaction.guild else 10 * 1024 * 1024
+        result = await self.port.submit(Request(
+            id=str(interaction.id), address=Address(self.name, conversation),
+            sender=Sender(str(interaction.user.id), interaction.user.display_name), text=text,
+            received_at=interaction.created_at.timestamp(), is_direct=interaction.guild is None, mentions_me=True,
+            display=dataclasses.replace(self.display, max_upload_mb=round(limit / 1024 ** 2, 2))))
+        if not result and pending.placeholder and result.reason not in ("duplicate", "locked"):
+            pending.placeholder = False
+            await interaction.edit_original_response(content="I can't do that here.")
+
+    def _view(self, reply: Reply):
+        if not reply.actions:
+            return None
+        view = discord.ui.View(timeout=None)
+        for action in reply.actions[:5]:
+            view.add_item(discord.ui.Button(label=action.label[:80], custom_id=(slash.BUTTON_PREFIX + action.command)[:100]))
+        return view
+
+    # ---- outgoing ---------------------------------------------------------------------------------
     async def deliver(self, reply: Reply) -> Delivery:
         if self.client is None or not self.client.is_ready():
             return Delivery(False, detail="not_connected")
         channel = await self._channel(reply.address.conversation)
         if channel is None:
             return Delivery(False, detail="unknown_conversation")
+        pending = self.interactions.get(reply.in_reply_to)
+        if pending is not None and pending.conversation != reply.address.conversation:
+            pending = None
+
+        async def post(reference=None, **options):
+            options = {key: value for key, value in options.items() if value is not None}
+            if pending is None:
+                return await channel.send(reference=reference, **options)
+            if pending.placeholder:
+                pending.placeholder = False
+                if not reply.private:
+                    file = options.pop("file", None)
+                    return await pending.interaction.edit_original_response(
+                        **options, **({"attachments": [file]} if file is not None else {}))
+                try:
+                    await pending.interaction.delete_original_response()
+                except discord.HTTPException:
+                    pass
+            return await pending.interaction.followup.send(ephemeral=reply.private, wait=True, **options)
+
         try:
             if reply.kind == "progress":
+                if pending is not None and pending.placeholder:
+                    message = await pending.interaction.edit_original_response(content=f"-# ⏳ {reply.text}"[:LIMIT])
+                    return Delivery(True, message_id=str(message.id))
                 return await self._show_progress(channel, reply)
             if reply.run_id and reply.kind in ("text", "file", "notice"):
                 await self._clear_progress(reply.run_id)
             reference = (discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
                                                   fail_if_not_exists=False)
-                         if reply.quote and str(reply.quote).isdigit() else None)
+                         if pending is None and reply.quote and str(reply.quote).isdigit() else None)
             if reply.kind == "file":
-                sent = await channel.send(content=reply.text[:LIMIT] or None, reference=reference,
-                                          file=discord.File(reply.file.path, filename=reply.file.name or None))
+                sent = await post(content=reply.text[:LIMIT] or None, reference=reference,
+                                  file=discord.File(reply.file.path, filename=reply.file.name or None))
                 return Delivery(True, message_id=str(sent.id))
             text = self.render(reply)
             if not text.strip():
                 return Delivery(True, detail="suppressed")
-            first = None
-            for kind, value in await self._parts(reply, text):
+            first, parts, view = None, await self._parts(reply, text), self._view(reply)
+            for index, (kind, value) in enumerate(parts):
                 if kind == "image":
                     try:
-                        sent = await channel.send(file=discord.File(value, filename="formula.png"),
-                                                  reference=reference if first is None else None)
+                        sent = await post(file=discord.File(value, filename="formula.png"),
+                                          reference=reference if first is None else None)
                     finally:
                         Path(value).unlink(missing_ok=True)
                 else:
-                    sent = await channel.send(content=value, reference=reference if first is None else None)
+                    sent = await post(content=value, reference=reference if first is None else None,
+                                      view=view if index == len(parts) - 1 else None)
                 first = first or sent
             return Delivery(True, message_id=str(first.id))
         except (discord.Forbidden, discord.NotFound) as error:
