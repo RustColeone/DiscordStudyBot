@@ -1,0 +1,4 @@
+# Local stdin chat. Copy to config.yml (git-ignored); extension_config.cli in core.yml overrides it.
+conversation: local
+user: local                     # add it to owners.cli in core.yml to be its owner
+user_name: you

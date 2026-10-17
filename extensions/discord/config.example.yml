@@ -1,0 +1,14 @@
+# Discord module settings. Copy to config.yml (git-ignored) and keep what you change;
+# extension_config.discord in core.yml overrides this file. Defaults shown.
+token_env: [DISCORD_BOT_TOKEN, DISCORD_TOKEN, TOKEN]   # where the bot token is read from (.env)
+attachment_max_mb: 25
+slash_commands: true            # register the commands as Discord slash commands
+talk_prefixes: []               # e.g. ["$agent", "$chat"]: "$agent hi" addresses the bot like a mention
+thread_channels: []             # channel IDs where a task asked to the bot gets its own thread
+music_dir: /path/to/music       # $music (needs ffmpeg and libopus)
+music_list: /path/to/musicList.txt
+ffmpeg: ffmpeg
+clock_interval_s: 1             # live $start clock
+clock_max: 10
+math: true                      # render $$math$$ as images
+math_max_images: 10

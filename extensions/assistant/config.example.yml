@@ -1,0 +1,5 @@
+# Assistant engine settings. Copy to config.yml (git-ignored); extension_config.assistant in core.yml
+# overrides it. Per-conversation options (instructions, …) belong in assignments in core.yml.
+max_steps: 8
+history_limit: 16
+effort: low

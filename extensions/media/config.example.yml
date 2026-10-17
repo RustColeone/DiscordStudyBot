@@ -1,0 +1,2 @@
+# $video / $clip settings. Copy to config.yml (git-ignored); extension_config.media in core.yml overrides it.
+keep_dir: clips                 # --keep-file copies (relative to data/core/extensions/media)

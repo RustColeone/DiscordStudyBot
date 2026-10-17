@@ -1,0 +1,5 @@
+# Room engine settings. Copy to config.yml (git-ignored); extension_config.room in core.yml overrides it.
+max_steps: 24
+history_limit: 16
+max_tokens: 1500
+aliases: {claude: [Haiku]}      # other names people call a persona by

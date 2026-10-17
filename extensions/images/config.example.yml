@@ -1,0 +1,7 @@
+# $draw settings. Copy to config.yml (git-ignored); extension_config.images in core.yml overrides it.
+default_provider: gemini        # or openai
+gemini_model: gemini-2.5-flash-image
+openai_model: gpt-image-2.5-sunburst
+size: 1024x1024
+quality: auto
+output_format: png

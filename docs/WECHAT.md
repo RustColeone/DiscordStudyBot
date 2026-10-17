@@ -78,9 +78,10 @@ database key setup to be run again; reading pauses until then.
 ## Configuration
 
 WeChat is a drop-in plugin: it loads by itself and stays dormant (no interface, no messages) until
-`extension_config.wechat` in core.yml or one of the `WECHAT_BRIDGE_*` variables in `.env` is set.
+`plugins/wechat/config.yml` (copy `config.example.yml`) or one of the `WECHAT_BRIDGE_*` variables in `.env` is set.
 
-`extension_config.wechat` in core.yml (environment fallbacks `WECHAT_BRIDGE_*` in `.env`):
+`plugins/wechat/config.yml` (git-ignored; `extension_config.wechat` in core.yml overrides it; environment
+fallbacks `WECHAT_BRIDGE_*` in `.env`):
 
 | Key | Default | |
 |---|---|---|

@@ -1,0 +1,8 @@
+# Terminal settings. Copy to config.yml (git-ignored); extension_config.terminal in core.yml overrides it.
+# shell: [powershell.exe, -NoLogo, -NoProfile, -NonInteractive, -Command, "-"]   # default: PowerShell / bash
+cwd: ~                          # where new shells start
+quiet_s: 1.5                    # reply once nothing new has appeared for this long
+max_wait_s: 20
+update_s: 3                     # how often the output in progress is refreshed
+idle_minutes: 60                # shells end after this long without input
+tail_chars: 1800

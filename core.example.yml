@@ -21,20 +21,11 @@
 #   exclude: [extensions/terminal, extensions/cli]
 #   paths: [../AudioManager/bot_extension]
 #
-# Each module folder may keep a git-ignored config.yml; extension_config below overrides it.
-
+# Module settings live with the module: copy its config.example.yml to config.yml (git-ignored) next
+# to it, e.g. extensions/discord/config.yml. This file holds what is shared (owners, models, personas,
+# admission, assignments); a module's settings repeated here, under extension_config, override its own:
 # extension_config:
-#   discord: {token_env: [DISCORD_BOT_TOKEN, DISCORD_TOKEN, TOKEN], attachment_max_mb: 25,
-#             music_dir: /path/to/music, music_list: /path/to/musicList.txt,   # $music (needs ffmpeg, libopus)
-#             clock_interval_s: 1, math: true,   # live $start clock; render $$math$$ as images
-#             talk_prefixes: ["$agent", "$chat"],   # "$agent hi" counts as addressing the bot
-#             thread_channels: ["123456789012345678"],   # tasks asked here get their own thread
-#             slash_commands: true}   # register the commands as Discord slash commands
-#   assistant: {max_steps: 8, history_limit: 16, effort: low}
-#   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}
-#   media: {keep_dir: clips}     # --keep-file copies (relative to data/core/extensions/media)
-#   web: {grounding: true, grounding_model: gemini-3.8-flash, searxng_url: ""}   # or SEARXNG_URL in .env
-#   cli: {conversation: local, user: local, user_name: you}
+#   discord: {thread_channels: ["123456789012345678"]}
 
 # Owners per interface (sender IDs). Default: DISCORD_OWNER_ID, else the Discord application owner.
 # owners:

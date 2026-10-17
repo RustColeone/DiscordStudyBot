@@ -1,0 +1,9 @@
+# WeChat settings (see docs/WECHAT.md). Copy to config.yml (git-ignored); extension_config.wechat in
+# core.yml overrides it. Without any settings the plugin stays dormant.
+database_root: /home/you/Documents/xwechat_files/wxid_…/db_storage
+database_keys: data/core/extensions/wechat/keys.json
+max_upload_mb: 100
+max_text_chars: 500
+coalesce_seconds: 1
+account_interval_s: 20
+chat_interval_s: 20

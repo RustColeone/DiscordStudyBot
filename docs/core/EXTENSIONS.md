@@ -140,12 +140,14 @@ EXTENSION = Extension("my_extension", setup, contracts="1", version="1", descrip
 modules:
   exclude: [extensions/terminal, whale_chan]   # a path ending or a folder name; never imported
   paths: [../MusicManager/bot_extension]
-extension_config:
-  my_extension: {some_option: 1}      # merged over the folder's config.yml into context.config
+extension_config:                     # rarely needed: the module's own config.yml is the place
+  my_extension: {some_option: 1}      # merged over that config.yml into context.config
 ```
 
-* **Settings:** `context.config` is the folder's own `config.yml`, with `extension_config.<name>` from
-  core.yml merged over it.
+* **Settings:** a module's own settings live in its folder: it ships a documented
+  `config.example.yml`, and the machine's copy is `config.yml` next to it (git-ignored). `core.yml`
+  holds what is shared (owners, models, personas, admission, assignments); `extension_config.<name>`
+  there, when present, is merged over the folder's `config.yml` into `context.config`.
 * **Secrets:** prefer `.env` and name the variable in the config (for example
   `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Putting a secret directly in the folder's `config.yml`
   (`token: …`) is supported for people who would rather not edit the environment; then
@@ -470,7 +472,7 @@ to any conversation:
   when an owner is speaking), `max_steps`, `history_limit`, `history_image_minutes`, `history_scope: sender`,
   `quote: latest` (default; quote the newest message of the run) or `quote: trigger` (keep quoting
   the original request).
-* Extension options (`extension_config.assistant`): `max_steps` (8), `history_limit` (16), `effort`
+* Module settings (`extensions/assistant/config.yml`): `max_steps` (8), `history_limit` (16), `effort`
   (`low`).
 * Images attached to the run's messages, found by its tools, or sent by the person in history shortly
   before the request (`history_image_minutes`, default 30; WeChat sends a picture and its question as
@@ -512,7 +514,7 @@ four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of t
 * Guards: a successful write is never repeated in a run, a failed action is
   retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
-* Extension options (`extension_config.room`): `max_steps`, `history_limit` (16), `max_tokens`
+* Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (16), `max_tokens`
   (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`,
   `max_steps`, `history_limit`, `history_image_minutes`, `diary: false`.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
@@ -550,7 +552,7 @@ display `$$…$$` is sent as PNG images between the text parts. Its public opera
 anyone, acting only on the calling conversation) are `discord.music` (`$music`), `music_status`,
 `music_control`, `queue_music` (one player per server, in the caller's voice channel), `time`
 (`$time`), `clock_start` (`$start`) and `clock_stop` (`$stop`); `status` and `invite` are owner-only.
-Options: `talk_prefixes` (for example `["$agent", "$chat"]`: a message starting with one is addressed
+Settings (`extensions/discord/config.yml`, see its `config.example.yml`): `talk_prefixes` (for example `["$agent", "$chat"]`: a message starting with one is addressed
 to the bot like a mention, without the prefix), `thread_channels` (channel IDs where tasks get threads), `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
 `math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` (10).
 
@@ -591,7 +593,7 @@ A line is never sent twice: if the bot restarts mid-run, it says so instead. She
 `idle_minutes` without input and when the bot stops. A routine you type (`$routine every 1h $t df -h`)
 runs `$t` on a schedule; one a model set up asks for your approval each time.
 
-Options (`extension_config.terminal`): `shell` (a command line as a list, e.g. `[cmd.exe, /Q]`; on
+Settings (`extensions/terminal/config.yml`): `shell` (a command line as a list, e.g. `[cmd.exe, /Q]`; on
 Linux use an interactive shell, or `^C` ends it), `cwd` (home), `quiet_s` (1.5), `max_wait_s` (20), `update_s` (3),
 `idle_minutes` (60), `tail_chars` (1800).
 
