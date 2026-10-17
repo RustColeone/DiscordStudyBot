@@ -200,7 +200,7 @@ All port methods act only on your own interface's addresses; anything else raise
 | `files` | `FileRef`s to local files you downloaded (optional). |
 | `received_at` | Epoch seconds the platform received it. Admission compares it with rule changes and `max_age_s`. |
 | `is_direct` | `True` for one-to-one conversations. |
-| `mentions_me` | For groups: `True` only if the message explicitly addresses this account. What counts (a mention entity, a quote-reply to the bot) is your interface's decision; prefer platform metadata over text matching. `None` if unknown. |
+| `mentions_me` | For groups: `True` only if the message explicitly addresses this account. What counts (a mention entity, a quote-reply to the bot, a typed known `$command`) is your interface's decision; prefer platform metadata over text matching. `None` if unknown. |
 | `reply_to`, `quoted_text` | ID and text of the message this one quotes or replies to, if any. |
 | `display` | What this conversation can show; usually `self.display`. |
 | `extra` | Opaque string facts for your own use; the core stores but does not interpret them. |
@@ -220,7 +220,10 @@ be submitted concurrently. Messages starting with `$` and a letter are commands 
 `$help [command]`, `$call <capability> <json arguments>` (owners only: run any capability directly, for
 example `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
 capability and operation commands (`$help` lists them). The core only understands this `$` text;
-platforms with their own command menus (Discord slash commands) translate into it.
+platforms with their own command menus (Discord slash commands) translate into it. Whether a typed
+`$command` addresses the bot in a group is likewise your interface's decision, expressed as
+`mentions_me` (the included Discord interface counts a command named in `port.commands()`). The core has
+no per-platform exceptions: fit a platform's habits to these facts in its interface.
 
 ### Interface settings
 
@@ -517,7 +520,9 @@ replaces the placeholder (progress edits it), later replies follow up, `private`
 ephemeral, and after 15 minutes replies go to the channel as usual. Commands with a `message_action`
 appear under Apps on a message (`/video`: "Download video"). `Reply.actions` become buttons whose
 presses run their `$command` as the presser. Creator-only commands are hidden from members in servers.
-Typed `$` commands keep working. Option `slash_commands: false` turns registration off.
+Typed `$` commands keep working, and in servers a typed command from the catalog (`$help`, `$remind …`)
+addresses the bot without a mention, like its slash form; unknown ones (`$AAPL is up`) stay ordinary
+chatter. Option `slash_commands: false` turns registration off.
 
 [`extensions/discord`](../../extensions/discord/interface.py) renders replies with Markdown, speaker
 labels, a rolling status block for unrequested notices, and math: inline `$…$` becomes Unicode and
@@ -559,7 +564,8 @@ live longer. Conversation history, runs and approvals are kept indefinitely.
 In any conversation, `$routine every 1h $status` posts `$status` there every hour as you, and
 `$routine weekdays 09:00 what is on my reminders today?` asks the conversation's engine each weekday
 morning. People can also just ask the bot ("check the server every hour"), which calls
-`core.add_routine`. `$routine` lists them, `$routine pause|resume|delete <id>` manages them.
+`core.add_routine`; those run the same way, as the person who asked. `$routine` lists them,
+`$routine pause|resume|delete <id>` manages them.
 
 For unattended system work that reports elsewhere, the owner creates a configured routine:
 `core.set_routine(name="medicine", daily_at="08:00", text="Remind everyone to take their medicine.")` and

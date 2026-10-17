@@ -24,8 +24,8 @@ the configuration and every extension without starting anything.
 ## What it can do
 
 Ask in plain language; the bot uses its tools when they help. Most tools are also commands: type
-`/` in Discord for the menu (or `$name …` as text, which works everywhere); `/help` lists them.
-Approvals arrive with Approve and Deny buttons.
+`/` in Discord for the menu (or `$name …` as text, which works everywhere and needs no @mention);
+`/help` lists them. Approvals arrive with Approve and Deny buttons.
 
 | | |
 |---|---|
