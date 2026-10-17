@@ -52,7 +52,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Routines | `$routine every 1h $status`, `$routine weekdays 09:00 <question for the bot>`, or just ask ("check the server every hour"); `$routine` lists, `$routine pause/resume/delete <id>` |
 | Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images; progress with a Cancel button, reactions (✅/❌/🛑) that press buttons, and optional per-task threads (`thread_channels`) |
-| Host | `$status` |
+| Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (each action waits for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
@@ -109,7 +109,7 @@ module and modules never import the core ([`tests/test_core_boundaries.py`](test
 ```
 contracts/    public API between the core and modules
 core/         gateway, manager, providers, storage, loader
-extensions/   built-in modules (discord, cli, assistant, room, terminal, basic, media, images, web, reminders, system)
+extensions/   built-in modules (discord, cli, assistant, room, terminal, host, basic, media, images, web, reminders, system)
 plugins/      external modules (whale_chan example, wechat)
 tests/        tests and fixtures
 docs/         architecture, module guide, WeChat

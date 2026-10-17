@@ -76,7 +76,8 @@ class ToolContext(Protocol):
     """Handles the core gives a capability for one call.
 
     `display` is what the calling conversation can show (for example its upload limit).
-    `files` are the files people attached to the run's requests, oldest first.
+    `files` are the files people attached to the run's requests, oldest first; `own_files` only those
+    the person who started the run attached (in a group, others may add messages to a run).
     `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces
     receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`).
     """
@@ -88,6 +89,7 @@ class ToolContext(Protocol):
     display: Display
     is_direct: bool
     files: tuple[FileRef, ...]
+    own_files: tuple[FileRef, ...]
     storage: Store
     models: Models
     workspace: Path

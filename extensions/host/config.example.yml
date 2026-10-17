@@ -1,0 +1,3 @@
+# Host settings. Copy to config.yml (git-ignored); extension_config.host in core.yml overrides it.
+downloads_dir: ~/Downloads      # where $savefile puts attachments by default
+desktop_env: {}                 # Linux: the desktop session, found by itself; e.g. {DISPLAY: ":1"}

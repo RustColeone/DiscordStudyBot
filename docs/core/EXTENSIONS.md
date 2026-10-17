@@ -376,7 +376,7 @@ for members and every conversation's items for admins. Describe the admin behavi
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
-`files` (files people attached to the run's requests); `storage` (your extension's private store, shared by your capabilities, committed on
+`files` (files people attached to the run's requests; `own_files`: only those of the person who started the run, which is what anything writing them somewhere should use); `storage` (your extension's private store, shared by your capabilities, committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a
 directory for this run's output files); `await progress(text)`; `await schedule(at, text)`
 (a one-time `reminder` notice in the calling conversation at Unix time `at`; returns its ID; raises
@@ -596,6 +596,29 @@ runs `$t` on a schedule; one a model set up asks for your approval each time.
 Settings (`extensions/terminal/config.yml`): `shell` (a command line as a list, e.g. `[cmd.exe, /Q]`; on
 Linux use an interactive shell, or `^C` ends it), `cwd` (home), `quiet_s` (1.5), `max_wait_s` (20), `update_s` (3),
 `idle_minutes` (60), `tail_chars` (1800).
+
+### The included host module
+
+[`extensions/host`](../../extensions/host/extension.py) is this computer's desktop and files, for the
+creator only, on Windows, macOS and Linux. Every capability is creator-only; all but the process list
+are writes, so a model's call waits for the creator's approval (and the creator's own `$command` is
+that approval). Nobody else sees the commands in their menus.
+
+| Capability | Command | Does |
+| --- | --- | --- |
+| `host.screenshot` | `$screenshot` | The whole screen, shrunk to a JPEG if over the upload limit |
+| `host.get_file` | `$getfile <path>` | Sends a copy of a file (path absolute, or relative to home) |
+| `host.save_files` | `$savefile [folder]` + attachment | Saves the creator's own attachments, only the ones named (`names`, so the approval shows them; default all of the creator's), to `~/Downloads` by default; existing names get ` (1)`. Files others added to the run are never saved |
+| `host.read_clipboard` / `host.write_clipboard` | `$clipboard` / `$copy <text>` | The clipboard's text |
+| `host.open` | `$open <url or path>` | Opens an http(s) URL in the browser, or a file or folder with its default app |
+| `host.processes` (read) | `$processes [cpu\|memory]` | The busiest processes |
+
+Linux uses `grim` (wlroots Wayland, e.g. the Raspberry Pi), `gnome-screenshot` or `spectacle` (GNOME or KDE
+Wayland) or `scrot` (X11) for screenshots, never X11 capture under Wayland (it would be black), `wl-clipboard`, `xclip` or `xsel` for the
+clipboard and `xdg-open`; a bot running as a service finds the logged-in desktop session by itself
+(`desktop_env` overrides it). Windows and macOS need nothing extra. Settings
+(`extensions/host/config.yml`): `downloads_dir`, `desktop_env`. Shell work (listing folders, ending
+processes) is the terminal's.
 
 ## Core capabilities
 

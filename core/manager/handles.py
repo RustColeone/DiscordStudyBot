@@ -117,10 +117,15 @@ class ToolContextHandle:
         self.run_id = record.id
         self.display: Display = trigger.display
         self.is_direct = trigger.is_direct
-        files = []
+        files, own = [], []
         for event in manager.tank.events(record.id, ("input", "inbox")):
-            files.extend(FileRef(**item) for item in event.data["request"].get("files", ()))
+            request = event.data["request"]
+            attached = [FileRef(**item) for item in request.get("files", ())]
+            files.extend(attached)
+            if str((request.get("sender") or {}).get("id", "")) == trigger.sender.id:
+                own.extend(attached)
         self.files: tuple[FileRef, ...] = tuple(files) or tuple(trigger.files)
+        self.own_files: tuple[FileRef, ...] = tuple(own) or (tuple(trigger.files) if not files else ())
         self.storage = manager.tank.store("extension:" + extension)
         profile = (manager.personas[record.personas[0]].profile if record.personas else "default")
         self.models = ModelsHandle(manager, record.id, profile)
