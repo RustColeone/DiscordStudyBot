@@ -250,6 +250,32 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(progress.deleted)
         self.assertEqual(dm.texts(), [f"Cancelled run {run.id}."])
 
+    async def test_a_thread_started_on_a_bot_message_is_addressed(self):
+        await self.start()
+        await self.say(incoming(self.room, self.alice, "<@999> echo first", self.guild, mentions=[self.client.user]))
+        answer = self.room.sent[-1]
+        on_answer = FakeChannel(answer.id)
+        on_answer.parent_id, on_answer.owner_id, on_answer.parent = 555, self.alice.id, self.room
+        await self.say(incoming(on_answer, self.alice, "echo follow up", self.guild))
+        self.assertEqual(on_answer.texts(), ["follow up"])
+        # A thread on someone else's message stays ordinary chatter (looked up once, then remembered).
+        lookups = []
+
+        async def fetch_message(message_id):
+            lookups.append(message_id)
+            return SimpleNamespace(author=self.alice if message_id == 31 else self.client.user)
+        self.room.fetch_message = fetch_message
+        on_alice = FakeChannel(31)
+        on_alice.parent_id, on_alice.owner_id, on_alice.parent = 555, self.alice.id, self.room
+        await self.say(incoming(on_alice, self.alice, "echo ignored", self.guild))
+        await self.say(incoming(on_alice, self.alice, "echo ignored again", self.guild))
+        self.assertEqual((on_alice.texts(), lookups), ([], [31]))
+        # An older bot message the bot no longer remembers is found through the lookup.
+        on_old = FakeChannel(32)
+        on_old.parent_id, on_old.owner_id, on_old.parent = 555, self.alice.id, self.room
+        await self.say(incoming(on_old, self.alice, "echo old", self.guild))
+        self.assertEqual(on_old.texts(), ["old"])
+
     async def test_thread_channels_run_each_task_in_its_own_thread(self):
         await self.start({"extension_config": {"discord": {"thread_channels": ["555"]}}})
         thread = FakeChannel(4321)

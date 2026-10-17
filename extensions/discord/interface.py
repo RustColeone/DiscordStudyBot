@@ -3,7 +3,8 @@
 Conversations are `dm:<user id>` for direct messages and `<channel id>` for server channels and
 threads. In servers the bot answers when mentioned or when someone replies to one of its messages
 (the core's admission rules decide; the interface only reports the facts). A typed known `$command`
-and every message in a thread the bot opened (`thread_channels`) count as addressed too.
+and every message in a thread the bot opened (`thread_channels`) or that was started on a bot message
+count as addressed too.
 
 Public operations act on the calling conversation only: music in the caller's voice channel of that
 server (music.py), the study clock (clock.py). Text replies render math (math_render.py).
@@ -150,6 +151,8 @@ class DiscordInterface(Interface):
         self._owners: list[str] = []
         self.status_log = StatusLog(self._send_status, self._edit_status)
         self._members: OrderedDict[tuple[str, str], Any] = OrderedDict()
+        self._sent_ids: OrderedDict[str, None] = OrderedDict()
+        self._thread_starters: OrderedDict[str, bool] = OrderedDict()
         self.math = MathRenderer(Path(data_dir) / "math", config)
         music_list = config.get("music_list")
         self.music = MusicPlayer(self, Path(config.get("music_dir") or Path(data_dir) / "music").expanduser(),
@@ -317,6 +320,35 @@ class DiscordInterface(Interface):
             return f"dm:{author.id}"
         return str(channel.id)
 
+    async def is_bot_thread(self, channel) -> bool:
+        """A thread the bot opened, or one started on a bot message (a thread's ID is its starter
+        message's). Recent bot messages are known; otherwise the starter is looked up once per thread."""
+        user = self.client.user
+        if user is None or getattr(channel, "parent_id", None) is None:
+            return False
+        if getattr(channel, "owner_id", None) == user.id:
+            return True
+        key = str(channel.id)
+        if key in self._sent_ids:
+            return True
+        if key not in self._thread_starters:
+            starter = getattr(channel, "starter_message", None)
+            if starter is None:
+                try:
+                    starter = await channel.parent.fetch_message(channel.id)
+                except (discord.HTTPException, AttributeError):
+                    starter = None
+            self._thread_starters[key] = getattr(getattr(starter, "author", None), "id", None) == user.id
+            while len(self._thread_starters) > 512:
+                self._thread_starters.popitem(last=False)
+        return self._thread_starters[key]
+
+    def _sent(self, messages) -> None:
+        for message in messages:
+            self._sent_ids[str(message.id)] = None
+        while len(self._sent_ids) > 2000:
+            self._sent_ids.popitem(last=False)
+
     async def to_request(self, message, conversation: str) -> Request:
         user = self.client.user
         channel, guild = message.channel, message.guild
@@ -336,9 +368,9 @@ class DiscordInterface(Interface):
             content = content[len(prefixed):].strip()
         # Typing a known command ("$help") addresses the bot as a slash command does; "$AAPL" does not.
         commanded = not prefixed and self.names_command(content)
-        # A thread the bot opened for a task is a conversation with the bot: everything there is addressed.
-        own_thread = (user is not None and getattr(channel, "parent_id", None) is not None
-                      and getattr(channel, "owner_id", None) == user.id)
+        # A thread the bot opened, or one someone started on a bot message, is a conversation with the
+        # bot: everything there is addressed.
+        own_thread = await self.is_bot_thread(channel)
         addressed = is_direct or mentioned or replied_to_me or bool(prefixed) or commanded or own_thread
         files, kinds = [], []
         for attachment in message.attachments or []:
@@ -654,6 +686,7 @@ class DiscordInterface(Interface):
             for kind, value in items:
                 if kind == "image":
                     Path(value).unlink(missing_ok=True)
+        self._sent(sent)
         await self._clear_progress(reply.run_id, taken_over)
         if view is not None and sent:
             self._remember_actions(sent[-1].id, reply)

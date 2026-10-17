@@ -532,7 +532,8 @@ cancellation, removes it. Reacting to a message with buttons presses one, as the
 Cancel). In the channels listed in `thread_channels`, a message addressed to the bot that is not a
 command opens a thread on it (named after it, archived after a day idle), and the run happens in the
 thread's own conversation. The thread starts fresh: the bot sees the message, not the channel's earlier
-history. In any thread the bot opened, every message counts as addressed, so follow-ups and answers to
+history. In any thread the bot opened, and in any thread someone starts on one of the bot's messages
+(anywhere, to follow up on an answer), every message counts as addressed, so follow-ups and answers to
 its questions need no mention. A thread has its own address (`discord:<thread id>`): its parent
 channel's admission rules do not apply there, so restrict threads with `discord:*` patterns if
 needed. Thread channels need the Create Public Threads permission (included in the invite link).
