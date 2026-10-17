@@ -24,6 +24,8 @@
 #   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
 #   - extensions/wechat          # WeChat account interface (Linux client; see docs/WECHAT.md)
 #   - extensions/cli
+#   - extensions/terminal        # creator-only shell on this machine: $t <line>, or a terminal channel
+#                                #   (assignment {engine: terminal, persona: terminal}); see docs/core/EXTENSIONS.md
 #   - ../AudioManager/bot_extension
 
 # Drop-in folders: every subfolder with an extension.py loads automatically (default [plugins]).

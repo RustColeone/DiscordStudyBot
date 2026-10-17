@@ -203,7 +203,7 @@ All port methods act only on your own interface's addresses; anything else raise
 | `mentions_me` | For groups: `True` only if the message explicitly addresses this account. What counts (a mention entity, a quote-reply to the bot, a typed known `$command`) is your interface's decision; prefer platform metadata over text matching. `None` if unknown. |
 | `reply_to`, `quoted_text` | ID and text of the message this one quotes or replies to, if any. |
 | `display` | What this conversation can show; usually `self.display`. |
-| `extra` | Opaque string facts for your own use; the core stores but does not interpret them. |
+| `extra` | Opaque string facts for your own use; the core stores but does not interpret them. On requests the core creates for a conversation routine it sets `routine` (the ID) and `routine_via` (`command` if a person typed it, `tool` if a model set it up through `core.add_routine`); an engine that acts without asking, like the terminal, should refuse `tool`. |
 
 `origin` stays `"person"`; only the core creates routine requests.
 
@@ -281,7 +281,7 @@ Return a `Delivery`:
 | --- | --- |
 | `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). |
 | `file` | Send `reply.file.path` (named `reply.file.name`), caption `reply.text`. The core already checked `display.files` and `max_upload_mb`. |
-| `progress` | A transient status line, one per run (`reply.run_id`): edit it in place where you can, and clear it when the run answers. It carries a `Cancel` action (`$cancel <run>`). You get it only if your `display.progress` is true or you are the control route. |
+| `progress` | A transient status line, one per run (`reply.run_id`): edit it in place where you can, and clear it when the run answers. It carries a `Cancel` action (`$cancel <run>`), which stops the run's work (an engine's turn or a `$command`'s capability). You get it only if your `display.progress` is true or you are the control route. |
 | `notice` | Phrase `reply.code` in your platform's style (table below). |
 | `event` | An interface event for the owner (you receive these if you host the control route or an event route). Show `reply.text`; `reply.data["origin_address"]` and `reply.data["interface"]` say where it came from. Return the `message_id` so owner replies can be relayed. |
 
@@ -548,6 +548,42 @@ Options: `talk_prefixes` (for example `["$agent", "$chat"]`: a message starting 
 to the bot like a mention, without the prefix), `thread_channels` (channel IDs where tasks get threads), `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
 `math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` (10).
 
+### The included terminal
+
+[`extensions/terminal`](../../extensions/terminal/extension.py) is a shell on the bot's machine for the
+creator only. It is off unless listed in `core.yml`. Each conversation has its own long-lived shell
+(PowerShell on Windows, bash on Linux), so `cd` and variables persist between inputs. There are two
+ways in:
+
+* `$t <line>` from any conversation (also `/t`): `$t` alone shows output that appeared since, and
+  `$t ^C` interrupts what is running while keeping the shell. On Linux that is a real Ctrl-C (the shell
+  is an interactive bash without rc files, so loops stop too). On Windows the running programs are
+  ended; if there are none (a loop in PowerShell itself) the shell is, and the next line starts a new
+  one. A typed `$t` needs no mention on Discord.
+* A terminal conversation, where every message is a line for the shell. In a terminal conversation,
+  type a line starting with `$` and a letter as `$t $HOME`; otherwise it is read as a command.
+
+```yaml
+extensions: [..., extensions/terminal]
+assignments:
+  "discord:123456789012345678": {engine: terminal, persona: terminal}
+admission:
+  "discord:123456789012345678": {require_mention_in_groups: false, owner_only: true}
+```
+
+After each input, the output is shown as it arrives (a progress message updated every few seconds;
+its Cancel button interrupts the program), then the last screenful once nothing new has appeared for
+`quiet_s` seconds or after `max_wait_s`. A program still running is named in the reply. Lines typed
+by the same person meanwhile go straight to the shell. The shell uses plain pipes: ordinary commands,
+scripts and line-based REPLs work; full-screen programs (vim, top) and password prompts (sudo) do not.
+A line is never sent twice: if the bot restarts mid-run, it says so instead. Shells end after
+`idle_minutes` without input and when the bot stops. A routine you type (`$routine every 1h $t df -h`)
+runs `$t` on a schedule; one a model set up asks for your approval each time.
+
+Options (`extension_config.terminal`): `shell` (a command line as a list, e.g. `[cmd.exe, /Q]`; on
+Linux use an interactive shell, or `^C` ends it), `cwd` (home), `quiet_s` (1.5), `max_wait_s` (20), `update_s` (3),
+`idle_minutes` (60), `tail_chars` (1800).
+
 ## Core capabilities
 
 All owner-only; the writes need approval unless pre-approved (an owner's `$command` counts as
@@ -578,7 +614,10 @@ live longer. Conversation history, runs and approvals are kept indefinitely.
 In any conversation, `$routine every 1h $status` posts `$status` there every hour as you, and
 `$routine weekdays 09:00 what is on my reminders today?` asks the conversation's engine each weekday
 morning. People can also just ask the bot ("check the server every hour"), which calls
-`core.add_routine`; those run the same way, as the person who asked. `$routine` lists them,
+`core.add_routine`; those run the same way, as the person who asked, with one difference: a routine a
+model set up does not speak for its creator. Its `$commands` are not the creator's approval (writes
+wait for approval), it cannot use `$approve`, `$deny`, `$admin` or `$call`, and routines it adds are
+marked the same way. `$routine` lists them,
 `$routine pause|resume|delete <id>` manages them.
 
 For unattended system work that reports elsewhere, the owner creates a configured routine:
