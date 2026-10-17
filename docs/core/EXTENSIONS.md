@@ -552,7 +552,7 @@ to the bot like a mention, without the prefix), `thread_channels` (channel IDs w
 
 [`extensions/terminal`](../../extensions/terminal/extension.py) is a shell on the bot's machine for the
 creator only. It is off unless listed in `core.yml`. Each conversation has its own long-lived shell
-(PowerShell on Windows, bash on Linux), so `cd` and variables persist between inputs. There are two
+(PowerShell on Windows, bash on Linux), so `cd` and variables persist between inputs. There are three
 ways in:
 
 * `$t <line>` from any conversation (also `/t`): `$t` alone shows output that appeared since, and
@@ -562,6 +562,11 @@ ways in:
   one. A typed `$t` needs no mention on Discord.
 * A terminal conversation, where every message is a line for the shell. In a terminal conversation,
   type a line starting with `$` and a letter as `$t $HOME`; otherwise it is read as a command.
+* Models: in a run the creator started, the assistant can use `terminal.send` (one line; a write, so
+  each line waits for the creator's approval, which shows the exact line) and `terminal.peek` (new
+  output, no approval). This is how "ask the bot to do something on my computer" works. Pre-approving
+  `terminal.send` in an assignment removes that check; don't, unless the conversation is yours alone.
+  Nobody but the creator can reach the shell, by command, terminal conversation or model.
 
 ```yaml
 extensions: [..., extensions/terminal]

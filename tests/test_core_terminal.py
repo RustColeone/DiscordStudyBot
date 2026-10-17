@@ -130,6 +130,21 @@ class TerminalCoreTests(unittest.IsolatedAsyncioTestCase):
                       "for that.", texts)
         self.assertFalse(any("from-a-model" in text for text in texts))
 
+    async def test_models_reach_the_shell_only_for_the_creator_and_each_line_is_approved(self):
+        await self.chat.say('tool terminal.send {"input": "echo model-line"}', sender="boss")
+        await settle(self.core)
+        approval = self.core.tank.approvals("pending")[0]
+        self.assertEqual((approval["name"], approval["arguments"]), ("terminal.send", {"input": "echo model-line"}))
+        await iface(self.core, "owner").say(f"$approve {approval['id']}", conversation="dm", sender="boss")
+        await settle(self.core)
+        self.assertIn("approved: model-line", self.chat.texts("room", "text"))
+        await self.chat.say('tool terminal.peek {}', sender="boss")
+        await self.chat.say('tool terminal.send {"input": "echo nope"}')
+        await settle(self.core)
+        texts = self.chat.texts("room", "text")
+        self.assertIn("success: (no new output)", texts)
+        self.assertIn("failed: terminal.send is available only to the owner", texts)
+
     async def test_a_terminal_conversation_and_t_share_one_shell(self):
         await self.chat.say("Y=7", conversation="term", sender="boss")
         await settle(self.core)
@@ -148,4 +163,9 @@ class TerminalCoreTests(unittest.IsolatedAsyncioTestCase):
         await settle(self.core)
         self.assertEqual(self.core.tank.run(runs[0].id).status, "cancelled")
         self.assertEqual(self.chat.texts("room", "text"), [f"Cancelled run {runs[0].id}."])
-        self.assertEqual(self.core.manager.engines["terminal"].terminals.shells["chat:room"].running(), [])
+        shell = self.core.manager.engines["terminal"].terminals.shells["chat:room"]
+        for _ in range(40):  # the interrupted program may take a moment to exit
+            if not shell.running():
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual(shell.running(), [])

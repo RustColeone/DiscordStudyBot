@@ -39,7 +39,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images; progress with a Cancel button, reactions (✅/❌/🛑) that press buttons, and optional per-task threads (`thread_channels`) |
 | Host | `$status` |
-| Terminal | Optional, creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), or a whole channel becomes a terminal |
+| Terminal | Optional, creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
@@ -95,7 +95,7 @@ extension and extensions never import the core ([`tests/test_core_boundaries.py`
 contracts/    public API between the core and extensions
 core/         gateway, manager, providers, storage, loader
 extensions/   included extensions (discord, cli, assistant, room, basic, media, images, web, reminders, system, wechat)
-plugins/      drop-in extensions (whale_chan example)
+plugins/      drop-in extensions (whale_chan example, wechat)
 tests/        tests and fixtures
 docs/         architecture, extension guide, WeChat
 ```

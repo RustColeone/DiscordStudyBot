@@ -1,9 +1,11 @@
 """Terminal: a shell on this machine, for the bot's creator only.
 
-Two ways in, one shell per conversation:
+Three ways in, one shell per conversation:
 * `$t <line>` in any conversation sends a line (`$t` alone shows new output, `$t ^C` interrupts);
 * a conversation assigned to the `terminal` engine (`persona: terminal`) sends every message there to
-  the shell.
+  the shell;
+* models, in runs the creator started, call `terminal.send` (each line waits for the creator's
+  approval) and `terminal.peek`.
 After each input the output is shown as it arrives (every few seconds), then the last screenful once
 it goes quiet. Off unless listed in core.yml; see docs/core/EXTENSIONS.md.
 """
@@ -11,6 +13,7 @@ it goes quiet. Off unless listed in core.yml; see docs/core/EXTENSIONS.md.
 from __future__ import annotations
 
 import atexit
+import platform
 from pathlib import Path
 
 from contracts import (Capability, Command, Contributions, Engine, EngineSpec, Extension, Option, Persona, Risk,
@@ -70,6 +73,12 @@ def setup(context) -> Contributions:
                                           tool.display.max_text_chars)
         return ToolResult.ok(output)
 
+    async def peek(arguments, tool) -> ToolResult:
+        output = await terminals.exchange(str(tool.address), "", tool.progress, None, tool.display.markdown,
+                                          tool.display.max_text_chars)
+        return ToolResult.ok(output)
+
+    system = f"{platform.system()} ({Path(terminals.argv[0]).name})"
     command = Command("t", "Type a line into this machine's shell (creator only)",
                       (Option("input", f"A shell line; empty shows new output, {INTERRUPT} interrupts"),),
                       examples=("ls", INTERRUPT, ""), access="creator")
@@ -77,10 +86,18 @@ def setup(context) -> Contributions:
         # Engines need a persona; this one only names the speaker (no model is used).
         Persona("terminal", "Terminal", "A shell on the bot's machine; no model is involved."),
     ], capabilities=[
-        Capability("terminal.send", "Send a line to this conversation's shell on the bot's machine and return "
-                   "its output.", send, {"input": {"type": "string"}}, risk=Risk.WRITE, internal=True,
-                   access="creator", command=command, command_argument="input",
+        # Offered to models in the creator's own runs; every line still waits for the creator's approval.
+        Capability("terminal.send", f"Type one line into the shell on the bot's own computer, {system}, and get "
+                   "its output (the last screenful once it goes quiet). The shell belongs to this conversation and "
+                   "keeps its directory and variables between lines. It has no terminal: no full-screen programs, "
+                   f"no password prompts. '{INTERRUPT}' interrupts the running program. The owner approves each "
+                   "line, so send one purposeful command at a time and say why.", send,
+                   {"input": {"type": "string", "description": f"One shell line, or {INTERRUPT}"}},
+                   risk=Risk.WRITE, access="creator", command=command, command_argument="input",
                    timeout_s=float(config.get("max_wait_s", 20)) + 30),
+        Capability("terminal.peek", "Show output this conversation's shell printed since it was last shown (for "
+                   "a command still running). Sends nothing.", peek, risk=Risk.READ, access="creator",
+                   timeout_s=30),
     ])
 
 
