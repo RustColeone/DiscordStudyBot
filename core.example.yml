@@ -19,7 +19,7 @@
 #   host (creator-only $screenshot, $getfile, $savefile, $clipboard, $copy, $open, $processes).
 # External ones here: whale_chan (鲸酱), wechat (dormant until extension_config.wechat is set; docs/WECHAT.md).
 # modules:
-#   exclude: [extensions/terminal, extensions/cli]
+#   exclude: [extensions/terminal, whale_chan]
 #   paths: [../AudioManager/bot_extension]
 #
 # Module settings live with the module: copy its config.example.yml to config.yml (git-ignored) next
