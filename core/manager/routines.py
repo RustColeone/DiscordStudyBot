@@ -40,8 +40,10 @@ class RoutineDesk:
     def _gateway(self):
         return self._manager.gateway
 
-    def add(self, caller: Caller, schedule_text: str, text: str, chat: str | None = None) -> dict:
-        """`schedule_text` is `every 1h`, `daily 08:00`, … ; returns the stored routine."""
+    def add(self, caller: Caller, schedule_text: str, text: str, chat: str | None = None,
+            via: str = "command") -> dict:
+        """`schedule_text` is `every 1h`, `daily 08:00`, … ; returns the stored routine. `via` is `command`
+        when a person typed it, `tool` when a model set it up (its firings then carry no approval)."""
         address, is_direct = caller.address, caller.is_direct
         if chat:
             if not caller.admin:
@@ -56,7 +58,7 @@ class RoutineDesk:
             if len(mine) >= MEMBER_MAX_PER_CONVERSATION:
                 raise PermissionError(f"You already have {MEMBER_MAX_PER_CONVERSATION} routines here; "
                                       "delete one first")
-        return self._gateway.add_routine(address, caller.sender, is_direct, schedule, rest)
+        return self._gateway.add_routine(address, caller.sender, is_direct, schedule, rest, via=via)
 
     def visible(self, caller: Caller) -> list[dict]:
         if caller.admin:
@@ -104,7 +106,7 @@ class RoutineDesk:
         title = "All routines" if caller.admin else "Routines here"
         return "\n".join([f"{title}:", *(self.line(caller, item) for item in items)])
 
-    def command(self, caller: Caller, text: str) -> str:
+    def command(self, caller: Caller, text: str, via: str = "command") -> str:
         """`$routine [list] | [add] [--chat <address>] <schedule> <text> | delete|pause|resume <id>`."""
         tokens = text.split()
         chat = None
@@ -126,7 +128,7 @@ class RoutineDesk:
                 return f"Routine {routine['id']} {done}."
             if action == "add":
                 tokens = tokens[1:]
-            routine = self.add(caller, "", " ".join(tokens), chat)
+            routine = self.add(caller, "", " ".join(tokens), chat, via=via)
         except (ValueError, LookupError, PermissionError) as error:
             return str(error)
         when = dt.datetime.fromtimestamp(routine["next_at"]).astimezone().strftime("%Y-%m-%d %H:%M")

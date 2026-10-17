@@ -87,7 +87,8 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
     async def add_routine(arguments, context) -> ToolResult:
         try:
             routine = manager.routines.add(caller(context), arguments["schedule"], arguments["text"],
-                                           arguments.get("chat"))
+                                           arguments.get("chat"),
+                                           via="command" if manager.typed_call(context.run_id) else "tool")
         except PermissionError as error:
             return ToolResult.fail(str(error), "not_permitted")
         return ToolResult.ok(f"Routine {routine['id']} added: {describe(routine)}; it sends {routine['text']!r}.",

@@ -124,6 +124,20 @@ class RoutineTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Only admins", await self.say(
             'tool core.add_routine {"schedule": "daily 09:00", "text": "x", "chat": "chat:elsewhere"}'))
 
+    async def test_a_routine_a_model_set_up_does_not_speak_for_its_creator(self):
+        for text in ("$remember from the model", "$admin lock", "$routine every 1h $remember laundered"):
+            await self.say(f'tool core.add_routine {{"schedule": "every 1h", "text": "{text}"}}', sender="boss")
+        await self.say("$routine every 1h $remember typed", sender="boss")
+        await self.fire(61)
+        texts = self.chat.texts("room")
+        self.assertIn("Saved note #1.", texts)  # the typed one, as the creator's own approval
+        self.assertEqual([item["arguments"] for item in self.core.tank.approvals("pending")],
+                         [{"text": "from the model"}])
+        self.assertIn("A routine set up through a tool cannot use $admin; type `$routine` yourself for that.", texts)
+        self.assertFalse(self.core.manager.settings.get("lock"))
+        laundered = next(item for item in self.core.gateway.conversation_routines() if "laundered" in item["text"])
+        self.assertEqual(laundered["via"], "tool")
+
 
 if __name__ == "__main__":
     unittest.main()

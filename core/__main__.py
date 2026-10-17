@@ -41,7 +41,11 @@ async def main(arguments: argparse.Namespace) -> int:
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, task.cancel)
+        try:
+            loop.add_signal_handler(sig, task.cancel)
+        except NotImplementedError:
+            # Windows: asyncio.run already turns Ctrl-C into cancelling this task.
+            break
     try:
         await core.build()
         describe(core)

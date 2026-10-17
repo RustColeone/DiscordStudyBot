@@ -335,6 +335,19 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(iface(core, "owner").texts("dm")[-1], f"Approval {approval_id} is not pending.")
         self.assertEqual(self.counts(), {})
 
+    async def test_a_command_cancelling_its_own_conversation_stops_the_others_and_answers(self):
+        core = await self.core()
+        await iface(core).say("hold")
+        for _ in range(100):
+            if core.tank.runs(("running",)):
+                break
+            await asyncio.sleep(0.01)
+        held = core.tank.runs(("running",))[0]
+        await iface(core).say('$call core.cancel_runs {"address": "chat:room"}', sender="boss")
+        await asyncio.wait_for(settle(core), 5)
+        self.assertEqual(core.tank.run(held.id).status, "cancelled")
+        self.assertIn("open run(s) in chat:room", iface(core).texts("room")[-1])
+
     # ---- routing, routines, operations -------------------------------------------------------------
     async def test_progress_goes_to_control_when_the_conversation_hides_it(self):
         core = await self.core({"extension_config": {"fake": {"interfaces": {"quiet": {"progress": False}}}}})

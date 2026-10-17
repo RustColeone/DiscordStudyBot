@@ -395,7 +395,8 @@ class Gateway:
         request = Request(id=f"routine:{routine_id}:{int(routine['next_at'])}", address=address, sender=sender,
                           text=routine["text"], received_at=now, origin="routine",
                           is_direct=bool(routine.get("is_direct")), mentions_me=True,
-                          display=self.display_for(address), extra={"routine": routine_id})
+                          display=self.display_for(address),
+                          extra={"routine": routine_id, "routine_via": routine.get("via", "command")})
         reason = None
         if not self.rule_for(address).get("enabled", True):
             reason = "conversation_closed"
@@ -413,7 +414,8 @@ class Gateway:
 
     # ---- conversation routines --------------------------------------------------------------------
     def add_routine(self, address: Address, sender: Sender, is_direct: bool, schedule: Mapping[str, Any],
-                    text: str) -> dict:
+                    text: str, via: str = "command") -> dict:
+        """`via`: `command` (a person typed it) or `tool` (a model set it up; see Manager.vouched)."""
         schedule = schedules.validate(schedule)
         text = text.strip()
         if not text:
@@ -427,7 +429,7 @@ class Gateway:
         routine_id = schedules.new_id()
         routine = {**schedule, "address": str(address), "sender": {"id": sender.id, "name": sender.name},
                    "is_direct": bool(is_direct), "text": text, "enabled": True, "created_at": now,
-                   "next_at": upcoming}
+                   "next_at": upcoming, "via": "tool" if via == "tool" else "command"}
         self.bottle.set_routine(routine_id, routine)
         self.audit.record("routine_added", routine=routine_id, address=str(address))
         return {"id": routine_id, **routine}

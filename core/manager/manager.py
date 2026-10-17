@@ -858,6 +858,12 @@ class Manager:
         async def say(message: str, private: bool = False) -> None:
             await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id, private=private))
 
+        # A routine a model set up acts as its creator but cannot speak for them: its $commands are not
+        # their approval, and the creator-only built-ins are closed to it.
+        vouched = self.vouched(request)
+        if not vouched and name in ("approve", "deny", "admin", "call"):
+            await say(f"A routine set up through a tool cannot use ${name}; type `$routine` yourself for that.")
+            return
         if name in ("approve", "deny"):
             await say(await self.decide(rest, name == "approve", request) if rest else f"Usage: ${name} <id>")
         elif name == "runs":
@@ -877,7 +883,8 @@ class Manager:
             await say(self.admin_command(rest, request), private=True)
         elif name == "routine":
             caller = self.caller(request)
-            await say(self.routines.command(caller, rest), private=caller.admin)
+            await say(self.routines.command(caller, rest, via="command" if vouched else "tool"),
+                      private=caller.admin)
         elif name == "tools":
             assignment = self.assignment_for(request.address)
             names = [c.name for c in self.capabilities.values()
@@ -910,7 +917,17 @@ class Manager:
             if level < LEVELS[capability.command.access]:
                 await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
                 return
-            await self._command_run(request, capability, rest, owner)
+            await self._command_run(request, capability, rest, owner and vouched)
+
+    @staticmethod
+    def vouched(request: Request) -> bool:
+        """False for a request fired by a routine that a model set up (through `core.add_routine`)."""
+        return not (request.origin == "routine" and request.extra.get("routine_via") == "tool")
+
+    def typed_call(self, run_id: str) -> bool:
+        """The run is someone's own `$command` (not a model's tool call, nor a model-made routine's)."""
+        record = self.tank.run(run_id)
+        return record is not None and record.engine == COMMAND_ENGINE and self.vouched(request_from_dict(record.trigger))
 
     def commands(self) -> list[Command]:
         """The command catalog: built-ins, then capability and operation commands by name."""
@@ -1078,8 +1095,13 @@ class Manager:
                            status="running", origin=request.origin, trigger=request_to_dict(request),
                            usage={"model_calls": 0, "tool_calls": 0, "seconds": 0.0})
         self.tank.create_run(record)
-        # An explicit $command from the owner is the owner's approval of that exact action.
-        result = await self.call_tool(record.id, capability.name, arguments, approved=owner)
+        # Registered like an engine run, so cancelling the run (its Cancel button) stops the work.
+        self._tasks[record.id] = asyncio.current_task()
+        try:
+            # An explicit $command from the owner is the owner's approval of that exact action.
+            result = await self.call_tool(record.id, capability.name, arguments, approved=owner)
+        finally:
+            self._tasks.pop(record.id, None)
         if result.status == "needs_approval":
             self.tank.update_run(record.id, status="waiting_approval")
             await self._deliver(Reply(request.address, "notice", code="waiting_approval", in_reply_to=request.id,
@@ -1124,7 +1146,7 @@ class Manager:
             # Cancelled from inside its own work (an interface cancelling during delivery): waiting for
             # the task would wait for ourselves, so cancel it once the current step returns.
             asyncio.get_running_loop().call_soon(task.cancel)
-        elif task is not None:
+        elif task is not None and task is not asyncio.current_task():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         self.audit.record("run_cancelled", run=record.id)
