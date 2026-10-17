@@ -8,7 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Literal, Mapping, Protocol
 
-from contracts.commands import Command, derive
+from contracts.commands import Access, Command, derive
 from contracts.messages import Address, Display, FileRef, Origin, Sender
 from contracts.models import Models
 from contracts.stores import Store
@@ -90,6 +90,7 @@ class ToolContext(Protocol):
     storage: Store
     models: Models
     workspace: Path
+    access: Access  # the caller's effective level: member, admin or creator
 
     async def progress(self, text: str) -> None: ...
 
@@ -113,6 +114,9 @@ class Capability:
     `name` is `<extension>.<action>`. `parameters` are JSON-schema properties; `required` lists
     mandatory ones. `needs` lists Display features the conversation must support (for example `files`).
     `internal` capabilities are callable by engines but not offered to models as tools.
+    `access` is the lowest level that may call it (`member`, `admin`, `creator`; `owner_only` means
+    `creator`). The caller's level is `ToolContext.access`, so a capability may also do more for higher
+    levels (an admin sees every conversation's items, a member only their own).
     `command`, when set, makes the capability available as `$<command> <text>`, with the text passed
     as `command_argument`. It may be a name or a `Command` declaring options and a template for
     interfaces with native command menus; a name becomes a `Command` with one option for
@@ -131,8 +135,13 @@ class Capability:
     command: Command | str | None = None
     command_argument: str | None = None
     timeout_s: float = 600.0
+    access: Access = "member"
 
     def __post_init__(self):
+        if self.owner_only:
+            object.__setattr__(self, "access", "creator")
+        if self.access not in ("member", "admin", "creator"):
+            raise ValueError(f"{self.name}: access must be member, admin or creator")
         if isinstance(self.command, str):
             object.__setattr__(self, "command", derive(self.command, self.description, self.command_argument,
                                                        self.parameters, tuple(self.required)))

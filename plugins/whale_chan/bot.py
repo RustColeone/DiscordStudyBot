@@ -22,6 +22,7 @@ NOTICES = {
     "not_permitted": "I can't do that here.",
     "unknown_command": "Unknown command `${command}`. Try `$help`.",
     "budget_exceeded": "⚠️ That took more work than I'm allowed for one request.",
+    "locked": "🔧 本鲸在维护中，请稍后再来～",
 }
 
 

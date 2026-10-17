@@ -37,6 +37,7 @@ NOTICES = {
     "waiting_approval": "⏳ Waiting for the owner's approval (`{approval_id}`).",
     "unknown_command": "Unknown command `${command}`. Try `$help`.",
     "not_permitted": "That command isn't available here.",
+    "locked": "🔧 The bot is in maintenance right now; please try again later.",
 }
 
 

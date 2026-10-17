@@ -13,6 +13,7 @@ NOTICES = {
     "waiting_approval": "[waiting for the owner's approval {approval_id}]",
     "unknown_command": "[unknown command ${command}]",
     "not_permitted": "[not permitted here]",
+    "locked": "[the bot is in maintenance]",
     "relayed": "[relayed to {address}: ok={ok}]",
 }
 

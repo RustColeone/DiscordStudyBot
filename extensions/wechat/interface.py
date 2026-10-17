@@ -28,6 +28,7 @@ NOTICES = {
     "waiting_approval": "⏳ 这个操作需要主人批准，请稍等。",
     "unknown_command": "未知命令 ${command}。发送 $help 查看可用命令。",
     "not_permitted": "这里不能使用这个命令。",
+    "locked": "🔧 本鲸在维护中，请稍后再来～",
 }
 STATES = {
     "logged_out": "WeChat is logged out. Run $wechat_login and scan the QR code.",

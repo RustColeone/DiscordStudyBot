@@ -215,6 +215,7 @@ after `submit` returns.** Submit messages of one conversation in order; differen
 be submitted concurrently. Messages starting with `$` and a letter are commands (subject to the
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
 `$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
+`$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins),
 `$help [command]`, `$call <capability> <json arguments>` (owners only: run any capability directly, for
 example `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
 capability and operation commands (`$help` lists them). The core only understands this `$` text;
@@ -354,6 +355,12 @@ Capability("music.find_tracks", "Search the library by artist or title.", find_t
 | `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call. `command` is a name, or a `Command` declaration (below). |
 | `timeout_s` | Hard limit for one call (default 600). |
 
+**Access levels.** `access="admin"` or `"creator"` (or `owner_only=True`) limits who may call a
+capability at all; `context.access` (`member`, `admin`, `creator`) is the caller's effective level, so
+one capability can also behave differently by level, for example listing only the caller's own items
+for members and every conversation's items for admins. Describe the admin behaviour in the command's
+`admin_help`; `$help` shows it to admins only.
+
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
 `files` (files people attached to the run's requests); `storage` (your extension's private store, shared by your capabilities, committed on
@@ -394,6 +401,7 @@ class MyEngine(Engine):
 | `resumed` | `True` when the core restarted during the run. |
 | `options` | The assignment's `options` mapping (per-conversation settings). |
 | `owner` | Whether the trigger's sender is an owner of its interface (never for routines). |
+| `access` | The trigger's sender's effective level: `member`, `admin` or `creator` (see below). |
 | `personas`, `memory(name)` | Personas of this conversation; each persona's private persistent store. |
 | `diary(name)` | That persona's notes about the trigger's sender in this conversation (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |

@@ -61,6 +61,7 @@ class SessionHandle:
         self.resumed = resumed
         self.options = dict(record.assignment.get("options") or {})
         self.owner = record.origin != "routine" and manager.is_owner(self.trigger)
+        self.access = manager.caller_access(record)
         profile = self.personas[0].profile if self.personas else "default"
         self.models = ModelsHandle(manager, record.id, profile)
         self.tools = ToolsHandle(manager, record.id)
@@ -123,6 +124,7 @@ class ToolContextHandle:
         profile = (manager.personas[record.personas[0]].profile if record.personas else "default")
         self.models = ModelsHandle(manager, record.id, profile)
         self.workspace = workspace
+        self.access = manager.caller_access(record)
 
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)

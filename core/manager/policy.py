@@ -118,5 +118,8 @@ class Owners:
     def ids(self, interface: str) -> set[str]:
         return self._owners.get(interface) or self._reported.get(interface, set())
 
+    def interfaces(self) -> list[str]:
+        return sorted({*self._owners, *self._reported})
+
     def is_owner(self, interface: str, sender: Sender) -> bool:
         return sender.kind == "person" and sender.id in self.ids(interface)

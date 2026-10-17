@@ -130,6 +130,16 @@ Owners and the control route come from `core.yml`. An interface may report the p
 (`port.set_owners`, e.g. the Discord application owner and their DM); that is used only for interfaces
 with no configured owners and when no control route is configured.
 
+## Access levels
+
+Everyone acts at one of three levels: `creator` (the owners), `admin` (added by the creator with
+`$admin add --user <id>`; per platform identity such as `discord:123`) or `member`. Admins can switch
+their own admin view off and on (`$admin off|on`) to see the bot as a member. Capabilities and
+commands declare the lowest level that may run them, and receive the caller's level
+(`ToolContext.access`, `Session.access`), so each one decides what more an admin may see or do; there
+is no separate admin command list. Approvals stay with the creator. `$admin lock` makes the bot answer
+only the creator and admins (members get one maintenance notice per conversation) until `$admin unlock`.
+
 ## Interface reports
 
 Besides `submit`, an interface's port can `notify` the owner (a `Reply(kind="event")` routed by

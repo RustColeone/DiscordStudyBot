@@ -104,6 +104,7 @@ class Gateway:
         self._admin = GatewayAdmin(self)
         self._ready: dict[str, tuple[bool, str]] = {}
         self._started = False
+        self._lock_told: dict[str, float] = {}
         self.forwards = ScopedStore(bottle.db, "kv", "core:forwards")
         for pattern, rule in (rules or {}).items():
             self._admin.set_rule(pattern, rule)
@@ -175,6 +176,8 @@ class Gateway:
             return "sender_not_allowed"
         if not request.is_direct and rule.get("require_mention_in_groups", True) and request.mentions_me is not True:
             return "not_mentioned"
+        if self.manager.locked and self.manager.role_of(request) == "member":
+            return "locked"
         return "accepted"
 
     async def submit(self, interface: str, request: Request) -> SubmitResult:
@@ -209,6 +212,8 @@ class Gateway:
                         return SubmitResult(True, "relayed")
                 decision = "accepted" if command and owner else self.admit(request)
                 self.audit.record("admission", address=str(request.address), decision=decision, command=command)
+                if decision == "locked":
+                    self._tell_locked(request)
                 if decision != "accepted":
                     return SubmitResult(False, decision)
                 if command:
@@ -220,6 +225,16 @@ class Gateway:
                 # Not durably accepted: allow the interface to submit it again.
                 self.bottle.forget_seen(key)
                 raise
+
+    def _tell_locked(self, request: Request) -> None:
+        """While locked, each conversation hears once (per lock) that the bot is in maintenance."""
+        epoch = float(self.manager.settings.get("lock_epoch") or 0)
+        key = str(request.address)
+        if self._lock_told.get(key) == epoch:
+            return
+        self._lock_told[key] = epoch
+        self._spawn(self.deliver(Reply(request.address, "notice", code="locked", in_reply_to=request.id,
+                                       text="The bot is in maintenance right now; please try again later.")))
 
     def _spawn(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)

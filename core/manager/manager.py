@@ -50,7 +50,19 @@ BUILTIN_COMMANDS = (
              Option("arguments", "JSON object")), template="{capability}[ {arguments}]", access="creator",
             examples=('core.list_rules', 'basic.now {"timezone": "Asia/Tokyo"}')),
 )
+ADMIN_COMMAND = Command(
+    "admin", "Admins and maintenance: status, list, add/remove admins (creator), lock, your admin view",
+    (Option("action", "What to do", required=False,
+            choices=("status", "list", "add", "remove", "lock", "unlock", "on", "off")),
+     Option("user", "User ID or mention (add/remove), e.g. 123456 or wechat:wxid_…")),
+    template="[{action}][ --user {user}]", access="admin",
+    examples=("", "add --user 123456789", "lock", "unlock", "off"),
+    admin_help="lock: only the creator and admins are answered (members are told it is maintenance); "
+               "unlock ends it. off/on: switch your own admin view (off = see the bot as a member). "
+               "add/remove: creator only.")
+BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND)
 CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
+LEVELS = {"member": 0, "admin": 1, "creator": 2}
 
 
 # The run whose engine task (or a task it started) is executing; child tasks inherit it.
@@ -85,6 +97,8 @@ class Manager:
         self.personas = dict(personas)
         self._config_assignments = dict(assignments)
         self._overrides = tank.store("core:assignments")
+        self.admins = tank.store("core:admins")
+        self.settings = tank.store("core:settings")
         self.owners = owners
         self._control_config = control
         self._control_reported: Address | None = None
@@ -253,6 +267,32 @@ class Manager:
     # ---- inbound ----------------------------------------------------------------------------------
     def is_owner(self, request: Request) -> bool:
         return self.owners.is_owner(request.address.interface, request.sender)
+
+    # ---- access levels ------------------------------------------------------------------------
+    @staticmethod
+    def identity(interface: str, sender_id: str) -> str:
+        return f"{interface}:{sender_id}"
+
+    def role_of(self, request: Request) -> str:
+        """The level someone holds: creator (owners), admin (added by the creator) or member."""
+        if self.is_owner(request):
+            return "creator"
+        if request.sender.kind == "person" and self.admins.get(self.identity(request.address.interface,
+                                                                               request.sender.id)):
+            return "admin"
+        return "member"
+
+    def access_of(self, request: Request) -> str:
+        """The level someone acts with: their role, unless they switched their admin view off."""
+        role = self.role_of(request)
+        if role != "member" and self.settings.get("view_off:" + self.identity(request.address.interface,
+                                                                             request.sender.id)):
+            return "member"
+        return role
+
+    @property
+    def locked(self) -> bool:
+        return bool(self.settings.get("lock"))
 
     def assignment_for(self, address: Address) -> Assignment | None:
         return most_specific(self.assignments, address)[1]
@@ -489,11 +529,11 @@ class Manager:
         return result
 
     # ---- tools ------------------------------------------------------------------------------------
-    def _caller_is_owner(self, record: RunRecord, assignment: Assignment) -> bool:
+    def caller_access(self, record: RunRecord) -> str:
         trigger = request_from_dict(record.trigger)
-        if trigger.origin == "routine":
-            return assignment.trusted
-        return self.owners.is_owner(trigger.address.interface, trigger.sender)
+        if trigger.origin == "routine" and trigger.address.interface == "routine":
+            return "creator" if Assignment.from_dict(record.assignment).trusted else "member"
+        return self.access_of(trigger)
 
     def _refusal(self, record: RunRecord, capability: Capability | None, name: str) -> ToolResult | None:
         if capability is None:
@@ -501,8 +541,9 @@ class Manager:
         assignment = Assignment.from_dict(record.assignment)
         if not assignment.allows(capability.name):
             return ToolResult.fail(f"{capability.name} is not allowed in this conversation", "not_allowed")
-        if capability.owner_only and not self._caller_is_owner(record, assignment):
-            return ToolResult.fail(f"{capability.name} is available only to the owner", "owner_only")
+        if LEVELS[self.caller_access(record)] < LEVELS[capability.access]:
+            who = "the owner" if capability.access == "creator" else "admins"
+            return ToolResult.fail(f"{capability.name} is available only to {who}", "owner_only")
         display = request_from_dict(record.trigger).display
         missing = set(capability.needs) - display.features()
         if missing:
@@ -794,6 +835,7 @@ class Manager:
         name, _, rest = text.partition(" ")
         name, rest = name.strip().lower(), rest.strip()
         owner = self.is_owner(request)
+        level = LEVELS[self.access_of(request)]
         self.tank.record_message(str(request.address), "in", request.text, sender_id=request.sender.id,
                                  sender_name=request.sender.name, message_id=request.id, at=request.received_at)
 
@@ -803,7 +845,7 @@ class Manager:
         if name in ("approve", "deny"):
             await say(await self.decide(rest, name == "approve", request) if rest else f"Usage: ${name} <id>")
         elif name == "runs":
-            runs = self.tank.runs(limit=20, address=None if owner else str(request.address))
+            runs = self.tank.runs(limit=20, address=None if level >= 1 else str(request.address))
             pending = {item["run_id"]: item["id"] for item in self.tank.approvals("pending")}
             lines = [f"{run.id} {run.status} {run.address} {run.engine}"
                      + (f" approval={pending[run.id]}" if run.id in pending else "") for run in runs]
@@ -812,10 +854,12 @@ class Manager:
             await say(await self.cancel(rest or None, request))
         elif name == "memory":
             await say(self.memory_command(rest, request))
+        elif name == "admin":
+            await say(self.admin_command(rest, request))
         elif name == "tools":
             assignment = self.assignment_for(request.address)
             names = [c.name for c in self.capabilities.values()
-                     if assignment and assignment.allows(c.name) and (owner or not c.owner_only)]
+                     if assignment and assignment.allows(c.name) and level >= LEVELS[c.access]]
             await say(", ".join(sorted(names)) or "No tools here.")
         elif name == "call":
             target, _, raw = rest.partition(" ")
@@ -841,6 +885,9 @@ class Manager:
                 await self._deliver(Reply(request.address, "notice", code="unknown_command", in_reply_to=request.id,
                                           data={"command": name}))
                 return
+            if level < LEVELS[capability.command.access]:
+                await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
+                return
             await self._command_run(request, capability, rest, owner)
 
     def commands(self) -> list[Command]:
@@ -850,13 +897,10 @@ class Manager:
             if capability.command is None:
                 continue
             command = capability.command
-            if capability.owner_only and command.access != "creator":
-                command = dataclasses.replace(command, access="creator")
+            if LEVELS[capability.access] > LEVELS[command.access]:
+                command = dataclasses.replace(command, access=capability.access)
             declared.append(command)
         return [*BUILTIN_COMMANDS, *sorted(declared, key=lambda command: command.name)]
-
-    def access_of(self, request: Request) -> str:
-        return "creator" if self.is_owner(request) else "member"
 
     def help_text(self, text: str, request: Request) -> str:
         level = {"member": 0, "admin": 1, "creator": 2}[self.access_of(request)]
@@ -879,6 +923,63 @@ class Manager:
         if command.admin_help and level >= 1:
             lines.append("Admin: " + command.admin_help)
         return "\n".join(line for line in lines if line)
+
+    def admin_command(self, text: str, request: Request) -> str:
+        """`$admin`: status, admins, lock and the caller's own admin view. Adding and removing admins is
+        the creator's alone; admins may lock, list and switch their view."""
+        role = self.role_of(request)
+        if role == "member":
+            return "Only admins can use $admin."
+        parts = text.split()
+        action = parts[0].lower() if parts else "status"
+        me = self.identity(request.address.interface, request.sender.id)
+        if action in ("on", "off"):
+            self.settings.set("view_off:" + me, action == "off")
+            self.audit.record("admin_view", who=me, view=action)
+            return ("Admin view on." if action == "on"
+                    else "Admin view off: you see the bot as a member until `$admin on`.")
+        if self.settings.get("view_off:" + me) and action != "status":
+            return "Your admin view is off; `$admin on` first."
+        if action in ("lock", "unlock"):
+            locked = action == "lock" and (len(parts) < 2 or parts[1].lower() not in ("off", "false"))
+            self.settings.set("lock", locked)
+            self.settings.set("lock_epoch", time.time())
+            self.audit.record("lock", by=me, locked=locked)
+            return ("🔒 Locked: only the creator and admins are answered. `$admin unlock` ends it." if locked
+                    else "🔓 Unlocked: everyone is answered again.")
+        if action == "list":
+            admins = sorted(self.admins.keys())
+            creators = [f"{interface}:{owner}" for interface in self.owners.interfaces()
+                        for owner in sorted(self.owners.ids(interface))]
+            return "\n".join([f"Creator: {', '.join(creators) or '(none configured)'}",
+                              "Admins: " + (", ".join(admins) if admins else "(none)")])
+        if action in ("add", "remove"):
+            if role != "creator":
+                return "Only the creator can add or remove admins."
+            user = text.split("--user", 1)[1].strip() if "--user" in text else " ".join(parts[1:])
+            user = user.strip().strip("<@!>")
+            if not user:
+                return "Usage: `$admin add --user <id>` (a user ID or mention; `wechat:<id>` for another platform)."
+            who = user if ":" in user else self.identity(request.address.interface, user)
+            if action == "add":
+                self.admins.set(who, {"added_by": me, "at": time.time()})
+            else:
+                if not self.admins.get(who):
+                    return f"{who} is not an admin."
+                self.admins.delete(who)
+            self.audit.record("admin_" + action, who=who, by=me)
+            return f"{who} is {'now an admin' if action == 'add' else 'no longer an admin'}."
+        if action != "status":
+            return self.help_text("admin", request)
+        open_runs = self.tank.runs(("running", "waiting_input", "waiting_approval"), limit=200)
+        pending = self.tank.approvals("pending")
+        ready = self.gateway.ready() if self.gateway is not None and hasattr(self.gateway, "ready") else {}
+        lines = [f"Role: {role}" + (" (view off)" if self.settings.get("view_off:" + me) else ""),
+                 "Lock: " + ("🔒 on" if self.locked else "off"),
+                 "Interfaces: " + (", ".join(f"{name} {'✅' if state[0] else '⚠️ ' + state[1]}"
+                                             for name, state in sorted(ready.items())) or "(none)"),
+                 f"Open runs: {len(open_runs)} · pending approvals: {len(pending)} · admins: {len(self.admins.keys())}"]
+        return "\n".join(lines)
 
     def memory_command(self, text: str, request: Request) -> str:
         """`$memory`: what personas keep about the sender in this conversation; only theirs, only here."""
@@ -963,8 +1064,8 @@ class Manager:
 
     async def cancel(self, target: str | None, request: Request) -> str:
         if target and ":" in target:
-            if not self.is_owner(request):
-                return "Only the owner can cancel a whole conversation."
+            if LEVELS[self.access_of(request)] < LEVELS["admin"]:
+                return "Only admins can cancel a whole conversation."
             count = await self.cancel_conversation(Address.parse(target), f"cancelled by {request.address}")
             return f"Cancelled {count} run(s) in {target}."
         open_statuses = ("running", "waiting_input", "waiting_approval")
@@ -977,8 +1078,9 @@ class Manager:
         if record is None or record.status not in open_statuses:
             return "No open run to cancel."
         trigger = request_from_dict(record.trigger)
-        if not (self.is_owner(request) or (trigger.address == request.address and trigger.sender == request.sender)):
-            return "Only the owner or the person who started it can cancel this run."
+        if not (LEVELS[self.access_of(request)] >= LEVELS["admin"]
+                or (trigger.address == request.address and trigger.sender == request.sender)):
+            return "Only admins or the person who started it can cancel this run."
         await self._cancel_record(record, f"cancelled by {request.address}")
         return f"Cancelled run {record.id}."
 

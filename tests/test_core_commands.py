@@ -76,3 +76,51 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AccessTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.core = await start_core(Path(self._tmp.name))
+        self.chat = iface(self.core)
+
+    async def asyncTearDown(self):
+        await self.core.stop()
+        self._tmp.cleanup()
+
+    async def say(self, text, sender="alice", conversation="room"):
+        await self.chat.say(text, sender=sender, conversation=conversation)
+        await settle(self.core)
+        return self.chat.texts(conversation)[-1] if self.chat.texts(conversation) else None
+
+    async def test_only_the_creator_adds_and_removes_admins(self):
+        self.assertEqual(await self.say("$admin"), "Only admins can use $admin.")
+        self.assertEqual(await self.say("$admin add --user alice", sender="boss"), "chat:alice is now an admin.")
+        self.assertEqual(await self.say("$admin add --user mallory"), "Only the creator can add or remove admins.")
+        self.assertIn("Role: admin", await self.say("$admin"))
+        self.assertIn("Admins: chat:alice", await self.say("$admin list"))
+        self.assertEqual(await self.say("$admin remove --user <@alice>", sender="boss"),
+                         "chat:alice is no longer an admin.")
+        self.assertEqual(await self.say("$admin"), "Only admins can use $admin.")
+
+    async def test_levels_reach_capabilities_and_the_admin_view_can_be_switched_off(self):
+        self.core.manager.admins.set("chat:alice", {"added_by": "chat:boss"})
+        self.assertIn("here: chat:room", await self.say("$where"))
+        await self.say("$runs")
+        self.assertIn("only to the owner", await self.say("$echoop x"))
+        self.assertIn("$admin", await self.say("$help"))
+        self.assertIn("Admin view off", await self.say("$admin off"))
+        self.assertNotIn("$admin", await self.say("$help"))
+        self.assertIn("Admin view on", await self.say("$admin on"))
+
+    async def test_lock_answers_only_admins_and_tells_each_conversation_once(self):
+        self.core.manager.admins.set("chat:alice", {"added_by": "chat:boss"})
+        self.assertIn("Locked", await self.say("$admin lock"))
+        await self.chat.say("echo hi", sender="bob", conversation="other")
+        await self.chat.say("echo again", sender="bob", conversation="other")
+        await settle(self.core)
+        notices = [reply for reply in self.chat.delivered if reply.address.conversation == "other"]
+        self.assertEqual([reply.code for reply in notices], ["locked"])
+        self.assertEqual(await self.say("echo admin works"), "admin works")
+        self.assertIn("Unlocked", await self.say("$admin unlock"))
+        self.assertEqual(await self.say("echo open", sender="bob", conversation="other"), "open")
