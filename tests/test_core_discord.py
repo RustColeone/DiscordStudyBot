@@ -198,6 +198,13 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         await self.say(incoming(self.room, self.alice, "$agents echo no", self.guild))
         self.assertEqual(self.room.texts(), ["hi"])
 
+    async def test_a_known_command_addresses_the_bot_without_a_mention(self):
+        await self.start()
+        await self.say(incoming(self.room, self.alice, "$AAPL is up", self.guild))
+        self.assertEqual(self.room.texts(), [])
+        await self.say(incoming(self.room, self.alice, "$runs", self.guild))
+        self.assertEqual(self.room.texts(), ["No open runs."])
+
     async def test_long_text_is_split_and_only_the_first_part_quotes(self):
         await self.start()
         reply_text = ("word " * 600).strip()

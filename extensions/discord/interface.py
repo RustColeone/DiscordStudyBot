@@ -256,7 +256,9 @@ class DiscordInterface(Interface):
                          if content == prefix or content.startswith(prefix + " ")), None)
         if prefixed:
             content = content[len(prefixed):].strip()
-        addressed = is_direct or mentioned or replied_to_me or bool(prefixed)
+        # Typing a known command ("$help") addresses the bot as a slash command does; "$AAPL" does not.
+        commanded = not prefixed and self.names_command(content)
+        addressed = is_direct or mentioned or replied_to_me or bool(prefixed) or commanded
         files, kinds = [], []
         for attachment in message.attachments or []:
             kinds.append(attachment_kind(getattr(attachment, "content_type", "")))
@@ -270,11 +272,17 @@ class DiscordInterface(Interface):
         return Request(
             id=str(message.id), address=Address(self.name, conversation), sender=Sender(str(message.author.id), name),
             text=content, received_at=message.created_at.timestamp(), is_direct=is_direct,
-            mentions_me=True if is_direct else (mentioned or replied_to_me or bool(prefixed)),
+            mentions_me=True if is_direct else (mentioned or replied_to_me or bool(prefixed) or commanded),
             reply_to=str(reference.message_id) if reference and reference.message_id else None,
             quoted_text=(resolved_message.content or "")[:1000] if resolved_message is not None else "",
             kind=kind, files=tuple(files), display=display,
             extra={"guild_id": str(guild.id) if guild else "", "channel_name": getattr(channel, "name", "") or ""})
+
+    def names_command(self, content: str) -> bool:
+        if not content.startswith("$"):
+            return False
+        name = content[1:].partition(" ")[0].strip().lower()
+        return bool(name) and any(command.name == name for command in self.port.commands())
 
     @staticmethod
     def display_for_guild(guild) -> Display:
