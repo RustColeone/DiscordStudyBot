@@ -25,11 +25,24 @@ class SentMessage:
         self.allowed_mentions, self.view = allowed_mentions, view
         self.deleted = False
 
-    async def edit(self, content):
-        self.content = content
+    async def edit(self, content, view=None):
+        self.content, self.view = content, view
 
     async def delete(self):
         self.deleted = True
+
+
+class PartialMessage:
+    """What channel.get_partial_message returns: edits and deletes with the bot's own token."""
+
+    def __init__(self, channel, message_id):
+        self.channel, self.id = channel, message_id
+
+    async def edit(self, content=None, view=None):
+        self.channel.partial_log.append(("edit", self.id, content))
+
+    async def delete(self):
+        self.channel.partial_log.append(("delete", self.id))
 
 
 class FakeChannel:
@@ -40,6 +53,10 @@ class FakeChannel:
         self.sent: list[SentMessage] = []
         self.fail = fail
         self.typed = 0
+        self.partial_log = []
+
+    def get_partial_message(self, message_id):
+        return PartialMessage(self, message_id)
 
     async def send(self, content=None, file=None, reference=None, allowed_mentions=None, view=None):
         if self.fail is not None:
@@ -204,6 +221,55 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.room.texts(), [])
         await self.say(incoming(self.room, self.alice, "$runs", self.guild))
         self.assertEqual(self.room.texts(), ["No open runs."])
+
+    async def until(self, predicate):
+        for _ in range(200):
+            if predicate():
+                return
+            await asyncio.sleep(0.01)
+        self.fail("condition not reached")
+
+    async def test_progress_has_a_cancel_button_and_a_reaction_presses_it(self):
+        await self.start()
+        dm = FakeChannel(77, private=True)
+        self.client.users[1] = self.alice
+        await self.discord.on_message(incoming(dm, self.alice, "slow"))
+        await self.until(lambda: dm.sent)
+        progress = dm.sent[0]
+        run = self.core.tank.runs(("running",))[0]
+        self.assertEqual(progress.content, "⏳ working")
+        self.assertEqual(progress.view.children[0].custom_id, f"cmd:$cancel {run.id}")
+        # Another reaction or someone else's does nothing; the starter's 🛑 presses Cancel.
+        await self.discord.on_raw_reaction_add(SimpleNamespace(
+            user_id=1, message_id=progress.id, emoji="🎉", guild_id=None, channel_id=77, member=None))
+        self.assertEqual(self.core.tank.run(run.id).status, "running")
+        await self.discord.on_raw_reaction_add(SimpleNamespace(
+            user_id=1, message_id=progress.id, emoji="🛑", guild_id=None, channel_id=77, member=None))
+        await settle(self.core)
+        self.assertEqual(self.core.tank.run(run.id).status, "cancelled")
+        self.assertTrue(progress.deleted)
+        self.assertEqual(dm.texts(), [f"Cancelled run {run.id}."])
+
+    async def test_thread_channels_run_each_task_in_its_own_thread(self):
+        await self.start({"extension_config": {"discord": {"thread_channels": ["555"]}}})
+        thread = FakeChannel(4321)
+        thread.parent_id, thread.owner_id = 555, self.client.user.id
+        names = []
+
+        async def create_thread(name, auto_archive_duration):
+            names.append(name)
+            return thread
+        message = incoming(self.room, self.alice, "<@999> echo hi there", self.guild, mentions=[self.client.user])
+        message.create_thread = create_thread
+        await self.say(message)
+        self.assertEqual((names, thread.texts(), self.room.texts()), (["echo hi there"], ["hi there"], []))
+        self.assertEqual(self.core.tank.runs(("done",))[0].address, "discord:4321")
+        # In the bot's thread every message is addressed; commands and chatter stay in the channel.
+        await self.say(incoming(thread, self.alice, "echo again", self.guild))
+        self.assertEqual(thread.texts()[-1], "again")
+        await self.say(incoming(self.room, self.alice, "echo ignored", self.guild))
+        await self.say(incoming(self.room, self.alice, "$runs", self.guild))
+        self.assertEqual((names, self.room.texts()), (["echo hi there"], ["No open runs."]))
 
     async def test_long_text_is_split_and_only_the_first_part_quotes(self):
         await self.start()

@@ -130,7 +130,9 @@ class Reply:
     personas; `label` qualifies it (for example a work note). Interfaces show both in their own way.
     `actions` are buttons, each running a `$command` as the person who presses it (interfaces without
     buttons show the commands as text). `private` asks to show the reply only to the person it answers,
-    where the platform can (otherwise it is sent normally).
+    where the platform can (otherwise it is sent normally). `run_id` names the run a reply is about: its
+    output and progress (progress carries a `Cancel` action), or the `$cancel` confirmation for it, after
+    which interfaces can clear that run's progress display.
     """
 
     address: Address

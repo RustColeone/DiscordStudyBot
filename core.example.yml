@@ -35,6 +35,7 @@
 #             music_dir: /path/to/music, music_list: /path/to/musicList.txt,   # $music (needs ffmpeg, libopus)
 #             clock_interval_s: 1, math: true,   # live $start clock; render $$math$$ as images
 #             talk_prefixes: ["$agent", "$chat"],   # "$agent hi" counts as addressing the bot
+#             thread_channels: ["123456789012345678"],   # tasks asked here get their own thread
 #             slash_commands: true}   # register the commands as Discord slash commands
 #   assistant: {max_steps: 8, history_limit: 16, effort: low}
 #   images: {default_provider: gemini, gemini_model: gemini-2.5-flash-image, openai_model: gpt-image-2.5-sunburst}

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import discord
 
-from contracts import Command, Option
+from contracts import Action, Address, Command, Option, Reply
 from tests.core_support import ROOT, FakeAdapter, make_config, settle
 from tests.test_core_discord import FakeChannel, FakeClient, FakeUser
 from core.app import Core
@@ -51,12 +51,14 @@ class FakeInteraction:
         self.channel_id = channel.id
         self.created_at = dt.datetime.now(dt.timezone.utc)
         self.log = []
+        self.views = []
         self.response = FakeResponse(self)
         self.followup = FakeFollowup(self)
 
     async def edit_original_response(self, **options):
         self.log.append(("edit", options.get("content"), bool(options.get("attachments"))))
-        return SimpleNamespace(id=self.id)
+        self.views.append(options.get("view", "unchanged"))
+        return SimpleNamespace(id=self.id, channel=self.channel)
 
     async def delete_original_response(self):
         self.log.append(("delete",))
@@ -150,6 +152,52 @@ class InteractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([entry[0] for entry in interaction.log], ["defer", "delete", "followup"])
         self.assertTrue(interaction.log[2][2])
         self.assertIn("$help", interaction.log[2][1])
+
+    async def test_progress_in_the_placeholder_has_cancel_until_the_answer_replaces_it(self):
+        interaction = FakeInteraction(discord.InteractionType.application_command, {}, self.alice,
+                                      FakeChannel(71, private=True))
+        self.discord.interactions.add("int-1", interaction, "dm:1")
+        address = Address("discord", "dm:1")
+        cancel = (Action("Cancel", "$cancel run-1", "danger"),)
+        await self.discord.deliver(Reply(address, "progress", "working", in_reply_to="int-1", run_id="run-1",
+                                         actions=cancel))
+        self.assertEqual(interaction.log[-1], ("edit", "⏳ working", False))
+        self.assertEqual(interaction.views[-1].children[0].custom_id, "cmd:$cancel run-1")
+        await self.discord.deliver(Reply(address, "text", "the answer", in_reply_to="int-1", run_id="run-1"))
+        self.assertEqual(interaction.log[-1], ("edit", "the answer", False))
+        self.assertIsNone(interaction.views[-1])
+        self.assertNotIn(("delete",), interaction.log)
+        # The answer replaced the Cancel button, so a reaction on it no longer cancels anything.
+        self.assertNotIn(str(interaction.id), self.discord.port.bottle.get("message_actions") or {})
+
+    async def test_cancelling_from_another_slash_command_removes_the_runs_progress(self):
+        address = Address("discord", "dm:1")
+        cancel = (Action("Cancel", "$cancel run-1", "danger"),)
+        await self.discord.deliver(Reply(address, "progress", "working", in_reply_to="msg-1", run_id="run-1",
+                                         actions=cancel))
+        dm = self.discord._channels["dm:1"]
+        progress = dm.sent[0]
+        self.assertIn(str(progress.id), self.discord.port.bottle.get("message_actions"))
+        other = FakeInteraction(discord.InteractionType.application_command, {}, self.alice, dm)
+        self.discord.interactions.add("int-2", other, "dm:1")
+        await self.discord.deliver(Reply(address, "text", "Cancelled run run-1.", in_reply_to="int-2",
+                                         run_id="run-1"))
+        self.assertTrue(progress.deleted)
+        self.assertEqual(other.log[-1], ("edit", "Cancelled run run-1.", False))
+        self.assertNotIn(str(progress.id), self.discord.port.bottle.get("message_actions"))
+
+    async def test_progress_outlives_its_interaction_through_the_channel(self):
+        channel = FakeChannel(72, private=True)
+        interaction = FakeInteraction(discord.InteractionType.application_command, {}, self.alice, channel)
+        self.discord.interactions.add("int-3", interaction, "dm:1")
+        address = Address("discord", "dm:1")
+        await self.discord.deliver(Reply(address, "progress", "working", in_reply_to="int-3", run_id="run-3"))
+        self.discord.interactions.get("int-3").at -= 3600  # past Discord's 15 minutes
+        await self.discord.deliver(Reply(address, "progress", "still working", in_reply_to="int-3", run_id="run-3"))
+        await self.discord.deliver(Reply(address, "text", "done", in_reply_to="int-3", run_id="run-3"))
+        self.assertEqual(channel.partial_log, [("edit", interaction.id, "⏳ still working"),
+                                               ("delete", interaction.id)])
+        self.assertEqual(self.discord._channels["dm:1"].texts(), ["done"])
 
     async def test_buttons_run_their_command_as_whoever_presses_them(self):
         dm = FakeChannel(78, private=True)

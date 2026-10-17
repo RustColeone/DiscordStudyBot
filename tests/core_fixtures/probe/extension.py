@@ -5,6 +5,7 @@
   tool2 <name> <json> call the same capability twice without call_id (signature dedupe)
   inbox               wait until the inbox has a message, reply "inbox <text>" for each
   hold                block until released through RELEASE (tests restarts mid-run)
+  slow                report progress, then block until RELEASE
   crash               raise
   bad                 return an invalid yield
   models <n>          make n model calls
@@ -96,6 +97,11 @@ class ProbeEngine(Engine):
         if command == "progress":
             await session.progress("working")
             await session.reply("done")
+            return RunYield.DONE
+        if command == "slow":
+            await session.progress("working")
+            await RELEASE.wait()
+            await session.reply("slow done")
             return RunYield.DONE
         await session.reply(rest if command == "echo" else session.trigger.text)
         return RunYield.DONE

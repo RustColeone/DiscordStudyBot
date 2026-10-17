@@ -789,7 +789,8 @@ class Manager:
         record = self.tank.run(run_id)
         trigger = request_from_dict(record.trigger)
         await self._run_output(record, Reply(trigger.address, "progress", text=text, in_reply_to=trigger.id,
-                                             run_id=run_id, source="run"))
+                                             run_id=run_id, source="run",
+                                             actions=(Action("Cancel", f"$cancel {run_id}", "danger"),)))
 
     # ---- interface reports --------------------------------------------------------------------------
     def observe(self, address: Address, text: str, direction: str, sender: Sender | None, kind: str,
@@ -866,7 +867,10 @@ class Manager:
                      + (f" approval={pending[run.id]}" if run.id in pending else "") for run in runs]
             await say("\n".join(lines) or "No open runs.", private=level >= 1)
         elif name == "cancel":
-            await say(await self.cancel(rest or None, request))
+            message, cancelled = await self.cancel(rest or None, request)
+            # Naming the cancelled run lets interfaces clear its progress message.
+            await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id,
+                                      run_id=cancelled))
         elif name == "memory":
             await say(self.memory_command(rest, request), private=True)
         elif name == "admin":
@@ -1084,12 +1088,13 @@ class Manager:
         self.tank.update_run(record.id, status="done")
         await self._deliver_result(record, result)
 
-    async def cancel(self, target: str | None, request: Request) -> str:
+    async def cancel(self, target: str | None, request: Request) -> tuple[str, str | None]:
+        """The answer for `$cancel`, and the ID of the run it cancelled (if exactly one)."""
         if target and ":" in target:
             if LEVELS[self.access_of(request)] < LEVELS["admin"]:
-                return "Only admins can cancel a whole conversation."
+                return "Only admins can cancel a whole conversation.", None
             count = await self.cancel_conversation(Address.parse(target), f"cancelled by {request.address}")
-            return f"Cancelled {count} run(s) in {target}."
+            return f"Cancelled {count} run(s) in {target}.", None
         open_statuses = ("running", "waiting_input", "waiting_approval")
         if target:
             record = self.tank.run(target)
@@ -1098,13 +1103,13 @@ class Manager:
                     if request_from_dict(run.trigger).sender.id == request.sender.id]
             record = mine[0] if mine else None
         if record is None or record.status not in open_statuses:
-            return "No open run to cancel."
+            return "No open run to cancel.", None
         trigger = request_from_dict(record.trigger)
         if not (LEVELS[self.access_of(request)] >= LEVELS["admin"]
-                or (trigger.address == request.address and trigger.sender == request.sender)):
-            return "Only admins or the person who started it can cancel this run."
+                or (trigger.address == request.address and trigger.sender.id == request.sender.id)):
+            return "Only admins or the person who started it can cancel this run.", None
         await self._cancel_record(record, f"cancelled by {request.address}")
-        return f"Cancelled run {record.id}."
+        return f"Cancelled run {record.id}.", record.id
 
     async def _cancel_record(self, record: RunRecord, reason: str) -> None:
         async with self._locks[record.address]:

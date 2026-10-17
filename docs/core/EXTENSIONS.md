@@ -281,12 +281,13 @@ Return a `Delivery`:
 | --- | --- |
 | `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). |
 | `file` | Send `reply.file.path` (named `reply.file.name`), caption `reply.text`. The core already checked `display.files` and `max_upload_mb`. |
-| `progress` | A transient status line. You get it only if your `display.progress` is true or you are the control route. |
+| `progress` | A transient status line, one per run (`reply.run_id`): edit it in place where you can, and clear it when the run answers. It carries a `Cancel` action (`$cancel <run>`). You get it only if your `display.progress` is true or you are the control route. |
 | `notice` | Phrase `reply.code` in your platform's style (table below). |
 | `event` | An interface event for the owner (you receive these if you host the control route or an event route). Show `reply.text`; `reply.data["origin_address"]` and `reply.data["interface"]` say where it came from. Return the `message_id` so owner replies can be relayed. |
 
 `reply.source` says who produced it: `run`, `command`, `owner` (a relay or owner send) or `core`.
-`reply.in_reply_to` is the triggering request ID; `reply.run_id` the run. Replies routed from another
+`reply.in_reply_to` is the triggering request ID; `reply.run_id` the run. The `$cancel` confirmation
+also names the run it cancelled in `reply.run_id`, so clear that run's progress then. Replies routed from another
 conversation carry `data["origin_address"]`.
 
 | Notice `code` | When | `data` |
@@ -524,6 +525,18 @@ Typed `$` commands keep working, and in servers a typed command from the catalog
 addresses the bot without a mention, like its slash form; unknown ones (`$AAPL is up`) stay ordinary
 chatter. Option `slash_commands: false` turns registration off.
 
+**Progress, reactions and threads.** A run's progress is one message edited in place (inside the
+slash command's placeholder when it came from one) with a Cancel button; the answer, or the
+cancellation, removes it. Reacting to a message with buttons presses one, as the person reacting:
+✅ or 👍 the first success/primary button (Approve), ❌, 🛑 or 👎 the first danger button (Deny,
+Cancel). In the channels listed in `thread_channels`, a message addressed to the bot that is not a
+command opens a thread on it (named after it, archived after a day idle), and the run happens in the
+thread's own conversation. The thread starts fresh: the bot sees the message, not the channel's earlier
+history. In any thread the bot opened, every message counts as addressed, so follow-ups and answers to
+its questions need no mention. A thread has its own address (`discord:<thread id>`): its parent
+channel's admission rules do not apply there, so restrict threads with `discord:*` patterns if
+needed. Thread channels need the Create Public Threads permission (included in the invite link).
+
 [`extensions/discord`](../../extensions/discord/interface.py) renders replies with Markdown, speaker
 labels, a rolling status block for unrequested notices, and math: inline `$…$` becomes Unicode and
 display `$$…$$` is sent as PNG images between the text parts. Its public operations (usable by
@@ -531,7 +544,7 @@ anyone, acting only on the calling conversation) are `discord.music` (`$music`),
 `music_control`, `queue_music` (one player per server, in the caller's voice channel), `time`
 (`$time`), `clock_start` (`$start`) and `clock_stop` (`$stop`); `status` and `invite` are owner-only.
 Options: `talk_prefixes` (for example `["$agent", "$chat"]`: a message starting with one is addressed
-to the bot like a mention, without the prefix), `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
+to the bot like a mention, without the prefix), `thread_channels` (channel IDs where tasks get threads), `music_dir`, `music_list`, `ffmpeg`, `clock_interval_s` (1), `clock_max` (10), `math` (true),
 `math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` (10).
 
 ## Core capabilities

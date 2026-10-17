@@ -2,7 +2,8 @@
 
 Conversations are `dm:<user id>` for direct messages and `<channel id>` for server channels and
 threads. In servers the bot answers when mentioned or when someone replies to one of its messages
-(the core's admission rules decide; the interface only reports the facts).
+(the core's admission rules decide; the interface only reports the facts). A typed known `$command`
+and every message in a thread the bot opened (`thread_channels`) count as addressed too.
 
 Public operations act on the calling conversation only: music in the caller's voice channel of that
 server (music.py), the study clock (clock.py). Text replies render math (math_render.py).
@@ -11,6 +12,7 @@ server (music.py), the study clock (clock.py). Text replies render math (math_re
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import re
 import time
 from collections import OrderedDict, defaultdict
@@ -31,8 +33,8 @@ from .status_log import StatusLog, code_safe
 DEFAULT_UPLOAD_BYTES = 10 * 1024 * 1024
 MESSAGE_LIMIT = 2000
 INVITE_PERMISSIONS = discord.Permissions(view_channel=True, send_messages=True, send_messages_in_threads=True,
-                                         read_message_history=True, attach_files=True, embed_links=True,
-                                         add_reactions=True)
+                                         create_public_threads=True, read_message_history=True, attach_files=True,
+                                         embed_links=True, add_reactions=True)
 NOTICES = {
     "run_failed": "⚠️ Sorry, I couldn't finish that.",
     "waiting_approval": "⏳ Waiting for the owner's approval (`{approval_id}`).",
@@ -49,6 +51,22 @@ REFUSALS = {
 }
 BUTTON_STYLES = {"primary": discord.ButtonStyle.primary, "secondary": discord.ButtonStyle.secondary,
                  "success": discord.ButtonStyle.success, "danger": discord.ButtonStyle.danger}
+# A reaction on a message with buttons presses the first button of these styles.
+REACTIONS = {"✅": ("success", "primary"), "👍": ("success", "primary"),
+             "❌": ("danger",), "🛑": ("danger",), "👎": ("danger",)}
+ACTION_MEMORY = 300
+COMMAND = re.compile(r"^\$[A-Za-z]")
+
+
+def reaction_action(emoji: str, actions) -> dict | None:
+    styles = REACTIONS.get(emoji)
+    if not styles or not actions:
+        return None
+    return next((action for action in actions if action.get("style") in styles), None)
+
+
+def thread_name(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()[:80] or "Task"
 
 
 def split_text(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
@@ -120,11 +138,14 @@ class DiscordInterface(Interface):
         self.attachment_max_bytes = int(attachment_max_mb * 1024 * 1024)
         # Legacy habits such as "$agent hi": the prefix is dropped and the message counts as addressed.
         self.talk_prefixes = tuple(str(item).strip() for item in config.get("talk_prefixes") or () if str(item).strip())
+        # Channels where a message addressed to the bot opens a thread on it, and the task runs there.
+        self.thread_channels = frozenset(str(item).strip() for item in config.get("thread_channels") or ())
         self.client = client
         self.port = None
         self._task: asyncio.Task | None = None
         self._channels: OrderedDict[str, Any] = OrderedDict()
-        self._progress: OrderedDict[str, Any] = OrderedDict()
+        # Progress message per run, and the interaction whose placeholder shows it (None: a channel message).
+        self._progress: OrderedDict[str, tuple[Any, str | None]] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._owners: list[str] = []
         self.status_log = StatusLog(self._send_status, self._edit_status)
@@ -155,6 +176,7 @@ class DiscordInterface(Interface):
         self.client.event(self.on_ready)
         self.client.event(self.on_message)
         self.client.event(self.on_interaction)
+        self.client.event(self.on_raw_reaction_add)
         self._task = asyncio.create_task(self._run(), name="discord-client")
 
     async def _run(self) -> None:
@@ -227,12 +249,68 @@ class DiscordInterface(Interface):
                 self._members.popitem(last=False)
         async with self._locks[conversation]:
             request = await self.to_request(message, conversation)
+            request = await self._open_thread(message, request)
             result = await self.port.submit(request)
         if result and result.reason == "accepted":
             try:
-                await message.channel.typing()
+                await self._channels.get(request.address.conversation, message.channel).typing()
             except Exception:
                 pass
+
+    async def _open_thread(self, message, request: Request) -> Request:
+        """In a thread channel, a message addressed to the bot (not a command) becomes a thread's first
+        message: the run, its questions and follow-ups happen in the thread's own conversation."""
+        if (message.guild is None or str(message.channel.id) not in self.thread_channels
+                or request.mentions_me is not True or COMMAND.match(request.text)):
+            return request
+        try:
+            thread = await message.create_thread(name=thread_name(request.text), auto_archive_duration=1440)
+        except (discord.HTTPException, AttributeError) as error:
+            self.port.log("thread_failed", error=type(error).__name__, detail=str(error)[:200])
+            return request
+        self._remember(str(thread.id), thread)
+        return dataclasses.replace(request, address=Address(self.name, str(thread.id)),
+                                   extra={**request.extra, "channel_name": getattr(thread, "name", "") or "",
+                                          "parent_channel": str(message.channel.id)})
+
+    async def on_raw_reaction_add(self, payload) -> None:
+        """A reaction on a message with buttons presses the matching button (see REACTIONS)."""
+        user = self.client.user
+        if user is None or payload.user_id == user.id or getattr(payload.member, "bot", False):
+            return
+        actions = (self.port.bottle.get("message_actions") or {}).get(str(payload.message_id))
+        action = reaction_action(str(payload.emoji), actions)
+        if action is None:
+            return
+        member = payload.member
+        if member is None:
+            member = self.client.get_user(payload.user_id) or await self.client.fetch_user(payload.user_id)
+        guild = getattr(payload.member, "guild", None)
+        conversation = str(payload.channel_id) if payload.guild_id else f"dm:{payload.user_id}"
+        request = Request(
+            id=f"reaction:{payload.message_id}:{payload.user_id}:{action['command']}"[:200],
+            address=Address(self.name, conversation),
+            sender=Sender(str(payload.user_id), getattr(member, "display_name", None) or getattr(member, "name", "")),
+            text=action["command"], received_at=time.time(), is_direct=not payload.guild_id, mentions_me=True,
+            display=self.display_for_guild(guild),
+            extra={"guild_id": str(payload.guild_id or ""), "via": "reaction"})
+        async with self._locks[conversation]:
+            await self.port.submit(request)
+
+    def _remember_actions(self, message_id, reply: Reply) -> None:
+        if not reply.actions:
+            return
+        stored = dict(self.port.bottle.get("message_actions") or {})
+        stored[str(message_id)] = [{"command": action.command, "style": action.style} for action in reply.actions]
+        while len(stored) > ACTION_MEMORY:
+            stored.pop(next(iter(stored)))
+        self.port.bottle.set("message_actions", stored)
+
+    def _forget_actions(self, message_id) -> None:
+        stored = self.port.bottle.get("message_actions") or {}
+        if str(message_id) in stored:
+            self.port.bottle.set("message_actions", {key: value for key, value in stored.items()
+                                                     if key != str(message_id)})
 
     def conversation_id(self, channel, author) -> str:
         if getattr(channel, "type", None) == discord.ChannelType.private:
@@ -258,7 +336,10 @@ class DiscordInterface(Interface):
             content = content[len(prefixed):].strip()
         # Typing a known command ("$help") addresses the bot as a slash command does; "$AAPL" does not.
         commanded = not prefixed and self.names_command(content)
-        addressed = is_direct or mentioned or replied_to_me or bool(prefixed) or commanded
+        # A thread the bot opened for a task is a conversation with the bot: everything there is addressed.
+        own_thread = (user is not None and getattr(channel, "parent_id", None) is not None
+                      and getattr(channel, "owner_id", None) == user.id)
+        addressed = is_direct or mentioned or replied_to_me or bool(prefixed) or commanded or own_thread
         files, kinds = [], []
         for attachment in message.attachments or []:
             kinds.append(attachment_kind(getattr(attachment, "content_type", "")))
@@ -272,7 +353,7 @@ class DiscordInterface(Interface):
         return Request(
             id=str(message.id), address=Address(self.name, conversation), sender=Sender(str(message.author.id), name),
             text=content, received_at=message.created_at.timestamp(), is_direct=is_direct,
-            mentions_me=True if is_direct else (mentioned or replied_to_me or bool(prefixed) or commanded),
+            mentions_me=True if is_direct else addressed,
             reply_to=str(reference.message_id) if reference and reference.message_id else None,
             quoted_text=(resolved_message.content or "")[:1000] if resolved_message is not None else "",
             kind=kind, files=tuple(files), display=display,
@@ -401,6 +482,7 @@ class DiscordInterface(Interface):
                 pending.placeholder = False
                 if not reply.private:
                     edit = {key: value for key, value in options.items() if key != "file"}
+                    edit["view"] = view  # None also removes buttons a progress update left on the placeholder
                     if file is not None:
                         edit["attachments"] = [file]
                     return await interaction.edit_original_response(**edit)
@@ -532,19 +614,16 @@ class DiscordInterface(Interface):
             return Delivery(message is not None, message_id=str(message.id) if message is not None else None)
         post, pending = self._poster(reply, channel)
         if reply.kind == "progress":
-            if pending is not None and pending.placeholder:
-                try:
-                    message = await pending.interaction.edit_original_response(content=("⏳ " + self.render(reply))[:MESSAGE_LIMIT])
-                except discord.HTTPException as error:
-                    return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}")
-                return Delivery(True, message_id=str(message.id))
-            return await self._show_progress(channel, reply)
+            return await self._show_progress(channel, reply, pending)
+        # The interaction whose placeholder this reply takes over (with any progress shown in it).
+        taken_over = reply.in_reply_to if pending is not None and pending.placeholder else None
         reference = None
-        if pending is None and reply.quote and str(reply.quote).isdigit():
+        if (pending is None and reply.quote and str(reply.quote).isdigit()
+                and str(reply.quote) != reply.address.conversation):  # a thread's starter message is outside it
             reference = discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
                                                  fail_if_not_exists=False)
         text = self.render(reply)
-        sent, items = [], []
+        sent, items, view = [], [], None
         try:
             if reply.kind == "file":
                 file = discord.File(reply.file.path, filename=reply.file.name or Path(reply.file.path).name)
@@ -575,7 +654,9 @@ class DiscordInterface(Interface):
             for kind, value in items:
                 if kind == "image":
                     Path(value).unlink(missing_ok=True)
-        await self._clear_progress(reply.run_id)
+        await self._clear_progress(reply.run_id, taken_over)
+        if view is not None and sent:
+            self._remember_actions(sent[-1].id, reply)
         return Delivery(True, message_id=str(sent[0].id))
 
     async def _text_items(self, reply: Reply, text: str) -> list[tuple[str, Any]]:
@@ -606,29 +687,60 @@ class DiscordInterface(Interface):
     async def _edit_status(message, text: str) -> None:
         await message.edit(content=text)
 
-    async def _show_progress(self, channel, reply: Reply) -> Delivery:
+    async def _show_progress(self, channel, reply: Reply, pending=None) -> Delivery:
+        """One progress message per run, edited in place, with the run's Cancel button. A slash command's
+        "thinking…" placeholder shows the progress itself until the answer replaces it."""
         key = reply.run_id or reply.in_reply_to or reply.address.conversation
         text = ("⏳ " + self.render(reply))[:MESSAGE_LIMIT]
-        message = self._progress.get(key)
+        view = self._view(reply)
+        previous = self._progress.get(key)
+        entry = None
         try:
-            if message is not None:
-                await message.edit(content=text)
-            else:
-                message = await channel.send(content=text)
-                self._progress[key] = message
-                while len(self._progress) > 200:
-                    self._progress.popitem(last=False)
+            if pending is not None and pending.placeholder:
+                entry = (await pending.interaction.edit_original_response(content=text, view=view), reply.in_reply_to)
+            elif previous is not None:
+                message = self._editable(previous)
+                try:
+                    await message.edit(content=text, view=view)
+                    entry = (message, previous[1] if message is previous[0] else None)
+                except discord.HTTPException:
+                    entry = None  # gone or no longer editable: post a fresh one
+            if entry is None:
+                entry = (await channel.send(content=text, view=view), None)
         except discord.HTTPException as error:
             return Delivery(False, detail=f"HTTP {getattr(error, 'status', '?')}")
+        message = entry[0]
+        if previous is None or str(previous[0].id) != str(message.id):
+            if previous is not None:
+                self._forget_actions(previous[0].id)
+            if view is not None:
+                self._remember_actions(message.id, reply)
+        self._progress[key] = entry
+        while len(self._progress) > 200:
+            self._progress.popitem(last=False)
         return Delivery(True, message_id=str(message.id))
 
-    async def _clear_progress(self, run_id: str | None) -> None:
-        message = self._progress.pop(run_id, None) if run_id else None
-        if message is not None:
-            try:
-                await message.delete()
-            except discord.HTTPException:
-                pass
+    def _editable(self, entry):
+        """The progress message, edited through its interaction only while that can still be answered;
+        after that, through the channel with the bot's own token."""
+        message, interaction_id = entry
+        if interaction_id is None or self.interactions.get(interaction_id) is not None:
+            return message
+        partial = getattr(getattr(message, "channel", None), "get_partial_message", None)
+        return partial(message.id) if partial is not None else message
+
+    async def _clear_progress(self, run_id: str | None, taken_over: str | None = None) -> None:
+        """Remove a run's progress message, unless the answer `taken_over` its placeholder now fills it."""
+        entry = self._progress.pop(run_id, None) if run_id else None
+        if entry is None:
+            return
+        self._forget_actions(entry[0].id)
+        if entry[1] is not None and entry[1] == taken_over:
+            return
+        try:
+            await self._editable(entry).delete()
+        except discord.HTTPException:
+            pass
 
     # ---- operations -------------------------------------------------------------------------------
     def invite_url(self) -> str:
