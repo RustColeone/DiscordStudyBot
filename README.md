@@ -34,9 +34,11 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Web | `$search`, `$read <url>`, image search, Google Maps, `$wolfram` |
 | Video | `$video <url>` fitted to the upload limit; `$clip -u <url> -s 1:05 -e 1:20` then `$clip --confirm` |
 | Reminders | `$remind 10m drink water`, `$reminders`, `$unremind <id>` |
+| Routines | `$routine every 1h $status`, `$routine weekdays 09:00 <question for the bot>`, or just ask ("check the server every hour"); `$routine` lists, `$routine pause/resume/delete <id>` |
+| Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images |
 | Host | `$status` |
-| Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routines, routes and policy through `core.*` capabilities |
+| Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
 Writes (sending elsewhere, changing settings, saving notes) need the owner's approval unless an

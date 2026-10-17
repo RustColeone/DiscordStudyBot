@@ -216,6 +216,7 @@ be submitted concurrently. Messages starting with `$` and a letter are commands 
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
 `$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
 `$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins),
+`$routine` (anyone: repeat a message or command on a schedule; see Routine examples),
 `$help [command]`, `$call <capability> <json arguments>` (owners only: run any capability directly, for
 example `$call core.set_rule {"pattern": "wechat:x", "rule": {"enabled": true}}`; counts as approval), plus
 capability and operation commands (`$help` lists them). The core only understands this `$` text;
@@ -528,7 +529,10 @@ approval).
 | `core.send_message` (write) | `address`, `text`. An explicit owner send: not subject to admission. Returns `data["message_id"]`; fails with `delivery_failed` or `delivery_uncertain`. `owner_only` is judged by the run's trigger sender. |
 | `core.list_rules` / `core.set_rule` | `pattern`, `rule` (object or null to delete) |
 | `core.list_routes` / `core.set_route` | `pattern`, `route` (`{target, kinds}` or null) |
-| `core.list_routines` / `core.set_routine` / `core.delete_routine` | `name`, `text`, `every_minutes` or `daily_at` (`HH:MM` local), `enabled` |
+| `core.add_routine` (write, anyone) | `schedule` (`every 1h`, `daily 08:00`, `weekdays 09:00`, `mon,wed 18:30`, `at 18:30`, `at 2026-10-17 08:00`), `text` (a message or a `$command`), `chat` (admins: another conversation) |
+| `core.list_routines` (anyone) | none: this conversation's routines; every conversation's for admins |
+| `core.pause_routine` / `core.resume_routine` / `core.delete_routine` (write, anyone) | `id`: the caller's own routine here; admins: any |
+| `core.set_routine` (owner) | a configured routine in `routine:<name>`: `name`, `text`, `every_minutes` or `daily_at`, `enabled` |
 | `core.list_assignments` / `core.set_assignment` / `core.delete_assignment` | `pattern`, `assignment` |
 | `core.cancel_runs` | `address` |
 | `core.list_forwards` / `core.set_forward` | `address`, `target` (exact addresses; null removes) |
@@ -540,13 +544,18 @@ Request IDs for deduplication and event receipts for owner relays are kept for 3
 workspaces are deleted at startup 7 days after their run ended; copy files elsewhere if they must
 live longer. Conversation history, runs and approvals are kept indefinitely.
 
-## Routine example
+## Routine examples
 
-A reminder that reaches a conversation: the owner creates `core.set_routine(name="medicine",
-daily_at="08:00", text="Remind everyone to take their medicine.")` and
+In any conversation, `$routine every 1h $status` posts `$status` there every hour as you, and
+`$routine weekdays 09:00 what is on my reminders today?` asks the conversation's engine each weekday
+morning. People can also just ask the bot ("check the server every hour"), which calls
+`core.add_routine`. `$routine` lists them, `$routine pause|resume|delete <id>` manages them.
+
+For unattended system work that reports elsewhere, the owner creates a configured routine:
+`core.set_routine(name="medicine", daily_at="08:00", text="Remind everyone to take their medicine.")` and
 `core.set_route(pattern="routine:medicine", route={"target": "wechat:family@chatroom"})`. The run happens
 in `routine:medicine` under the `routine:medicine` (or `routine:*`) assignment; its replies go to the
-target only while that conversation is admitted. Non-owners cannot create routines.
+target only while that conversation is admitted.
 
 ## Testing
 

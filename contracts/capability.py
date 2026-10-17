@@ -86,6 +86,7 @@ class ToolContext(Protocol):
     origin: Origin
     run_id: str
     display: Display
+    is_direct: bool
     files: tuple[FileRef, ...]
     storage: Store
     models: Models

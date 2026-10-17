@@ -16,7 +16,8 @@ DEFAULT_PROMPT = ("You are a helpful, friendly assistant in a Discord server. An
 
 
 PREAPPROVED = ["reminders.create", "reminders.cancel", "discord.music", "discord.music_control",
-               "discord.queue_music", "discord.clock_start", "discord.clock_stop"]
+               "discord.queue_music", "discord.clock_start", "discord.clock_stop", "core.add_routine",
+               "core.delete_routine", "core.pause_routine", "core.resume_routine"]
 DEFAULT_CHAIN = [
     {"provider": "deepseek", "model": "deepseek-flash"},
     {"provider": "openai", "model": "gpt-6-luna"},

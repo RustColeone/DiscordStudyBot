@@ -10,6 +10,8 @@ import json
 from typing import TYPE_CHECKING, Any, Mapping
 
 from contracts import Address, Capability, Reply, Risk, ToolResult
+from core.gateway.routines import describe
+from core.manager.routines import Caller
 
 if TYPE_CHECKING:
     from core.manager.manager import GatewayLink, Manager
@@ -79,9 +81,34 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
         count = await manager.cancel_conversation(Address.parse(arguments["address"]), f"cancelled by run {context.run_id}")
         return ToolResult.ok(f"Cancelled {count} open run(s) in {arguments['address']}.")
 
-    async def delete_routine(arguments, context) -> ToolResult:
-        admin.delete_routine(arguments["name"])
-        return ToolResult.ok(f"Routine {arguments['name']} deleted.")
+    def caller(context) -> Caller:
+        return Caller(context.address, context.sender, context.is_direct, context.access, context.display.markdown)
+
+    async def add_routine(arguments, context) -> ToolResult:
+        try:
+            routine = manager.routines.add(caller(context), arguments["schedule"], arguments["text"],
+                                           arguments.get("chat"))
+        except PermissionError as error:
+            return ToolResult.fail(str(error), "not_permitted")
+        return ToolResult.ok(f"Routine {routine['id']} added: {describe(routine)}; it sends {routine['text']!r}.",
+                             data={"id": routine["id"], "next_at": routine["next_at"]})
+
+    async def list_routines(arguments, context) -> ToolResult:
+        who = caller(context)
+        items = manager.routines.visible(who)
+        return ToolResult.ok(manager.routines.listing(who), data={"routines": items})
+
+    def changer(action):
+        async def run(arguments, context) -> ToolResult:
+            try:
+                routine = manager.routines.change(caller(context), arguments["id"], action)
+            except LookupError as error:
+                return ToolResult.fail(str(error), "not_found")
+            except PermissionError as error:
+                return ToolResult.fail(str(error), "not_permitted")
+            return ToolResult.ok(f"Routine {routine['id']} {action}d." if action != "pause"
+                                 else f"Routine {routine['id']} paused.")
+        return run
 
     rule_schema = {"type": ["object", "null"], "description": "enabled, allow_senders, require_mention_in_groups; null deletes"}
     capabilities = [
@@ -99,16 +126,27 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                    "route: {target: 'interface:conversation', kinds: ['text','file','progress','notice']}",
                    guarded(set_route), {"pattern": {"type": "string"}, "route": {"type": ["object", "null"]}},
                    ("pattern",), Risk.WRITE, owner_only=True),
-        Capability("core.list_routines", "List scheduled routines.",
-                   guarded(lister(admin.routines, "routines")), risk=Risk.READ, owner_only=True),
+        Capability("core.add_routine",
+                   "Repeat a message or a $command on a schedule in this conversation, sent as the person who "
+                   "asked (plain text goes to the bot as their message; '$status' runs that command). schedule: "
+                   "'every 30m', 'every 2h', 'daily 08:00', 'weekdays 09:00', 'mon,wed 18:30', 'at 18:30' or "
+                   "'at 2026-10-17 08:00' (local time). chat: another conversation (admins only).",
+                   guarded(add_routine), {"schedule": {"type": "string"}, "text": {"type": "string"},
+                                          "chat": {"type": "string"}}, ("schedule", "text"), Risk.WRITE),
+        Capability("core.list_routines", "List routines: this conversation's, or every conversation's for admins.",
+                   guarded(list_routines), risk=Risk.READ),
+        Capability("core.pause_routine", "Pause a routine by ID (your own here; admins: any).", guarded(changer("pause")),
+                   {"id": {"type": "string"}}, ("id",), Risk.WRITE),
+        Capability("core.resume_routine", "Resume a paused routine by ID.", guarded(changer("resume")),
+                   {"id": {"type": "string"}}, ("id",), Risk.WRITE),
         Capability("core.set_routine", "Create or replace a routine that starts a run in routine:<name>. "
                    "Give every_minutes or daily_at (HH:MM, local time) and the instruction text.",
                    guarded(set_routine),
                    {"name": {"type": "string"}, "text": {"type": "string"},
                     "every_minutes": {"type": "number", "minimum": 1}, "daily_at": {"type": "string"},
                     "enabled": {"type": "boolean"}}, ("name", "text"), Risk.WRITE, owner_only=True),
-        Capability("core.delete_routine", "Delete a routine.", guarded(delete_routine),
-                   {"name": {"type": "string"}}, ("name",), Risk.WRITE, owner_only=True),
+        Capability("core.delete_routine", "Delete a routine by ID (your own here; admins: any).",
+                   guarded(changer("delete")), {"id": {"type": "string"}}, ("id",), Risk.WRITE),
         Capability("core.list_assignments", "List engine/persona/policy assignments by address pattern.",
                    guarded(list_assignments), risk=Risk.READ, owner_only=True),
         Capability("core.set_assignment", "Create or replace the runtime assignment for an address pattern. "

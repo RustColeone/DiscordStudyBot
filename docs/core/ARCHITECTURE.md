@@ -164,8 +164,17 @@ send and is not subject to admission.
 * **Routes** per pattern: `{target, kinds}` sends replies elsewhere (for example `routine:*` to a DM).
   Replies to `routine:*` without a route go to the control route, as does `progress` for interfaces
   whose `display.progress` is false. Routed replies carry `data["origin_address"]`.
-* **Routines**: `every_minutes` or `daily_at` (local `HH:MM`). Each firing has a deterministic request
-  ID, so a crash between firing and rescheduling cannot fire twice.
+* **Routines**: `every_minutes`, `daily_at` (local `HH:MM`, optionally on some `days`) or one-off
+  `once_at`. Each firing has a deterministic request ID, so a crash between firing and rescheduling
+  cannot fire twice; after downtime a routine fires once, not once per missed slot.
+  * *Conversation routines* (`$routine`, `core.add_routine`) belong to a conversation and a creator.
+    When due, their text is submitted to that conversation as if the creator had sent it
+    (`origin="routine"`): `$status` runs the command, plain text goes to the conversation's engine,
+    and the run has the creator's level. They are skipped while the conversation is not admitted or a
+    lock keeps the creator out. Members manage their own routines in their conversation (at most 5,
+    at least 30 minutes apart); admins see and manage all of them.
+  * *Configured routines* (core.yml `routines`, `core.set_routine`) run in `routine:<name>` with their
+    own assignment and routes, as unattended system work.
 * **Scheduled messages**: one-time `notice` replies (code `reminder`) that capabilities create through
   `ToolContext.schedule`, for the calling conversation only (at most 50 pending each, within a year).
   They wait while the interface is not ready and are skipped if the conversation is no longer

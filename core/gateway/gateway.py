@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 from contracts import (Address, Delivery, Display, Interface, Operation, Reply, Request, Sender, SubmitResult,
                        ToolResult)
 from core.audit import Audit
+from core.gateway import routines as schedules
+from core.gateway.routines import next_fire
 from core.manager.policy import most_specific
 from core.storage.bottle import Bottle
 from core.storage.sqlite import ScopedStore
@@ -197,7 +199,7 @@ class Gateway:
                 owner = self.manager.is_owner(request)
                 command = self.is_command(request) and (
                     owner or self.rule_for(request.address).get("commands", "all") == "all")
-                if owner and not command:
+                if owner and not command and request.origin == "person":
                     receipt = (self.bottle.receipt(f"{request.address.interface}:{request.reply_to}")
                                if request.reply_to else None)
                     origin = receipt or self.forwards.get(str(request.address))
@@ -343,6 +345,9 @@ class Gateway:
             if address.interface != ROUTINE and not self.rule_for(address).get("enabled", True):
                 self._spawn(self.manager.cancel_conversation(address, "not_admitted"))
 
+    def now(self) -> float:
+        return self._clock()
+
     def display_for(self, address: Address) -> Display:
         target = self._target(Reply(address, "text"))
         interface = self.interfaces.get(target.interface) if target else None
@@ -366,6 +371,10 @@ class Gateway:
         for name, routine in self.bottle.routines().items():
             if not routine.get("enabled", True) or routine.get("next_at", float("inf")) > now:
                 continue
+            if routine.get("address"):
+                if await self._fire_conversation_routine(name, routine, now):
+                    fired.append(name)
+                continue
             address = Address(ROUTINE, name)
             request = Request(id=f"{name}:{int(routine['next_at'])}", address=address,
                               sender=Sender(f"routine:{name}", name, "system"), text=routine["text"],
@@ -377,6 +386,79 @@ class Gateway:
             self.audit.record("routine_fired", routine=name)
         await self.fire_scheduled(now)
         return fired
+
+    async def _fire_conversation_routine(self, routine_id: str, routine: dict, now: float) -> bool:
+        """Post the routine's text to its conversation as its creator; then schedule the next time.
+        Skipped (not deleted) while the conversation is closed or a lock keeps its creator out."""
+        address = Address.parse(routine["address"])
+        sender = Sender(str(routine["sender"]["id"]), str(routine["sender"].get("name", "")), "person")
+        request = Request(id=f"routine:{routine_id}:{int(routine['next_at'])}", address=address, sender=sender,
+                          text=routine["text"], received_at=now, origin="routine",
+                          is_direct=bool(routine.get("is_direct")), mentions_me=True,
+                          display=self.display_for(address), extra={"routine": routine_id})
+        reason = None
+        if not self.rule_for(address).get("enabled", True):
+            reason = "conversation_closed"
+        elif self.manager.locked and self.manager.role_of(request) == "member":
+            reason = "locked"
+        if reason is None:
+            await self._submit(request)
+        upcoming = schedules.next_fire(routine, now)
+        if upcoming is None:
+            self.bottle.set_routine(routine_id, None)
+        else:
+            self.bottle.set_routine(routine_id, {**routine, "last_at": now, "next_at": upcoming})
+        self.audit.record("routine_fired", routine=routine_id, address=str(address), skipped=reason)
+        return reason is None
+
+    # ---- conversation routines --------------------------------------------------------------------
+    def add_routine(self, address: Address, sender: Sender, is_direct: bool, schedule: Mapping[str, Any],
+                    text: str) -> dict:
+        schedule = schedules.validate(schedule)
+        text = text.strip()
+        if not text:
+            raise ValueError("A routine needs something to send")
+        if len(text) > schedules.MAX_TEXT:
+            raise ValueError(f"A routine's text is at most {schedules.MAX_TEXT} characters")
+        now = self._clock()
+        upcoming = schedules.next_fire(schedule, now)
+        if upcoming is None:
+            raise ValueError("That time has already passed")
+        routine_id = schedules.new_id()
+        routine = {**schedule, "address": str(address), "sender": {"id": sender.id, "name": sender.name},
+                   "is_direct": bool(is_direct), "text": text, "enabled": True, "created_at": now,
+                   "next_at": upcoming}
+        self.bottle.set_routine(routine_id, routine)
+        self.audit.record("routine_added", routine=routine_id, address=str(address))
+        return {"id": routine_id, **routine}
+
+    def conversation_routines(self, address: Address | None = None) -> list[dict]:
+        """Conversation routines (of one conversation, or all), soonest first."""
+        found = [{"id": name, **routine} for name, routine in self.bottle.routines().items()
+                 if routine.get("address") and (address is None or routine["address"] == str(address))]
+        return sorted(found, key=lambda item: item.get("next_at") or float("inf"))
+
+    def configured_routines(self) -> list[dict]:
+        return [{"id": name, **routine} for name, routine in self.bottle.routines().items()
+                if not routine.get("address")]
+
+    def update_routine(self, routine_id: str, *, enabled: bool | None = None, delete: bool = False) -> dict:
+        routine = self.bottle.routines().get(routine_id)
+        if routine is None:
+            raise ValueError(f"No routine {routine_id!r}")
+        if delete:
+            self.bottle.set_routine(routine_id, None)
+        else:
+            routine = {**routine, "enabled": bool(enabled)}
+            if enabled and routine.get("address"):
+                upcoming = schedules.next_fire(routine, self._clock())
+                if upcoming is None:
+                    raise ValueError("That one-off time has already passed")
+                routine["next_at"] = upcoming
+            self.bottle.set_routine(routine_id, routine)
+        self.audit.record("routine_" + ("deleted" if delete else "enabled" if enabled else "paused"),
+                          routine=routine_id)
+        return {"id": routine_id, **routine}
 
     MAX_SCHEDULED_PER_CONVERSATION = 50
     MAX_SCHEDULE_AHEAD_S = 366 * 86400
@@ -427,16 +509,6 @@ class Gateway:
             self.manager.tank.record_message(str(address), "out", item["text"], kind="reminder",
                                              message_id=delivery.message_id)
         self.audit.record("scheduled_fired", scheduled=item["id"], status=status)
-
-def next_fire(routine: Mapping[str, Any], now: float) -> float:
-    if routine.get("every_minutes"):
-        return now + float(routine["every_minutes"]) * 60
-    hour, minute = (int(part) for part in str(routine["daily_at"]).split(":"))
-    current = dt.datetime.fromtimestamp(now).astimezone()
-    candidate = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if candidate.timestamp() <= now:
-        candidate += dt.timedelta(days=1)
-    return candidate.timestamp()
 
 
 class GatewayAdmin:

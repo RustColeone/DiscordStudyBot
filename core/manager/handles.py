@@ -116,6 +116,7 @@ class ToolContextHandle:
         self.origin = record.origin
         self.run_id = record.id
         self.display: Display = trigger.display
+        self.is_direct = trigger.is_direct
         files = []
         for event in manager.tank.events(record.id, ("input", "inbox")):
             files.extend(FileRef(**item) for item in event.data["request"].get("files", ()))
