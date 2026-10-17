@@ -195,7 +195,7 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Extension loading and assembly |
-| [`plugins/`](../../plugins) | Drop-in extensions, loaded without being listed; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek) |
+| [`plugins/`](../../plugins) | Drop-in extensions, loaded without being listed; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured) |
 | [`extensions/`](../../extensions) | Included: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram); optional `wechat` (account interface and persona, see [WECHAT.md](../WECHAT.md)) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 

@@ -5,7 +5,7 @@ key_setup.py. The key is accepted only if it decrypts the account's own image fi
 nothing else is saved. The XOR byte is derived from the files themselves.
 
 Run from the repository root as the account owner, once:
-    sudo venv/bin/python -m extensions.wechat.image_key --pid <native-wechat-pid> \
+    sudo venv/bin/python -m plugins.wechat.image_key --pid <native-wechat-pid> \
         --account-dir /path/to/xwechat_files/wxid_x --output data/core/extensions/wechat/image_key.json
 """
 

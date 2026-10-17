@@ -22,7 +22,7 @@
 #   - extensions/web             # $search <query> (Google grounding, SearXNG, DuckDuckGo), $read <url>,
 #                                #   image search, Google Maps, $wolfram <query> (needs WOLFRAM_APPID in .env)
 #   - extensions/room            # shared room engine + personas luna, gemini, claude, deepseek
-#   - extensions/wechat          # WeChat account interface (Linux client; see docs/WECHAT.md)
+#   (WeChat is the drop-in plugins/wechat: it loads by itself once extension_config.wechat is set; docs/WECHAT.md)
 #   - extensions/cli
 #   - extensions/terminal        # creator-only shell on this machine: $t <line>, or a terminal channel
 #                                #   (assignment {engine: terminal, persona: terminal}); see docs/core/EXTENSIONS.md

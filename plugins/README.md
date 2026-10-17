@@ -21,8 +21,8 @@ extension may accept the secret in its `config.yml` instead (`token: …`). In t
 
 ## What git ignores
 
-Folders in `plugins/` are git-ignored, since they are usually separate repositories; only this README
-and the `whale_chan` example are tracked. Every `plugins/*/config.yml` and `extensions/*/config.yml`
+Folders in `plugins/` are git-ignored, since they are usually separate repositories; only this README,
+the `whale_chan` example and `wechat` are tracked. Every `plugins/*/config.yml` and `extensions/*/config.yml`
 is ignored too.
 
 An extension is a black box to the core and the core to it: it imports only `contracts`, third-party

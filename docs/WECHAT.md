@@ -1,6 +1,6 @@
 # WeChat
 
-[`extensions/wechat`](../extensions/wechat/extension.py) connects one logged-in Linux WeChat account
+[`plugins/wechat`](../plugins/wechat/extension.py) connects one logged-in Linux WeChat account
 (the native desktop client, checked with WeChat 4.1.13.26 on a Raspberry Pi 5, ARM64) to the core as
 an interface. Which chats are answered, by which engine and persona, and with which tools is core
 configuration; the interface only reads, sends and reports facts.
@@ -57,9 +57,9 @@ Wayland app may lack accessibility; restart it through `$wechat_login`.
 injection; keys are accepted only if they authenticate the account's databases):
 
 ```bash
-sudo venv/bin/python -m extensions.wechat.key_setup --pid <native-wechat-pid> \
+sudo venv/bin/python -m plugins.wechat.key_setup --pid <native-wechat-pid> \
     --database-root ~/Documents/xwechat_files/wxid_…/db_storage --output temp/wechat_native/keys.json
-venv/bin/python -m extensions.wechat.probe --database-root ~/Documents/xwechat_files/wxid_…/db_storage \
+venv/bin/python -m plugins.wechat.probe --database-root ~/Documents/xwechat_files/wxid_…/db_storage \
     --keys temp/wechat_native/keys.json        # as the bot user: checks readiness, shows no messages
 ```
 
@@ -67,7 +67,7 @@ venv/bin/python -m extensions.wechat.probe --database-root ~/Documents/xwechat_f
 full-size in the desktop client first):
 
 ```bash
-sudo venv/bin/python -m extensions.wechat.image_key --pid <native-wechat-pid> \
+sudo venv/bin/python -m plugins.wechat.image_key --pid <native-wechat-pid> \
     --account-dir ~/Documents/xwechat_files/wxid_… --output data/core/extensions/wechat/image_key.json
 ```
 
@@ -76,6 +76,9 @@ put them in logs, chats or git. A new message shard (WeChat adds them as history
 database key setup to be run again; reading pauses until then.
 
 ## Configuration
+
+WeChat is a drop-in plugin: it loads by itself and stays dormant (no interface, no messages) until
+`extension_config.wechat` in core.yml or one of the `WECHAT_BRIDGE_*` variables in `.env` is set.
 
 `extension_config.wechat` in core.yml (environment fallbacks `WECHAT_BRIDGE_*` in `.env`):
 

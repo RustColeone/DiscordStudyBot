@@ -1,7 +1,7 @@
 """Check native database readiness without displaying messages or key values.
 
 This diagnostic does not enable replies or replace the desktop transport. Run as the bot user:
-    venv/bin/python -m extensions.wechat.probe --database-root /path/to/wxid_x/db_storage --keys <key file>
+    venv/bin/python -m plugins.wechat.probe --database-root /path/to/wxid_x/db_storage --keys <key file>
 """
 import argparse
 import json

@@ -61,6 +61,10 @@ def settings_from(config, data_dir: Path, environ=os.environ) -> dict:
 
 
 def setup(context) -> Contributions:
+    if not context.config and not any(os.environ.get(name, "").strip() for name in ENVIRONMENT.values()):
+        # A drop-in every install has: stay out of the way until WeChat is configured.
+        context.log("not_configured")
+        return Contributions()
     return Contributions(interfaces=[WeChatInterface(settings_from(context.config, context.data_dir))],
                          personas=[PERSONA])
 

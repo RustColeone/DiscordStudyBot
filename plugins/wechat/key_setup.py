@@ -5,7 +5,7 @@ No debugger attach, process writes, injection, raw-memory dumps or key logging.
 Only authenticated SQLCipher-4 keys for contact/session/message databases are saved.
 
 Run from the repository root as the account owner, once (copied from scripts/wechat_database_keys.py):
-    sudo venv/bin/python -m extensions.wechat.key_setup --pid <native-wechat-pid> \
+    sudo venv/bin/python -m plugins.wechat.key_setup --pid <native-wechat-pid> \
         --database-root /path/to/wxid_x/db_storage --output data/core/extensions/wechat/keys.json
 """
 import argparse

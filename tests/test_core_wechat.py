@@ -159,7 +159,7 @@ class WeChatCase(unittest.IsolatedAsyncioTestCase):
         settings = {"database_root": "", "poll_seconds": 3600, "coalesce_seconds": 0, "account_interval_s": 0,
                     "chat_interval_s": 0, **(wechat or {})}
         return make_config(self.tmp, {
-            "extensions": [str(ROOT / "extensions" / "wechat"), str(FIXTURES / "fake"), str(FIXTURES / "probe"),
+            "extensions": [str(ROOT / "plugins" / "wechat"), str(FIXTURES / "fake"), str(FIXTURES / "probe"),
                            str(FIXTURES / "tools"), str(ROOT / "extensions" / "basic"),
                            str(ROOT / "extensions" / "assistant")],
             "extension_config": {"wechat": settings},
@@ -583,12 +583,25 @@ def encrypted_fixture(value='hello'):
     return b''.join(encrypt(plain[i:i+4096],i//4096+1) for i in range(0,len(plain),4096))
 
 
+class DormantTests(unittest.TestCase):
+    def test_as_a_drop_in_it_does_nothing_until_configured(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        extension = __import__("core.loader", fromlist=["import_extension"]).import_extension(ROOT / "plugins" / "wechat")[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            context = SimpleNamespace(config={}, data_dir=Path(tmp), log=lambda *args, **fields: None)
+            with mock.patch.dict("os.environ", {}, clear=True):
+                self.assertEqual(list(extension.setup(context).interfaces), [])
+            context.config = {"database_root": ""}
+            self.assertEqual(len(extension.setup(context).interfaces), 1)
+
+
 class CopiedModuleTests(unittest.TestCase):
     """The database modules were copied from services/; check the copies, not the originals."""
 
     def module(self, name):
         package = __import__("core.loader", fromlist=["import_extension"]).import_extension(
-            ROOT / "extensions" / "wechat")[1].__name__.rsplit(".", 1)[0]
+            ROOT / "plugins" / "wechat")[1].__name__.rsplit(".", 1)[0]
         return __import__(f"{package}.{name}", fromlist=["x"])
 
     def test_v2_images_decrypt_with_the_account_key(self):
@@ -692,7 +705,7 @@ class TransportProtocolTests(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory(dir=scratch())
         self.tmp = Path(self._tmp.name)
         package = __import__("core.loader", fromlist=["import_extension"]).import_extension(
-            ROOT / "extensions" / "wechat")[1].__name__.rsplit(".", 1)[0]
+            ROOT / "plugins" / "wechat")[1].__name__.rsplit(".", 1)[0]
         self.module = __import__(f"{package}.transport", fromlist=["WeChatTransport"])
         self.transport = self.module.WeChatTransport(
             {"python": sys.executable, "outbox_dir": str(self.tmp / "outbox"), "login_dir": str(self.tmp / "login")},
@@ -746,7 +759,7 @@ class TransportProtocolTests(unittest.IsolatedAsyncioTestCase):
 class SplitTests(unittest.TestCase):
     def test_every_chunk_fits_the_limit(self):
         package = __import__("core.loader", fromlist=["import_extension"]).import_extension(
-            ROOT / "extensions" / "wechat")[1].__name__.rsplit(".", 1)[0]
+            ROOT / "plugins" / "wechat")[1].__name__.rsplit(".", 1)[0]
         split_text = __import__(f"{package}.interface", fromlist=["split_text"]).split_text
         self.assertEqual([len(chunk) for chunk in split_text("a" * 4000 + " " + "b" * 100)], [4000, 101])
         self.assertEqual([len(chunk) for chunk in split_text("a" * 3999 + "\n\n" + "b" * 10)], [4000, 11])
@@ -763,7 +776,7 @@ class SplitTests(unittest.TestCase):
 class SettingsAndReaderTests(unittest.TestCase):
     def test_settings_fall_back_to_the_environment(self):
         module = __import__("core.loader", fromlist=["import_extension"]).import_extension(
-            ROOT / "extensions" / "wechat")[1]
+            ROOT / "plugins" / "wechat")[1]
         settings = module.settings_from({"poll_seconds": 0.01}, Path("/data"), {
             "WECHAT_BRIDGE_DATABASE_ROOT": "/x/wxid_a_1/db_storage", "WECHAT_BRIDGE_MAX_UPLOAD_MB": "250"})
         self.assertEqual(settings["database_root"], "/x/wxid_a_1/db_storage")
@@ -773,7 +786,7 @@ class SettingsAndReaderTests(unittest.TestCase):
 
     def test_native_reader_reports_mention_counts_and_strips_one_mention(self):
         native = __import__("core.loader", fromlist=["import_extension"]).import_extension(
-            ROOT / "extensions" / "wechat")[1]
+            ROOT / "plugins" / "wechat")[1]
         package = native.__name__.rsplit(".", 1)[0]
         reader_module = __import__(package + ".native", fromlist=["WeChatNativeReader"])
         reader = reader_module.WeChatNativeReader.__new__(reader_module.WeChatNativeReader)

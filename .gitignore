@@ -18,6 +18,7 @@ bot_data_export.json
 plugins/*
 !plugins/README.md
 !plugins/whale_chan/
+!plugins/wechat/
 
 # Local extension settings
 extensions/*/config.yml
