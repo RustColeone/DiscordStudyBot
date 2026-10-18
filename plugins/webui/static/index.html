@@ -26,11 +26,14 @@
       <button class="new-chat" id="new-chat" type="button">＋ New chat</button>
       <nav class="chats" id="chats"></nav>
       <div class="me" id="me"></div>
+      <div class="resizer" id="resize-sidebar" role="separator" aria-orientation="vertical"
+           title="Drag to resize · double-click to reset"></div>
     </aside>
 
     <main class="room">
       <header class="topbar">
-        <button class="icon-button only-narrow" id="toggle-sidebar" type="button" aria-label="Chats">☰</button>
+        <button class="icon-button" id="toggle-sidebar" type="button" aria-label="Chats" aria-pressed="false"
+                title="Chats">☰</button>
         <div class="chat-title" id="chat-title" title="Rename">Classroom</div>
         <div class="connection" id="connection" aria-live="polite"></div>
         <button class="icon-button members-button" id="toggle-members" type="button" aria-label="Classmates"
@@ -66,6 +69,8 @@
         <button class="icon-button only-narrow" id="close-members" type="button" aria-label="Close">✕</button>
       </div>
       <div class="member-list" id="member-list"></div>
+      <div class="resizer" id="resize-members" role="separator" aria-orientation="vertical"
+           title="Drag to resize · double-click to reset"></div>
     </aside>
   </div>
   <div class="scrim" id="scrim" hidden></div>

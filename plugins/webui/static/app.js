@@ -7,9 +7,10 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  // accent: rings, borders and glows; ink: names and text; border/bubble: the bubble's edge and fill.
+  // accent: rings, the bubble's strip and glows; ink: names and text; border/bubble (optional): override the
+  // strip colour and the bubble's fill.
   const PEOPLE = {
-    luna: { accent: "#ffffff", ink: "#7d8898", border: "#d3d9e1", bubble: "#ffffff" },
+    luna: { accent: "#ffffff", ink: "#7d8898" },
     gemini: { accent: "#9a86f2", ink: "#7a63de" },
     claude: { accent: "#e5896a", ink: "#c4694a" },
     deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
@@ -23,7 +24,6 @@
     not_permitted: "That command isn't available here.",
     locked: "🔧 The bot is in maintenance right now.",
   };
-  const wide = window.matchMedia("(min-width: 1001px)");
   const state = {
     title: "Study Room", user: { name: "You" }, classmates: [], avatars: new Set(), commands: [],
     conversations: [], current: localStorage.getItem("webui.chat") || "classroom", lastId: 0,
@@ -67,25 +67,84 @@
     .startsWith(name.toLowerCase()));
 
   // ---- panels: chats on the left, classmates on the right ------------------------------------------
-  function setPanel(name, open) {
+  // Three widths: wide shows both panels, medium the chats only, narrow neither (they slide over the chat
+  // there). Either can be shown or hidden at any width; the choice is remembered per width, except on a
+  // phone, where both start folded.
+  const LEVELS = { wide: "(min-width: 1201px)", medium: "(min-width: 761px) and (max-width: 1200px)",
+                   narrow: "(max-width: 760px)" };
+  const DEFAULTS = { wide: { sidebar: true, members: true }, medium: { sidebar: true, members: false },
+                     narrow: { sidebar: false, members: false } };
+  const SIZES = { sidebar: [180, 440, 260], members: [180, 420, 240] };  // min, max, default width
+  const media = Object.fromEntries(Object.entries(LEVELS).map(([name, query]) => [name, window.matchMedia(query)]));
+  const level = () => Object.keys(media).find((name) => media[name].matches) || "wide";
+  const isOpen = (name) => document.body.classList.contains(`show-${name}`);
+
+  function setPanel(name, open, remember = true) {
     document.body.classList.toggle(`show-${name}`, open);
-    if (name === "members") {
-      $("#toggle-members").setAttribute("aria-pressed", String(open));
-      if (wide.matches) localStorage.setItem("webui.members", open ? "open" : "closed");
+    $(name === "sidebar" ? "#toggle-sidebar" : "#toggle-members").setAttribute("aria-pressed", String(open));
+    if (remember && level() !== "narrow") localStorage.setItem(`webui.${level()}.${name}`, open ? "open" : "closed");
+    // On a phone a panel covers the chat; a tap outside closes it.
+    $("#scrim").hidden = !(level() === "narrow" && (isOpen("sidebar") || isOpen("members")));
+    fitWidths();
+  }
+  const closePanels = () => { if (level() === "narrow") { setPanel("sidebar", false); setPanel("members", false); } };
+  function applyLevel() {
+    const current = level();
+    for (const name of ["sidebar", "members"]) {
+      const stored = current === "narrow" ? null : localStorage.getItem(`webui.${current}.${name}`);
+      setPanel(name, stored ? stored === "open" : DEFAULTS[current][name], false);
     }
-    updateScrim();
   }
-  const narrow = window.matchMedia("(max-width: 760px)");
-  function updateScrim() {
-    // Panels cover the chat only on small screens; there a tap outside closes them.
-    const covering = (document.body.classList.contains("show-sidebar") && narrow.matches) ||
-      (document.body.classList.contains("show-members") && !wide.matches);
-    $("#scrim").hidden = !covering;
+
+  // The width asked for (dragged, remembered) and the width shown can differ: on a smaller window the open
+  // panels give way so the chat keeps at least CHAT_MIN, and grow back when there's room again.
+  const CHAT_MIN = 360;
+  const wanted = Object.fromEntries(Object.entries(SIZES).map(([name, [, , fallback]]) =>
+    [name, Number(localStorage.getItem(`webui.width.${name}`)) || fallback]));
+  const docked = (name) => level() !== "narrow" && isOpen(name);
+  function fitWidths() {
+    const shown = { ...wanted };
+    const open = Object.keys(shown).filter(docked);
+    const spare = window.innerWidth - CHAT_MIN;
+    const total = open.reduce((sum, name) => sum + shown[name], 0);
+    if (total > spare) {
+      for (const name of open) shown[name] = Math.max(SIZES[name][0], Math.floor(shown[name] * spare / total));
+    }
+    for (const [name, width] of Object.entries(shown)) {
+      document.documentElement.style.setProperty(`--${name}-w`, `${width}px`);
+    }
   }
-  const closePanels = () => { setPanel("sidebar", false); if (!wide.matches) setPanel("members", false); };
-  function initialPanels() {
-    // Desktop: the class list starts open (as last left); phone: closed until asked for.
-    setPanel("members", wide.matches && localStorage.getItem("webui.members") !== "closed");
+  function setWidth(name, width) {
+    const [low, high] = SIZES[name];
+    const other = name === "sidebar" ? "members" : "sidebar";
+    const room = window.innerWidth - CHAT_MIN - (docked(other) ? $(`#${other}`).getBoundingClientRect().width : 0);
+    wanted[name] = Math.round(Math.max(low, Math.min(high, room, width)));
+    fitWidths();
+    return wanted[name];
+  }
+  function resizable(handle, name) {
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      const startX = event.clientX;
+      const startWidth = $(`#${name}`).getBoundingClientRect().width;
+      const direction = name === "sidebar" ? 1 : -1;  // the sidebar grows rightwards, the class list leftwards
+      document.body.classList.add("is-resizing");
+      let width = startWidth;
+      const moveTo = (move) => { width = setWidth(name, startWidth + direction * (move.clientX - startX)); };
+      const stop = () => {
+        handle.removeEventListener("pointermove", moveTo);
+        document.body.classList.remove("is-resizing");
+        localStorage.setItem(`webui.width.${name}`, String(width));
+      };
+      handle.addEventListener("pointermove", moveTo);
+      handle.addEventListener("pointerup", stop, { once: true });
+      handle.addEventListener("pointercancel", stop, { once: true });
+    });
+    handle.addEventListener("dblclick", () => {
+      localStorage.removeItem(`webui.width.${name}`);
+      setWidth(name, SIZES[name][2]);
+    });
   }
 
   function renderMembers() {
@@ -111,7 +170,7 @@
       text.append(make("div", "member-name", name),
         make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : "in class"));
       member.append(face, text);
-      member.onclick = () => { mention(name); if (!wide.matches) setPanel("members", false); };
+      member.onclick = () => { mention(name); if (level() === "narrow") setPanel("members", false); };
       list.append(member);
     }
     const you = make("div", "members-you");
@@ -136,7 +195,7 @@
       item.dataset.id = chat.id;
       const name = make("button", "chat-name", chat.title || chat.id);
       name.type = "button";
-      name.onclick = () => { open(chat.id); setPanel("sidebar", false); };
+      name.onclick = () => { open(chat.id); if (level() === "narrow") setPanel("sidebar", false); };
       item.append(name);
       if (chat.pinned) item.append(make("span", "chat-pin", "📌"));
       if (state.unread.has(chat.id)) item.append(make("span", "dot"));
@@ -713,14 +772,16 @@
   $("#chat-title").onclick = () => {
     rename(state.conversations.find((chat) => chat.id === state.current) || { id: state.current, title: "" });
   };
-  $("#toggle-sidebar").onclick = () => setPanel("sidebar", !document.body.classList.contains("show-sidebar"));
+  $("#toggle-sidebar").onclick = () => setPanel("sidebar", !isOpen("sidebar"));
   $("#close-sidebar").onclick = () => setPanel("sidebar", false);
-  $("#toggle-members").onclick = () => setPanel("members", !document.body.classList.contains("show-members"));
+  $("#toggle-members").onclick = () => setPanel("members", !isOpen("members"));
   $("#close-members").onclick = () => setPanel("members", false);
   $("#scrim").onclick = closePanels;
-  wide.addEventListener("change", initialPanels);
-  narrow.addEventListener("change", () => { setPanel("sidebar", false); });
-  initialPanels();
+  for (const query of Object.values(media)) query.addEventListener("change", (event) => event.matches && applyLevel());
+  window.addEventListener("resize", fitWidths);
+  resizable($("#resize-sidebar"), "sidebar");
+  resizable($("#resize-members"), "members");
+  applyLevel();
   setInterval(renderTyping, 60000);
 
   renderChats();
