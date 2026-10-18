@@ -212,6 +212,11 @@ class MyInterface(Interface):
     async def operate(self, operation, arguments, context): ...   # returns ToolResult
 ```
 
+Three interfaces to read: [`extensions/cli`](../../extensions/cli/extension.py) (the smallest),
+[`plugins/webui`](../../plugins/webui/interface.py) (a web page: its own server, a transcript, files both
+ways, approval cards and progress as live "typing", with the guards a creator-level page on the network
+needs) and [`extensions/discord`](../../extensions/discord/interface.py) (a full platform).
+
 ### The port
 
 | Method | Use |

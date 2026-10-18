@@ -24,7 +24,7 @@ extension may accept the secret in its `config.yml` instead (`token: …`). In t
 ## What git ignores
 
 Folders in `plugins/` are git-ignored, since they are usually separate repositories; only this README,
-the `whale_chan` example and `wechat` are tracked. Every `plugins/*/config.yml` and `extensions/*/config.yml`
+the `whale_chan` and `webui` examples and `wechat` are tracked. Every `plugins/*/config.yml` and `extensions/*/config.yml`
 is ignored too.
 
 An extension is a black box to the core and the core to it: it imports only `contracts`, third-party
@@ -58,3 +58,27 @@ To run it:
 
 Without a token only the `chat` engine and `whale_chan` persona load; assign them anywhere in
 core.yml, for example `"discord:123": {engine: chat, personas: [whale_chan]}`.
+
+## The web UI
+
+[`webui`](webui) is the bot as a chat page on your local network, for when you would rather not set up
+Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
+printed at startup) from a laptop or phone at home:
+
+* each chat is a conversation of the shared room by default: Luna, Gemini, Claude and DeepSeek, each in
+  their own bubble with their own picture (drop `luna.png` and so on into
+  [`webui/avatars/`](webui/avatars/README.md); until then, coloured initials);
+* the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
+  click someone, or type `@`, to ask them directly (`@Luna …` gets Luna's answer alone);
+* work notes fold away; Markdown, code and LaTeX are rendered in the page (KaTeX); files and pictures go
+  both ways (drop, paste or 📎);
+* approvals arrive as cards with their tier and buttons; type `$` (or `/`) for the command palette;
+* chats in the sidebar, each a separate conversation (`webui:<chat>`): drag to reorder, or ⋯ to rename,
+  pin, move or delete (deleting removes its messages and files from the page; the core keeps its history).
+
+Whoever opens the page is the bot's creator, like the console. So it answers only the local network
+(private and link-local addresses, or `networks:`), refuses other websites in your browser and
+DNS-rebinding hostnames, and serves only pictures and media inline. Set `WEBUI_PASSPHRASE` in `.env`
+(or `passphrase:` in its `config.yml`) to have each browser sign in once. Settings: see
+[`webui/config.example.yml`](webui/config.example.yml) (port, your name, title, who answers).
+

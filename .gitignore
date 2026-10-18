@@ -19,6 +19,7 @@ plugins/*
 !plugins/README.md
 !plugins/whale_chan/
 !plugins/wechat/
+!plugins/webui/
 
 # Local extension settings
 extensions/*/config.yml

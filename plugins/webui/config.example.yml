@@ -1,0 +1,22 @@
+# Web UI settings. Copy to config.yml in this folder (git-ignored); extension_config.webui in core.yml
+# overrides it.
+
+port: 4156                      # open http://<this computer's address>:4156
+# host: 0.0.0.0                 # listen on every network interface (127.0.0.1: this computer only)
+# user_name: Leo                # your name in the chat (default: your login name)
+# title: Study Room
+
+# Whoever opens the page acts as the bot's creator. It only answers the local network (private and
+# link-local addresses); a passphrase, asked once per browser, also keeps out others on your Wi-Fi.
+# Prefer WEBUI_PASSPHRASE in .env; if you put it here, `chmod 600 config.yml`.
+# passphrase: "a long phrase"
+# networks: [10.0.0.0/24, 100.64.0.0/10]   # only these networks instead (e.g. add Tailscale)
+# hostnames: [studybot.home]               # extra names this computer is reached by (IPs, localhost
+                                           # and *.local, *.lan, *.home.arpa always work)
+
+# Who answers: by default the shared room's four classmates (the room engine).
+# personas: [luna, gemini, claude, deepseek]
+# classmates: [Luna, Gemini, Claude, DeepSeek]   # display names on the class strip, in order
+# assignment: {budget: {model_calls: 40, tool_calls: 24, seconds: 900}}
+
+# max_upload_mb: 50

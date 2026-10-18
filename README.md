@@ -32,6 +32,8 @@ that touches a platform, decides what to say or does work is a module.
    even with nothing else connected.
 4. DM the bot on Discord, or mention it (or reply to it) in a server. The Discord application's owner is
    the bot's creator there; approvals arrive in their DM with Approve and Deny buttons.
+   No Discord? Open `http://<this computer>:4156` from any device at home: the web UI, where the four
+   classmates answer in their own bubbles (see [plugins/README.md](plugins/README.md#the-web-ui)).
 
 Later changes: run the setup again, or type `$setup` to the bot as its creator (modules and their
 settings; never secrets). Shared settings (owners, models, personas, which channels it answers in) live
@@ -58,6 +60,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (looking works in your private chats without asking; saving, opening and copying wait for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
+| Web UI | A chat page on your local network (`:4156`), no Discord needed: the four classmates in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
 Reads and prepares run; writes and critical actions (sending elsewhere, changing settings, the shell)
@@ -72,7 +75,8 @@ A module is a folder with an `extension.py`. Built-in ones live in [`extensions/
 ones are dropped into [`plugins/`](plugins); all load at startup unless `core.yml` excludes them
 (`modules: {exclude: [extensions/terminal]}`), each with its own git-ignored `config.yml`.
 [`plugins/whale_chan`](plugins/whale_chan) is a complete example: 鲸酱, a second Discord bot that chats
-like a personal AI web client on DeepSeek.
+like a personal AI web client on DeepSeek. [`plugins/webui`](plugins/webui) is the example interface: the
+bot as a web page on your local network.
 
 * [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md): how the core is built (interfaces, gateway,
   manager, engines, capabilities, storage) and its rules.

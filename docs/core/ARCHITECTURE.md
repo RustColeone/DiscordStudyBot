@@ -9,7 +9,7 @@ flowchart TB
     SUP["Supervisor · parent process<br/>heartbeat · restart · reason"]
     subgraph IS["Interface slot"]
         CLI["cli · discord · built-in"]
-        X1["wechat · whale_chan · plugins"]
+        X1["webui · wechat · whale_chan · plugins"]
     end
     subgraph CORE["Core · child process"]
         GW["Gateway<br/>admission · order · dedupe · routes · routines · scheduled"]
@@ -357,7 +357,7 @@ to the unit to keep a core that keeps crashing down until it is fixed.
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
-| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
+| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `webui` the example interface (a chat page on the local network, the room by default), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
 | [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 | [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |
