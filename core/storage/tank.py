@@ -266,6 +266,12 @@ class Tank:
             sql, parameters = sql + " AND run_id=?", [*parameters, run_id]
         return [self._approval(row) for row in self.db.query(sql + " ORDER BY created_at", parameters)]
 
+    def redact_approval(self, approval_id: str, arguments: dict) -> None:
+        self.db.execute("UPDATE approvals SET arguments=? WHERE id=?", (dumps(arguments), approval_id))
+
+    def action_names(self, run_id: str) -> set[str]:
+        return {row["name"] for row in self.db.query("SELECT DISTINCT name FROM actions WHERE run_id=?", (run_id,))}
+
     def decide_approval(self, approval_id: str, status: str, decided_by: str) -> bool:
         """Atomically move a pending approval to approved/denied/expired. False if it was not pending."""
         cursor = self.db.execute(

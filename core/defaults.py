@@ -15,9 +15,11 @@ DEFAULT_PROMPT = ("You are a helpful, friendly assistant in a Discord server. An
                   "the person writes in. Use tools when they help, and say plainly when you cannot do something.")
 
 
-PREAPPROVED = ["reminders.create", "reminders.cancel", "discord.music", "discord.music_control",
-               "discord.queue_music", "discord.clock_start", "discord.clock_stop", "core.add_routine",
-               "core.delete_routine", "core.pause_routine", "core.resume_routine"]
+# Basic features that only affect the requester's own conversation (or its server's voice channel), so
+# anyone may use them without the owner's approval.
+BASIC_FEATURES = ["reminders.create", "reminders.cancel", "discord.music", "discord.music_control",
+                  "discord.queue_music", "discord.clock_start", "discord.clock_stop", "core.add_routine",
+                  "core.delete_routine", "core.pause_routine", "core.resume_routine"]
 DEFAULT_CHAIN = [
     {"provider": "deepseek", "model": "deepseek-flash"},
     {"provider": "openai", "model": "gpt-6-luna"},
@@ -62,12 +64,17 @@ def default_config() -> dict:
                      **{name: character_chain(name) for name in ("deepseek", "luna", "gemini", "claude")}},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
-            # These only affect the requester's own conversation (or its server's voice channel), so
-            # members may use them without the owner's approval.
-            "*": {"engine": "assistant", "personas": ["assistant"], "preapprove": PREAPPROVED},
-            "routine:*": {"engine": "assistant", "personas": ["assistant"], "allow": ["basic.*"],
+            "*": {"engine": "assistant", "personas": ["assistant"]},
+            "routine:*": {"engine": "assistant", "personas": ["assistant"],
                           "budget": {"model_calls": 8, "tool_calls": 8, "seconds": 300}},
         },
+        # Access (use), approval defaults per tier (tiers) and exceptions (rules); see ARCHITECTURE.md.
+        "permissions": {
+            "*": {"rules": {name: "auto" for name in BASIC_FEATURES}},
+            "routine:*": {"use": ["basic.*"]},
+        },
+        # Files models may never read, besides the built-in list (.env, keys, credentials, modules' config.yml).
+        "secrets": [],
         "admission": {"*": {"enabled": True, "require_mention_in_groups": True}},
         "routes": {},
         "routines": {},

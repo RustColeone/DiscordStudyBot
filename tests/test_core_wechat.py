@@ -435,6 +435,10 @@ class OwnerTests(WeChatCase):
         self.assertIn("hello from friend", await self.command("$wechat_read Friend"))
         self.assertIn("shows your message", await self.command("$wechat_send Quiet | hi all"))
         self.assertEqual(self.texts("quiet@chatroom"), ["hi all"])
+        # The chat that approvals and grants are about is the one the message goes to.
+        mixed = await self.command('$call wechat.send {"chat": "Friend", "spec": "Quiet | sneaky"}')
+        self.assertIn("not both", mixed)
+        self.assertEqual(self.texts("quiet@chatroom"), ["hi all"])
         await self.poll()
         self.assertEqual(self.core.tank.runs(("cancelled",)), [])
 
@@ -518,12 +522,12 @@ class ProductionPolicyTests(WeChatCase):
             "admission": {"*": {"enabled": True, "require_mention_in_groups": True}, "wechat:*": {"enabled": False},
                           ROOM: {"enabled": True, "max_age_s": 900}, FRIEND: {"enabled": True, "max_age_s": 900}},
             "assignments": {"*": {"engine": "probe", "personas": ["p"]},
-                            "wechat:*": {"engine": "assistant", "personas": ["wechat"], "allow": ["*"],
-                                         "deny": ["system.*"], "preapprove": [],
+                            "wechat:*": {"engine": "assistant", "personas": ["wechat"],
                                          "budget": {"model_calls": 24, "tool_calls": 24, "seconds": 1800},
                                          "lane": "sender",
                                          "options": {"history_scope": "sender", "quote": "trigger", "diary": False,
-                                                     "max_steps": 12}}}},
+                                                     "max_steps": 12}}},
+            "permissions": {"wechat:*": {"use": ["*", "!system.*"], "tiers": {"write": "always-ask"}}}},
             adapter=adapter)
         trigger = self.transport.add("room@chatroom", "@Me\u2005说句话", mentions=True, sender="wxid_amy", name="Amy")
         await self.poll()

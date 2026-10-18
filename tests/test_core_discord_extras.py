@@ -101,8 +101,10 @@ class ExtrasTestBase(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def begin(self, discord_config=None, preapprove=True):
-        assignment = {"engine": "probe", "personas": ["p"], "preapprove": PUBLIC_WRITES if preapprove else []}
-        await self.start({"extension_config": {"discord": discord_config or {}}, "assignments": {"*": assignment}})
+        assignment = {"engine": "probe", "personas": ["p"]}
+        rules = {name: "auto" for name in PUBLIC_WRITES} if preapprove else {}
+        await self.start({"extension_config": {"discord": discord_config or {}}, "assignments": {"*": assignment},
+                          "permissions": {"*": {"rules": rules}}})
         self.server = FakeGuild()
         self.text = GuildChannel(556, self.server)
         self.client.channels[556] = self.text

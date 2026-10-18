@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,17 +19,26 @@ NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 
 
 class Risk(str, Enum):
-    """What running the capability can change.
+    """The capability's tier: what running it can change.
 
     READ: observes only; may be repeated.
     PREPARE: creates local artifacts (downloads, renders) but changes nothing shared; never repeated within a run.
-    WRITE: changes something outside the run (sends, edits, deletes, schedules); requires owner approval unless
-    the conversation's assignment pre-approves it; never repeated within a run.
+    WRITE: changes something reversible inside the bot (reminders, notes, routines, music); never repeated
+    within a run.
+    CRITICAL: affects the machine, other people or permissions (shell, files, services, sending as the owner,
+    changing policy); never repeated within a run and never approved by a wildcard.
+    Whether a call runs at once or waits for the owner is decided per conversation (see docs/core/ARCHITECTURE.md,
+    Permissions); by default reads and prepares run, writes and critical actions ask.
     """
 
     READ = "read"
     PREPARE = "prepare"
     WRITE = "write"
+    CRITICAL = "critical"
+
+
+TIER_ORDER = (Risk.READ, Risk.PREPARE, Risk.WRITE, Risk.CRITICAL)
+SubjectKind = Literal["value", "path"]
 
 
 @dataclass(frozen=True)
@@ -124,6 +134,19 @@ class Capability:
     as `command_argument`. It may be a name or a `Command` declaring options and a template for
     interfaces with native command menus; a name becomes a `Command` with one option for
     `command_argument`.
+
+    `risk` is the tier (see Risk). Attributes refine it; the core enforces them and configuration can
+    only make them stricter:
+    * `private`: shows the owner's private data (messages, screen, clipboard, files). Offered only in
+      conversations private to the owner; its run's output goes nowhere else.
+    * `subject`: the parameter that permission rules and saved grants match on (a unit, a chat, a path);
+      `subject_kind="path"` also makes the core refuse secret paths (`.env`, keys) to models.
+    * `escalate(arguments)`: may return a higher tier for a call (never a lower one).
+    * `never_auto`: a model's call always asks the owner; no rule or grant changes that.
+    * `grantable`: the owner may answer an approval with "always allow" for that exact subject in that
+      conversation (needs `subject`).
+    * `confirm`: even the owner's own typed command asks for a one-tap confirmation.
+    * `describe(arguments)`: one plain line for approval prompts ("Restart navidrome.service").
     """
 
     name: str
@@ -139,6 +162,14 @@ class Capability:
     command_argument: str | None = None
     timeout_s: float = 600.0
     access: Access = "member"
+    private: bool = False
+    subject: str | None = None
+    subject_kind: SubjectKind = "value"
+    escalate: Callable[[Mapping[str, Any]], "Risk | str | None"] | None = None
+    never_auto: bool = False
+    grantable: bool = False
+    confirm: bool = False
+    describe: Callable[[Mapping[str, Any]], str] | None = None
 
     def __post_init__(self):
         if self.owner_only:
@@ -158,10 +189,46 @@ class Capability:
             raise ValueError(f"{self.name}: required parameters are not declared: {sorted(missing)}")
         if self.command_argument and self.command_argument not in self.parameters:
             raise ValueError(f"{self.name}: command_argument must be a declared parameter")
+        if self.subject is not None and self.subject not in self.parameters:
+            raise ValueError(f"{self.name}: subject must be a declared parameter")
+        if self.subject_kind not in ("value", "path"):
+            raise ValueError(f"{self.name}: subject_kind must be value or path")
+        if self.grantable and self.subject is None:
+            raise ValueError(f"{self.name}: grantable needs a subject")
 
     @property
     def extension(self) -> str:
         return self.name.split(".", 1)[0]
+
+    def tier(self, arguments: Mapping[str, Any]) -> Risk:
+        """The tier of one call: the declared one, raised (never lowered) by `escalate`."""
+        if self.escalate is None:
+            return self.risk
+        try:
+            raised = self.escalate(arguments)
+        except Exception:
+            # Unsure: treat the call as the most sensitive tier rather than run it on a weaker footing.
+            return Risk.CRITICAL
+        if raised is None:
+            return self.risk
+        raised = Risk(raised)
+        return raised if TIER_ORDER.index(raised) > TIER_ORDER.index(self.risk) else self.risk
+
+    def subject_of(self, arguments: Mapping[str, Any]) -> str | None:
+        if self.subject is None or arguments.get(self.subject) is None:
+            return None
+        return str(arguments[self.subject]).strip()
+
+    def summary(self, arguments: Mapping[str, Any]) -> str:
+        """One line for approval prompts."""
+        if self.describe is not None:
+            try:
+                text = str(self.describe(arguments)).strip()
+                if text:
+                    return text
+            except Exception:
+                pass
+        return f"{self.name} {json.dumps(dict(arguments), ensure_ascii=False, sort_keys=True)}"
 
     def schema(self) -> dict:
         """The description offered to models."""

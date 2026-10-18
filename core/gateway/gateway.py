@@ -259,6 +259,10 @@ class Gateway:
             return self.manager.control
         return reply.address
 
+    def target(self, reply: Reply) -> Address | None:
+        """Where a reply would be delivered (after routes)."""
+        return self._target(reply)
+
     async def deliver(self, reply: Reply) -> Delivery:
         target = self._target(reply)
         if target is None:

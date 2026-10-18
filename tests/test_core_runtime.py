@@ -162,8 +162,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     # ---- tool policy ------------------------------------------------------------------------------
     async def test_tool_policy_refusals_are_results_not_exceptions(self):
-        core = await self.core({"assignments": {"chat:limited": {"engine": "probe", "personas": ["p"],
-                                                                  "allow": ["tools.*"], "deny": ["tools.broken"]}},
+        core = await self.core({"permissions": {"chat:limited": {"use": ["tools.*", "!tools.broken"]}},
                                 "extension_config": {"fake": {"interfaces": {"nofiles": {"files": False}}}}})
         chat = iface(core)
         await chat.say('tool tools.nope {}')
@@ -214,7 +213,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(delivery.detail, "too_large")
 
     async def test_identical_write_in_one_run_executes_once(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["tools.write_value"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"tools.write_value": "auto"}}}})
         await iface(core).say('tool2 tools.write_value {"key": "k", "value": "v"}')
         await iface(core).say('tool2 tools.read_value {"key": "k"}', conversation="reads")
         await settle(core)
@@ -267,7 +266,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("approved: wrote k (execution 1)", iface(core).texts("room"))
 
     async def test_interrupted_write_is_never_repeated_after_restart(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["tools.write_value"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"tools.write_value": "auto"}}}})
         await iface(core).say("hold")
         await asyncio.sleep(0.02)
         run = core.tank.runs(("running",))[0]
@@ -282,7 +281,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
 
     async def test_preapproved_write_runs_without_asking(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["tools.*"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"tools.*": "auto"}}}})
         await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
         await settle(core)
         self.assertEqual(iface(core).texts("room"), ["success: wrote k (execution 1)"])
@@ -504,7 +503,7 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(core.bottle.scheduled(status="uncertain")[0]["id"], scheduled_id)
 
     async def test_interface_operations_and_core_capabilities_are_owner_only(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["chat.reset"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"chat.reset": "auto"}}}})
         chat = iface(core)
         await chat.say('tool chat.echo {"value": "x"}', sender="boss")
         await chat.say('tool chat.echo {"value": "x"}', conversation="guest")
@@ -514,8 +513,10 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.texts("room"), ["success: echo x"])
         self.assertIn("only to the owner", chat.texts("guest")[0])
         self.assertEqual(chat.texts("boss2"), ["success: reset done"])
-        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
-        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        # The owner asked in their own direct chat, so the approval comes to that chat.
+        approval_id = chat.notices("approval_request")[0].data["approval_id"]
+        self.assertFalse(iface(core, "owner").notices("approval_request"))
+        await chat.say(f"$approve {approval_id}", conversation="b3", sender="boss")
         await settle(core)
         self.assertIn("hey", iface(core, "owner").texts("dm"))
         self.assertIn(("out", "hey"), [(item.direction, item.text) for item in core.tank.recent_messages("owner:dm")])
@@ -553,10 +554,17 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("only to the owner", iface(core).texts("guest2")[0])
 
     async def test_core_rule_capability_validates_and_changes_admission(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["core.*"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"core.*": "auto", "core.set_rule": "auto"}}}})
         chat = iface(core)
-        await chat.say('tool core.set_rule {"pattern": "chat:x", "rule": {"bogus": 1}}', sender="boss")
-        await chat.say('tool core.set_rule {"pattern": "chat:x", "rule": {"enabled": false}}',
+        # Changing policy is critical and never automatic for a model, whatever the rules say...
+        await chat.say('tool core.set_rule {"pattern": "chat:y", "rule": {"enabled": false}}', sender="boss",
+                       conversation="model")
+        await settle(core)
+        self.assertEqual(chat.notices("approval_request")[0].data["tier"], "critical")
+        self.assertTrue(await chat.say("echo still open", conversation="y"))
+        # ...while the owner's own typed command is their approval.
+        await chat.say('$call core.set_rule {"pattern": "chat:x", "rule": {"bogus": 1}}', sender="boss")
+        await chat.say('$call core.set_rule {"pattern": "chat:x", "rule": {"enabled": false}}',
                        conversation="b2", sender="boss")
         await settle(core)
         self.assertIn("Unknown rule keys", chat.texts("room")[0])

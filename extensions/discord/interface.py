@@ -107,7 +107,8 @@ class DiscordInterface(Interface):
     display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
                       max_upload_mb=DEFAULT_UPLOAD_BYTES / 1024 / 1024, max_text_chars=MESSAGE_LIMIT)
     operations = (
-        Operation("status", "Discord connection status, servers and owners", command="discord_status"),
+        Operation("status", "Discord connection status, servers and owners", command="discord_status",
+                  private=True),
         Operation("invite", "The link for inviting this bot to a server", command="invite"),
         Operation("music", "The music player in the caller's voice channel in this server. Text: init, play, pause, "
                   "stop, next, prev, status, queue, or -y <YouTube URLs> [--queue] (play now, or add after the "
@@ -583,14 +584,21 @@ class DiscordInterface(Interface):
     def render_approval(self, reply: Reply) -> str:
         data = dict(reply.data)
         approval, arguments = data.get("approval_id", ""), data.get("arguments", "{}")
-        head = f"🔐 Approval {inline_code(approval)} · {inline_code(data.get('capability', ''))}"
+        title = "Confirm" if data.get("kind") == "confirm" else "Approval"
+        tier = f" · **{data['tier'].upper()}**" if data.get("tier") else ""
+        head = f"🔐 {title} {inline_code(approval)}{tier} · {inline_code(data.get('capability', ''))}"
         if len(arguments) <= 300 and "\n" not in arguments:
             lines = [f"{head} {inline_code(arguments)}"]
         else:
             lines = [head, "```json\n" + code_safe(arguments[:1500]) + "\n```"]
+        if data.get("summary"):
+            lines.append(f"> {data['summary'][:500]}")
+        lines += [f"⚠️ {warning}" for warning in data.get("warnings", "").split(" | ") if warning]
         run = f" (run {inline_code(reply.run_id)})" if reply.run_id else ""
+        always = f"; {inline_code('$approve ' + approval + ' always')} stops asking for this exact action there" \
+            if data.get("always") == "true" else ""
         lines.append(f"Requested in {inline_code(data.get('address', ''))}{run}. "
-                     f"Reply {inline_code('$approve ' + approval)} or {inline_code('$deny ' + approval)}.")
+                     f"Reply {inline_code('$approve ' + approval)} or {inline_code('$deny ' + approval)}{always}.")
         return "\n".join(lines)
 
     @staticmethod

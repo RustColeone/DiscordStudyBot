@@ -8,8 +8,9 @@ changes to core.yml. Without a token the engine and persona still load, so the `
 
 It contributes: the `whale_chan` interface (the Discord bot), the `chat` engine, the `whale_chan`
 persona, the `whale_chan` model profile (DeepSeek Flash) and defaults for its own
-conversations (`whale_chan:*` uses the chat engine; in servers it answers mentions and replies).
-core.yml settings win over all of these.
+conversations (`whale_chan:*` uses the chat engine; in servers it answers mentions and replies; every
+write and critical action asks the owner first, with no exceptions, in case she misread a request or a
+page tried to trick her). core.yml settings win over all of these.
 """
 
 from __future__ import annotations
@@ -70,7 +71,8 @@ def setup(context) -> Contributions:
                   **dict(config.get("assignment") or {})}
     return Contributions(**contributions, interfaces=[WhaleChanBot(name, token, context.data_dir, config=config)],
                          assignments={f"{name}:*": assignment},
-                         admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": True}})
+                         admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": True}},
+                         permissions={f"{name}:*": {"tiers": {"write": "always-ask", "critical": "always-ask"}}})
 
 
 EXTENSION = Extension("whale_chan", setup, contracts="1", version="1",

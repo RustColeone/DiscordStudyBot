@@ -153,12 +153,27 @@ class CoreSideTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("after a crash", notice.text)
         self.assertFalse(reason.exists())
 
+    async def test_a_requested_restart_is_also_answered_where_it_was_asked(self):
+        reason = self.tmp / "reason.json"
+        with mock.patch.dict(os.environ, {"CORE_RESTART_REASON": str(reason)}):
+            supervised.request("Boss", "chat:whale-dm")
+            await supervised.report(self.core, wait_s=5)
+        self.assertEqual([notice.address.conversation for notice in iface(self.core, "owner").notices("restarted")],
+                         ["dm"])
+        here = self.chat.notices("restarted")
+        self.assertEqual([notice.address.conversation for notice in here], ["whale-dm"])
+        self.assertIn("as Boss asked", here[0].text)
+        with mock.patch.dict(os.environ, {"CORE_RESTART_REASON": str(reason)}):
+            supervised.request("Boss", "owner:dm")
+            await supervised.report(self.core, wait_s=5)
+        self.assertEqual(len(iface(self.core, "owner").notices("restarted")), 2)  # asked at control: said once
+
     async def test_only_the_creator_restarts_and_only_under_the_supervisor(self):
         await self.chat.say("$admin restart", sender="boss")
         await settle(self.core)
         self.assertIn("cannot restart itself", self.chat.texts("room")[-1])
         asked = []
-        self.core.manager.restart = asked.append
+        self.core.manager.restart = lambda by, where=None: asked.append((by, where))
         await self.chat.say("$admin restart", sender="alice")
         await settle(self.core)
         self.assertEqual(self.chat.texts("room")[-1], "Only the creator can restart the bot.")
@@ -166,10 +181,10 @@ class CoreSideTests(unittest.IsolatedAsyncioTestCase):
         await settle(self.core)
         self.assertEqual(self.chat.texts("room")[-1], "🔄 Restarting; I'll say when I'm back.")
         await asyncio.sleep(1.2)
-        self.assertEqual(asked, ["Boss"])
+        self.assertEqual(asked, [("Boss", "chat:room")])
 
     async def test_setup_changes_offer_a_restart_button_when_supervised(self):
-        self.core.manager.restart = lambda by: None
+        self.core.manager.restart = lambda by, where=None: None
         await self.chat.say("$setup on probe", sender="boss")
         await settle(self.core)
         reply = self.chat.delivered[-1]

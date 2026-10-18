@@ -60,8 +60,15 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def call(self, name, arguments=None, **tool):
         return await self.capabilities[name].run(arguments or {}, self.tool(**tool))
 
-    def test_only_the_process_list_is_a_read_and_everything_is_creator_only(self):
-        self.assertEqual({c.name for c in self.capabilities.values() if c.risk.value != "write"}, {"host.processes"})
+    def test_looking_is_a_private_read_saving_is_critical_and_everything_is_creator_only(self):
+        tiers = {c.name: c.risk.value for c in self.capabilities.values()}
+        looking = {"host.processes", "host.screenshot", "host.get_file", "host.read_clipboard"}
+        self.assertEqual({name for name, tier in tiers.items() if tier == "read"}, looking)
+        self.assertEqual({c.name for c in self.capabilities.values() if c.private}, looking)
+        self.assertEqual(tiers["host.save_files"], "critical")
+        self.assertEqual({tiers["host.open"], tiers["host.write_clipboard"]}, {"write"})
+        self.assertEqual((self.capabilities["host.get_file"].subject_kind,
+                          self.capabilities["host.save_files"].subject_kind), ("path", "path"))
         self.assertEqual({c.access for c in self.capabilities.values()}, {"creator"})
 
     async def test_screenshots_are_sent_and_shrunk_to_fit(self):

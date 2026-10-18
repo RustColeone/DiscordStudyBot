@@ -42,6 +42,7 @@ class LoadedExtension:
     path: Path
     module: ModuleType
     contributions: Contributions
+    config: Mapping[str, Any] = None  # the settings it was set up with (its config.yml, then core.yml's)
 
 
 def _package_name(path: Path) -> str:
@@ -122,4 +123,4 @@ async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[s
     for item in contributions.personas:
         if not isinstance(item, Persona):
             raise ExtensionError(f"{extension.name}: {item!r} is not a contracts.Persona")
-    return LoadedExtension(extension, Path(path).resolve(), module, contributions)
+    return LoadedExtension(extension, Path(path).resolve(), module, contributions, config)

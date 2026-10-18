@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 from contracts import Address, Persona
-from core.manager.policy import Assignment, Owners
+from core.manager.policy import Assignment, Owners, Permissions
 
 
 class ConfigError(ValueError):
@@ -43,6 +43,7 @@ class CoreConfig:
         # Where setup writes: the core.yml this came from (None: built-in defaults only) and the .env file.
         self.file: Path | None = None
         self.env_file: Path = base_dir / ".env"
+        self.env_files: list[Path] = [base_dir / ".env"]
         for legacy in ("extensions", "plugin_dirs"):
             if legacy in raw:
                 raise ConfigError(f"`{legacy}:` is no longer used: every module in extensions/ and plugins/ loads. "
@@ -64,14 +65,24 @@ class CoreConfig:
         self.routes = dict(raw.get("routes") or {})
         self.routines = dict(raw.get("routines") or {})
         self.audit_echo = bool(raw.get("audit_echo", False))
+        secrets = raw.get("secrets") or []
+        if isinstance(secrets, str) or not all(isinstance(item, str) for item in secrets):
+            raise ConfigError("`secrets:` must be a list of file paths or patterns")
+        self.secret_paths = list(secrets)
         try:
             self.personas = {name: Persona(name, value.get("display_name", name), value["prompt"],
                                            value.get("profile", "default"))
                              for name, value in (raw.get("personas") or {}).items()}
             self.assignments = {pattern: Assignment.from_config(pattern, value)
                                 for pattern, value in (raw.get("assignments") or {}).items()}
-        except (KeyError, TypeError) as error:
+        except (KeyError, TypeError, ValueError) as error:
             raise ConfigError(f"Invalid persona or assignment: {error}") from error
+        self.permissions = dict(raw.get("permissions") or {})
+        self.builtin_permissions: dict = {}  # set by load(): the built-in defaults, a layer of their own
+        try:
+            Permissions([("core.yml", self.permissions)])
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
 
     def all_modules(self) -> list[Path]:
         """Every module folder, excluded ones too, built-in ones first, each once."""
@@ -124,8 +135,10 @@ class CoreConfig:
         env_files = [cls._resolve(item, base) for item in raw.get("env_files", [".env"])]
         for env_file in env_files:
             load_env_file(env_file)
+        loaded = list(env_files)
         if base != ROOT and "env_files" not in raw:
             load_env_file(ROOT / ".env")
+            loaded.append(ROOT / ".env")
         defaults = default_config()
         # Paths written in core.yml are relative to core.yml; built-in ones are already absolute.
         for key in ("data_dir",):
@@ -139,6 +152,10 @@ class CoreConfig:
         config = cls(merge(defaults, raw), base)
         config.file = path if path is not None and Path(path).is_file() else None
         config.env_file = env_files[0] if env_files else base / ".env"
+        config.env_files = loaded
+        # Permissions layer setting by setting (built-in, then modules, then core.yml), so keep them apart.
+        config.builtin_permissions = dict(defaults.get("permissions") or {})
+        config.permissions = dict(raw.get("permissions") or {})
         return config
 
     @staticmethod

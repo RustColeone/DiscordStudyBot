@@ -10,7 +10,7 @@ import signal
 import time
 from pathlib import Path
 
-from contracts import Reply
+from contracts import Address, Reply
 
 BEAT_S = 5.0
 
@@ -66,11 +66,12 @@ def stop_on_signal(core, task):
     return handle
 
 
-def request(by: str) -> None:
-    """Record who asked for a restart, for the next core to report."""
+def request(by: str, where: str | None = None) -> None:
+    """Record who asked for a restart, and in which conversation, for the next core to report."""
     path = os.environ.get("CORE_RESTART_REASON")
     if path:
-        Path(path).write_text(json.dumps({"reason": "requested", "by": by, "at": time.time()}), encoding="utf-8")
+        data = {"reason": "requested", "by": by, "at": time.time(), **({"where": where} if where else {})}
+        Path(path).write_text(json.dumps(data), encoding="utf-8")
 
 
 def describe(data: dict, now: float | None = None) -> str:
@@ -89,7 +90,8 @@ def describe(data: dict, now: float | None = None) -> str:
 
 
 async def report(core, wait_s: float = 180.0) -> None:
-    """Tell the owner why the previous core stopped, once the control route's interface is connected."""
+    """Tell the owner why the previous core stopped, once the control route's interface is connected; a
+    requested restart is also answered in the conversation it was asked from (another bot's DM, say)."""
     path = Path(os.environ.get("CORE_RESTART_REASON") or "")
     if not path.name or not path.is_file():
         return
@@ -101,14 +103,25 @@ async def report(core, wait_s: float = 180.0) -> None:
         path.unlink(missing_ok=True)
     text = describe(data)
     print(f"[core] {text}", flush=True)
-    reply = None
+    try:
+        asked = Address.parse(data["where"]) if data.get("where") else None
+    except ValueError:
+        asked = None
+    sent: set[Address] = set()
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         control = core.manager.control if core.started else None
-        if control is not None:
-            reply = reply or Reply(control, "notice", code="restarted", text=text, source="core",
-                                   data={"reason": str(data.get("reason", ""))})
+        targets = [] if control is None else [control]
+        if asked is not None and core.started and asked not in targets:
+            targets.append(asked)
+        for target in targets:
+            if target in sent:
+                continue
             # Interfaces connect after the core starts (Discord logs in); try until the message goes out.
+            reply = Reply(target, "notice", code="restarted", text=text, source="core",
+                          data={"reason": str(data.get("reason", ""))})
             if (await core.gateway.deliver(reply)).ok:
-                return
+                sent.add(target)
+        if control is not None and set(targets) <= sent:
+            return
         await asyncio.sleep(2)

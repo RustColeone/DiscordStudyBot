@@ -37,6 +37,12 @@ models:
 
 # Extra assignment settings for this bot's conversations (core.yml assignments still win):
 # assignment:
-#   preapprove: [reminders.create, reminders.cancel]
-#   deny: ["system.*"]
+#   budget: {model_calls: 30, tool_calls: 24, seconds: 1800}
 #   options: {owner_instructions: "…"}
+
+# Permissions for her conversations (core.yml `permissions:` still wins, setting by setting). By default
+# reads and prepares run, and every write and critical action asks you first with no exceptions:
+# permissions:
+#   "whale_chan:*":
+#     use: ["*", "!system.*"]                 # what she may use at all
+#     tiers: {write: always-ask, critical: always-ask}

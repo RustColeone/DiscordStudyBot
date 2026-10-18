@@ -1,9 +1,10 @@
 """Host: this computer's desktop and files, for the bot's creator only.
 
 Screenshots, sending a file from the computer, saving attachments onto it, the clipboard, opening a
-URL or file with its default app, and what is running. Everything here is creator-only; everything
-except the process list is a write, so a model's call waits for the creator's approval (the creator's
-own `$command` is that approval). Works on Windows, macOS and Linux; see docs/core/EXTENSIONS.md.
+URL or file with its default app, and what is running. Everything here is creator-only. Looking (the
+screen, a file, the clipboard, the process list) is a private read: offered only in the creator's own
+private chats, and never for secret files. Saving files onto the computer is critical; opening something
+and setting the clipboard are writes. Works on Windows, macOS and Linux; see docs/core/EXTENSIONS.md.
 """
 
 from __future__ import annotations
@@ -160,24 +161,26 @@ def setup(context) -> Contributions:
     where = f"the bot's own computer ({SYSTEM})"
     return Contributions(capabilities=[
         Capability("host.screenshot", f"Take a screenshot of {where} and send it here.", screenshot,
-                   risk=Risk.WRITE, access="creator", needs={"files"},
+                   risk=Risk.READ, access="creator", needs={"files"}, private=True,
                    command=Command("screenshot", "Screenshot of this computer's screen (creator only)",
                                    access="creator"), timeout_s=60),
         Capability("host.get_file", f"Send a file from {where} into this conversation. path: absolute, or "
                    "relative to the home folder.", get_file, {"path": {"type": "string"}}, ("path",),
-                   Risk.WRITE, access="creator", needs={"files"}, command="getfile", command_argument="path",
-                   timeout_s=120),
+                   Risk.READ, access="creator", needs={"files"}, command="getfile", command_argument="path",
+                   timeout_s=120, private=True, subject="path", subject_kind="path"),
         Capability("host.save_files", f"Save files the owner attached to their own messages onto {where}. "
                    "names: the attachments' file names to save (all of the owner's if omitted); folder: where "
                    f"to (default {downloads}); names that exist get a number.", save_files,
                    {"names": {"type": "array", "items": {"type": "string"}}, "folder": {"type": "string"}},
-                   risk=Risk.WRITE, access="creator",
+                   risk=Risk.CRITICAL, access="creator", subject="folder", subject_kind="path",
+                   describe=lambda a: f"Save {', '.join(a.get('names') or []) or 'all attached files'} into "
+                                      f"{a.get('folder') or downloads}",
                    command=Command("savefile", "Save the attached file(s) onto this computer (creator only)",
                                    (Option("file", "The file to save", "attachment", True),
                                     Option("folder", f"Where to (default {downloads})")),
                                    template="[{folder}]", access="creator"), timeout_s=120),
-        Capability("host.read_clipboard", f"The text on {where}'s clipboard.", read_clipboard, risk=Risk.WRITE,
-                   access="creator", command=Command("clipboard", "Show this computer's clipboard (creator only)",
+        Capability("host.read_clipboard", f"The text on {where}'s clipboard.", read_clipboard, risk=Risk.READ,
+                   access="creator", private=True, command=Command("clipboard", "Show this computer's clipboard (creator only)",
                                                      access="creator"), timeout_s=30),
         Capability("host.write_clipboard", f"Put text on {where}'s clipboard.", write_clipboard,
                    {"text": {"type": "string"}}, ("text",), Risk.WRITE, access="creator", command="copy",
@@ -187,7 +190,7 @@ def setup(context) -> Contributions:
                    access="creator", command="open", command_argument="target", timeout_s=30),
         Capability("host.processes", f"What is running on {where}: the busiest processes. sort: cpu or memory.",
                    processes, {"sort": {"type": "string", "enum": ["cpu", "memory"]},
-                               "count": {"type": "integer"}}, risk=Risk.READ, access="creator",
+                               "count": {"type": "integer"}}, risk=Risk.READ, access="creator", private=True,
                    command="processes", command_argument="sort", timeout_s=30),
     ])
 

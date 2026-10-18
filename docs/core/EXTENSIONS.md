@@ -28,11 +28,12 @@ describes everything the core does with it; you should not need to read core cod
 | Term | Meaning |
 | --- | --- |
 | Address | `interface:conversation`, e.g. `wechat:room@chatroom`. The conversation part is yours to define and may contain `:`. |
-| Owner | A sender listed under `owners` in `core.yml` for that interface, e.g. `owners: {discord: ["1234"]}`. Owners approve writes, run owner-only capabilities, and their `$commands` bypass admission. |
-| Control route | `control: discord:dm-1234` in `core.yml`. Approval requests, failure details, events without a route, routine replies without a route, and hidden progress go there. |
+| Owner | A sender listed under `owners` in `core.yml` for that interface, e.g. `owners: {discord: ["1234"]}`. Owners decide approvals, run owner-only capabilities, their `$commands` bypass admission and count as their approval. |
+| Control route | `control: discord:dm-1234` in `core.yml`. The default private place for approval requests (those an owner did not start in their own direct chat), failure details, events without a route, routine replies without a route, and hidden progress. |
 | Route | Gateway data `pattern → {target, kinds}`: replies (of the listed `kinds`, or all) for conversations matching `pattern` go to `target` instead. `kinds` may include `event` to send interface events somewhere other than the control route. Edited with `core.set_route`. |
 | Admission rule | Gateway data deciding which person messages become requests (below). Edited with `core.set_rule`. |
-| Assignment | Manager data deciding which engine and personas handle a conversation, what they may use, and their budget (below). Edited with `core.set_assignment`. |
+| Assignment | Manager data deciding which engine and personas handle a conversation, and their budget (below). Edited with `core.set_assignment`. |
+| Permissions | What a conversation may use (access) and what runs there without asking (approval), per tier and per capability (below; [ARCHITECTURE.md](ARCHITECTURE.md#permissions)). |
 | Pattern | `*`, `interface:*`, or an exact address. The most specific match wins. |
 | Run | One handled request (or a resumed one), durable across restarts. |
 | Lane | Where a new message goes. A run *holds* its lane only while it is thinking or waiting for an answer; new messages then go to its inbox (or answer its question). While a run waits on a capability or a file delivery (a video conversion, a ten-minute upload) or for approval, it does not hold the lane, and new messages start their own run in parallel; engines see such work through `session.activity()`. Default lane = conversation; with `lane: sender`, each sender in a group conversation has their own lane, so only the person asked can answer a question. |
@@ -70,9 +71,6 @@ assignments:
   "*":
     engine: assistant
     personas: [assistant]          # or persona: assistant
-    allow: ["*"]                   # capability patterns this conversation may use
-    deny: []
-    preapprove: ["basic.remember"] # writes that run without asking the owner
     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
     trusted: false                 # routines only: may use owner-only capabilities
     lane: conversation             # or sender
@@ -85,6 +83,28 @@ replaces a runtime assignment (same keys) that takes priority over a configured 
 pattern; requests received before that moment do not start runs under it. `core.delete_assignment`
 removes runtime ones; `enabled: false` turns a conversation's engine off and cancels its open runs
 (pending approvals expire; an approval decided afterwards reports it expired).
+
+### Permissions
+
+```yaml
+permissions:
+  "*":
+    rules: {basic.remember: auto}            # exceptions: capability → auto | ask (or {member|admin|creator: …})
+  "wechat:*":
+    use: ["*", "!system.*"]                  # what may be used here at all
+    tiers: {write: always-ask}               # per tier: auto | ask | always-ask (critical: never auto)
+  "discord:*":
+    rules: {"services.restart(navidrome.service)": {creator: auto}}   # one subject, creator only
+```
+
+Per setting (the `use` list, each tier, each rule), the most specific pattern that sets it wins. An
+explicit rule is final (a saved "always allow" grant can still turn its `ask` into a run); `always-ask`
+admits no exceptions; patterns such as `ext.*` never make a critical call automatic. A module may
+suggest defaults (`Contributions.permissions`, or `permissions:` in its own `config.yml`): `use` and
+`tiers` only for its own interfaces' addresses, rules only for its own capabilities; `core.yml` overrides
+them setting by setting. `$permissions` shows what applies in a conversation, and the grants.
+The old assignment keys `allow`, `deny` and `preapprove` are refused in configuration with a pointer
+here; runtime assignments saved with them keep their `allow`/`deny` as that pattern's `use` list.
 
 ### Personas and model profiles
 
@@ -167,8 +187,10 @@ Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, sec
   `chmod 600 config.yml`, and never share or copy the folder together with its `config.yml`.
 * **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `profiles`
   (name → ordered candidates, as in core.yml) and `assignments` / `admission` for the extension's own
-  interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load).
-  core.yml and runtime edits always win.
+  interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load), and
+  `permissions` (`use` and `tiers` for its own interfaces, `rules` for its own capabilities; whale_chan
+  makes every write ask in her conversations). The module's own `config.yml` may set `permissions:` under
+  the same limits. core.yml and runtime edits always win.
 
 `python -m core --config core.yml --check` loads and validates every module, marks it built-in or
 external, and lists what each contributes, without starting anything.
@@ -315,10 +337,11 @@ conversation carry `data["origin_address"]`.
 
 | Notice `code` | When | `data` |
 | --- | --- | --- |
-| `restarted` | The core restarted (control route); `text` says why (requested, crash, hang) and how long it was down. | `reason` |
+| `restarted` | The core restarted (control route, and for `$admin restart` also the conversation that asked); `text` says why (requested, crash, hang) and how long it was down. | `reason` |
 | `run_failed` | The request could not be finished. Show a short neutral message in the conversation's language (or suppress it). | `error_code` |
 | `run_failed_detail` | Details for the owner (control route). `text` is English. | `error_code`, `address` |
-| `approval_request` | An action needs the owner's approval (control route). `text` is an English summary. | `approval_id`, `capability`, `address`, `arguments` (JSON) |
+| `approval_request` | An action needs the owner's approval, or the owner's own command asks to be confirmed (in the owner's direct chat where they asked, else the control route). `text` is an English summary written by the core; `actions` are Approve/[Always allow]/Deny or Confirm/Cancel. | `approval_id`, `capability`, `address`, `arguments` (JSON, scrubbed), `tier`, `kind` (`approval` or `confirm`), `summary`, `warnings` (` \| `-separated), `always` (`true`/`false`), `asked_by` |
+| `secret_refused` | A model's call was refused because it would have read or sent a secret. `text` says what. | |
 | `waiting_approval` | A `$command` is waiting for approval. | `approval_id` |
 | `relayed` | An owner reply to an event was sent on. | `address`, `ok`, `detail` |
 | `unknown_command` | Unknown `$command`. | `command` |
@@ -354,9 +377,9 @@ Command("remind", "Set a one-time reminder here",
 (`address`, `sender`), `run_id`, a `workspace` and `progress`. `operations` are platform-specific actions (login QR, account status, list chats, playing music). Each becomes
 a capability named `<interface name>.<operation>`, owner-only unless `owner_only=False`; a public
 operation must only act on the calling conversation (`context.address`); if your extension also declares a
-capability with that exact name, loading fails. `risk` works as for capabilities (`write` needs
-approval unless pre-approved); `command`/`command_argument` add a `$command`; `timeout_s` defaults to
-120. `operate` returns a `ToolResult` (attach a QR image in `files`). For results that arrive later
+capability with that exact name, loading fails. `risk` and the attributes (`private`, `subject`,
+`subject_kind`, `never_auto`, `grantable`, `confirm`) work as for capabilities; `command`/`command_argument`
+add a `$command`; `timeout_s` defaults to 120. `operate` returns a `ToolResult` (attach a QR image in `files`). For results that arrive later
 (login confirmed on the phone), use `port.notify` and `port.set_ready`.
 
 ## Capabilities
@@ -377,11 +400,18 @@ Capability("music.find_tracks", "Search the library by artist or title.", find_t
 | --- | --- |
 | `name` | `<extension name>.<action>`; the namespace must be your extension's name. |
 | `description`, `parameters`, `required` | Offered to models; `parameters` are JSON-schema properties. Arguments are validated before your handler runs; extra properties are rejected. |
-| `risk` | `read`: observes only; may run again. `prepare`: creates local artifacts (downloads, renders); runs once per run. `write`: changes something outside (send, edit, delete, schedule); needs owner approval unless pre-approved; runs once per run. Declare honestly; the policy depends on it. |
-| `owner_only` | Only owners (or trusted routines) may use it. |
+| `risk` | The tier. `read`: observes only; may run again. `prepare`: creates local artifacts (downloads, renders); runs once per run. `write`: changes something reversible inside the bot (reminders, notes, routines); asks by default. `critical`: affects the machine, other people or permissions (shell, saving files, services, sending as the owner, policy); asks by default and is never made automatic by a tier setting or a pattern. Writes and critical actions run once per run. Declare honestly; the permissions depend on it. |
+| `owner_only` | Only owners (or trusted routines) may use it (same as `access="creator"`). |
+| `private` | Shows the owner's private data: offered only in conversations private to the owner; that run's output never follows a route elsewhere, and it asks before any critical action. |
+| `subject`, `subject_kind` | The parameter rules and grants match on (`"unit"`, `"chat"`); `subject_kind="path"` matches globs and makes the core refuse secret paths (`.env`, keys) to models. |
+| `escalate` | `escalate(arguments)` may return a higher tier for one call (never lower), e.g. `critical` for `rm`-like options. |
+| `never_auto` | A model's call always asks, whatever the permissions say (policy changes, accounts, shell lines). |
+| `grantable` | The owner may answer with "always allow" for that exact subject in that conversation (needs `subject`). |
+| `confirm` | Even the owner's own typed command asks for a one-tap confirmation. |
+| `describe` | `describe(arguments)` returns one plain line for approval prompts ("Restart navidrome.service"). |
 | `needs` | `Display` features the conversation must have, e.g. `{"files"}`. Whether incoming attachments exist is not a feature; capabilities that read them check the request's `files` themselves. |
 | `internal` | Callable by engines but not shown to models. |
-| `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call. `command` is a name, or a `Command` declaration (below). |
+| `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call (except `confirm`, a secret in the arguments, or private data in a shared conversation, which ask to confirm). `command` is a name, or a `Command` declaration (below). |
 | `timeout_s` | Hard limit for one call (default 600). |
 
 **Access levels.** `access="admin"` or `"creator"` (or `owner_only=True`) limits who may call a
@@ -587,11 +617,14 @@ ways in:
   one. A typed `$t` needs no mention on Discord.
 * A terminal conversation, where every message is a line for the shell. In a terminal conversation,
   type a line starting with `$` and a letter as `$t $HOME`; otherwise it is read as a command.
-* Models: in a run the creator started, the assistant can use `terminal.send` (one line; a write, so
-  each line waits for the creator's approval, which shows the exact line) and `terminal.peek` (new
-  output, no approval). This is how "ask the bot to do something on my computer" works. Pre-approving
-  `terminal.send` in an assignment removes that check; don't, unless the conversation is yours alone.
-  Nobody but the creator can reach the shell, by command, terminal conversation or model.
+* Models: in a run the creator started, the assistant can use `terminal.send` (one line; critical and
+  `never_auto`, so each line waits for the creator's approval, which shows the exact line, whatever the
+  permissions say) and `terminal.peek` (new output; a private read, no approval). This is how "ask the
+  bot to do something on my computer" works. Nobody but the creator can reach the shell, by command,
+  terminal conversation or model.
+* The shell runs as the bot's OS user with the bot's environment. The core's secret filters only cover
+  what passes through the bot (see ARCHITECTURE.md, Enforcement: secrets); what a line itself reads or
+  sends is bounded by that approval and by the operating system.
 
 ```yaml
 assignments:
@@ -616,9 +649,11 @@ Linux use an interactive shell, or `^C` ends it), `cwd` (home), `quiet_s` (1.5),
 ### The included host module
 
 [`extensions/host`](../../extensions/host/extension.py) is this computer's desktop and files, for the
-creator only, on Windows, macOS and Linux. Every capability is creator-only; all but the process list
-are writes, so a model's call waits for the creator's approval (and the creator's own `$command` is
-that approval). Nobody else sees the commands in their menus.
+creator only, on Windows, macOS and Linux. Every capability is creator-only. Looking (screenshot, a
+file, the clipboard, the process list) is a `private` read: it runs without asking, but only in the
+creator's own private chats, and never for a secret file. Saving attachments onto the computer is
+critical (a model's call asks); opening something and setting the clipboard are writes (asks by
+default). The creator's own `$command` is their approval. Nobody else sees the commands in their menus.
 
 | Capability | Command | Does |
 | --- | --- | --- |
@@ -638,12 +673,14 @@ processes) is the terminal's.
 
 ## Core capabilities
 
-All owner-only; the writes need approval unless pre-approved (an owner's `$command` counts as
-approval).
+Changing policy (`set_rule`, `set_route`, `set_forward`, `set_routine`, `set_assignment`,
+`delete_assignment`) is critical and `never_auto`: a model's call always asks. `core.send_message` is
+critical and grantable per `address`; the `list_*` reads of policy are `private`. An owner's `$command`
+counts as approval.
 
 | Capability | Parameters |
 | --- | --- |
-| `core.send_message` (write) | `address`, `text`. An explicit owner send: not subject to admission. Returns `data["message_id"]`; fails with `delivery_failed` or `delivery_uncertain`. `owner_only` is judged by the run's trigger sender. |
+| `core.send_message` (critical) | `address`, `text`. An explicit owner send: not subject to admission. Returns `data["message_id"]`; fails with `delivery_failed` or `delivery_uncertain`. `owner_only` is judged by the run's trigger sender. |
 | `core.list_rules` / `core.set_rule` | `pattern`, `rule` (object or null to delete) |
 | `core.list_routes` / `core.set_route` | `pattern`, `route` (`{target, kinds}` or null) |
 | `core.add_routine` (write, anyone) | `schedule` (`every 1h`, `daily 08:00`, `weekdays 09:00`, `mon,wed 18:30`, `at 18:30`, `at 2026-10-17 08:00`), `text` (a message or a `$command`), `chat` (admins: another conversation) |

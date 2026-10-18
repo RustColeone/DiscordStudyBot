@@ -10,6 +10,8 @@ from core.config import ConfigError, CoreConfig
 from core.gateway.gateway import Gateway
 from core.loader import LoadedExtension, load_extension
 from core.manager.manager import Manager
+from core.manager.policy import Permissions, check_extension_permissions
+from core.manager.secrets import Secrets
 from core.providers.registry import Providers
 from core.storage.bottle import Bottle
 from core.storage.tank import Tank
@@ -73,6 +75,8 @@ class Core:
                               engines=[e.spec.name for e in loaded.contributions.engines],
                               capabilities=[c.name for c in loaded.contributions.capabilities])
         self.manager.attach_gateway(self.gateway)
+        self.manager.permissions = self._permissions()
+        self.manager.secrets = self._secrets()
         from core.setup import Setup
         self.manager.setup_desk = Setup(config)
         problems = self.manager.problems()
@@ -80,6 +84,43 @@ class Core:
             problems.append(f"control route {config.control} uses an interface that is not loaded")
         if problems:
             raise ConfigError("; ".join(problems))
+
+    def _permissions(self) -> Permissions:
+        """Built-in defaults, extension defaults (code, then the module's config.yml), then core.yml, setting by
+        setting."""
+        layers = [("built-in", self.config.builtin_permissions)]
+        for loaded in self.extensions:
+            name = loaded.extension.name
+            own = {interface.name for interface in loaded.contributions.interfaces}
+            for source, layer in ((f"{name} default", loaded.contributions.permissions),
+                                  (f"{name} config.yml", (loaded.config or {}).get("permissions"))):
+                if not layer:
+                    continue
+                try:
+                    check_extension_permissions(name, own, layer)
+                except ValueError as error:
+                    raise ConfigError(f"{source}: {error}") from error
+                layers.append((source, layer))
+        layers.append(("core.yml", self.config.permissions))
+        legacy = self.manager.legacy_use()
+        if legacy:
+            layers.append(("runtime assignment (allow/deny)", legacy))
+        try:
+            return Permissions(layers)
+        except ValueError as error:
+            raise ConfigError(str(error)) from error
+
+    def _secrets(self) -> Secrets:
+        names = {variable for loaded in self.extensions for setting in loaded.extension.settings
+                 if setting.kind == "secret" for variable in setting.env}
+        names.update(str(settings.get("api_key_env")) for settings in self.config.providers.values()
+                     if isinstance(settings, dict) and settings.get("api_key_env"))
+        paths = [str(path / "config.yml") for path in self.config.all_modules()]
+        paths += [str(self.config.data_dir / pattern) for pattern in ("*.db", "*.db-wal", "*.db-shm",
+                                                                       "extensions/*/*.db*", "extensions/*/keys.json",
+                                                                       "extensions/*/session.key")]
+        return Secrets.collect(env_files=self.config.env_files, names=names,
+                               paths=[*paths, *self.config.secret_paths])
 
     def _register_defaults(self, loaded: LoadedExtension) -> None:
         """Profiles, assignments and admission an extension suggests; core.yml and runtime edits win."""

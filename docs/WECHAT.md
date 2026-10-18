@@ -109,11 +109,17 @@ assignments:
   "wechat:*":
     engine: assistant
     personas: [wechat]
-    deny: ["system.*"]
     lane: sender                      # group members are handled independently
     budget: {model_calls: 24, tool_calls: 24, seconds: 1800}
     options: {history_scope: sender, quote: trigger, diary: false, max_steps: 12}
+permissions:
+  "wechat:*":
+    use: ["*", "!system.*"]
+    tiers: {write: always-ask}        # every write a member asks for comes to you first
 ```
+
+Reading your WeChat (`wechat_chats`, `wechat_read`, `wechat_status`) is a private read: it runs without
+asking, but only in your own private chats. Sending as you (`wechat.send`) is critical and asks.
 
 ## Owner commands
 

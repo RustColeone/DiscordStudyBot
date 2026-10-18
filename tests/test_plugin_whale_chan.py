@@ -116,10 +116,13 @@ class WhaleChanSetupTests(unittest.TestCase):
         self.assertEqual(from_env.interfaces[0].token, "secret")
         self.assertEqual(from_env.assignments["whale_chan:*"]["engine"], "chat")
         self.assertTrue(from_env.admission["whale_chan:*"]["require_mention_in_groups"])
-        from_config = self.setup_with({"token": "local", "interface": "whale", "assignment": {"deny": ["system.*"]}},
+        self.assertEqual(from_env.permissions["whale_chan:*"]["tiers"],
+                         {"write": "always-ask", "critical": "always-ask"})
+        from_config = self.setup_with({"token": "local", "interface": "whale", "assignment": {"lane": "sender"}},
                                       {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""})
         self.assertEqual(from_config.interfaces[0].token, "local")
-        self.assertEqual(from_config.assignments["whale:*"]["deny"], ["system.*"])
+        self.assertEqual(from_config.assignments["whale:*"]["lane"], "sender")
+        self.assertEqual(list(from_config.permissions), ["whale:*"])
 
     def test_long_text_splits_within_discords_limit(self):
         from core.loader import import_extension

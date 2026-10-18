@@ -15,7 +15,8 @@ class ReminderTests(unittest.IsolatedAsyncioTestCase):
         tmp = Path(self._tmp.name)
         extensions = [*make_config(tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "reminders")]
         self.core = await start_core(tmp, {"extensions": extensions, "assignments": {
-            "*": {"engine": "probe", "personas": ["p"], "preapprove": ["reminders.create", "reminders.cancel"]}}})
+            "*": {"engine": "probe", "personas": ["p"]}}, "permissions": {
+            "*": {"rules": {"reminders.create": "auto", "reminders.cancel": "auto"}}}})
         self.chat = iface(self.core)
 
     async def asyncTearDown(self):

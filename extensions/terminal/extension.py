@@ -4,8 +4,10 @@ Three ways in, one shell per conversation:
 * `$t <line>` in any conversation sends a line (`$t` alone shows new output, `$t ^C` interrupts);
 * a conversation assigned to the `terminal` engine (`persona: terminal`) sends every message there to
   the shell;
-* models, in runs the creator started, call `terminal.send` (each line waits for the creator's
-  approval) and `terminal.peek`.
+* models, in runs the creator started, call `terminal.send` (critical and never automatic: each line
+  waits for the creator's approval, whatever the permissions say) and `terminal.peek` (a private read).
+The shell runs as the bot's own OS user: what a line can reach is bounded by that approval and by the
+operating system, not by the core's secret filters (see docs/core/ARCHITECTURE.md, Enforcement).
 After each input the output is shown as it arrives (every few seconds), then the last screenful once
 it goes quiet. Loads with the built-in modules; exclude it in core.yml to turn it off. See
 docs/core/EXTENSIONS.md.
@@ -87,18 +89,19 @@ def setup(context) -> Contributions:
         # Engines need a persona; this one only names the speaker (no model is used).
         Persona("terminal", "Terminal", "A shell on the bot's machine; no model is involved."),
     ], capabilities=[
-        # Offered to models in the creator's own runs; every line still waits for the creator's approval.
+        # Offered to models in the creator's own runs; every line waits for the creator's approval.
         Capability("terminal.send", f"Type one line into the shell on the bot's own computer, {system}, and get "
                    "its output (the last screenful once it goes quiet). The shell belongs to this conversation and "
                    "keeps its directory and variables between lines. It has no terminal: no full-screen programs, "
                    f"no password prompts. '{INTERRUPT}' interrupts the running program. The owner approves each "
                    "line, so send one purposeful command at a time and say why.", send,
                    {"input": {"type": "string", "description": f"One shell line, or {INTERRUPT}"}},
-                   risk=Risk.WRITE, access="creator", command=command, command_argument="input",
-                   timeout_s=float(config.get("max_wait_s", 20)) + 30),
+                   risk=Risk.CRITICAL, access="creator", command=command, command_argument="input",
+                   timeout_s=float(config.get("max_wait_s", 20)) + 30, never_auto=True,
+                   describe=lambda a: f"Shell line: {a.get('input', '')}"),
         Capability("terminal.peek", "Show output this conversation's shell printed since it was last shown (for "
                    "a command still running). Sends nothing.", peek, risk=Risk.READ, access="creator",
-                   timeout_s=30),
+                   timeout_s=30, private=True),
     ])
 
 

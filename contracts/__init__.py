@@ -1,6 +1,6 @@
 """Public contracts between the core and extensions. Extensions import only this package."""
 
-from contracts.capability import Capability, Handler, Risk, ToolContext, ToolResult
+from contracts.capability import TIER_ORDER, Capability, Handler, Risk, ToolContext, ToolResult
 from contracts.commands import Command, Option
 from contracts.engine import (DIARY_KINDS, Activity, Diary, DiaryNote, Engine, EngineSpec, Event, History,
                               HistoryItem, Persona, RunYield, Session, Tools)
@@ -10,13 +10,13 @@ from contracts.messages import Action, Address, Delivery, Display, FileRef, Repl
 from contracts.models import ModelError, ModelRequest, ModelResult, Models
 from contracts.stores import Store
 
-CONTRACTS_VERSION = "1.0"
+CONTRACTS_VERSION = "1.1"
 
 __all__ = [
     "Action", "Activity", "Address", "Command", "Option", "Capability", "Contributions", "CONTRACTS_VERSION", "DIARY_KINDS", "Delivery", "Diary",
     "DiaryNote", "Display", "Engine",
     "EngineSpec", "Event", "Extension", "ExtensionContext", "FileRef", "Handler", "History", "HistoryItem",
     "Interface", "InterfacePort", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
-    "Persona", "Reply", "Request", "Risk", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
+    "Persona", "Reply", "Request", "Risk", "TIER_ORDER", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolResult", "Tools",
 ]

@@ -26,7 +26,8 @@ from contracts import (Action, Address, Capability, Command, Delivery, Display, 
 from core.audit import Audit
 from core.manager.handles import SessionHandle, ToolContextHandle
 from core.manager.routines import Caller, RoutineDesk
-from core.manager.policy import Assignment, Owners, most_specific
+from core.manager.policy import Assignment, Owners, Permissions, most_specific
+from core.manager.secrets import Secrets
 from core.providers.registry import Providers
 from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
@@ -81,7 +82,15 @@ SETUP_COMMAND = Command(
     examples=("", "discord", "discord thread_channels 123456789012345678", "off terminal", "on terminal"),
     admin_help="Changes are saved to the module's config.yml (switching modules: core.yml) and take effect after "
                "a restart. Secrets (tokens, keys) are only set on the machine: python -m core setup.")
-BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND, SETUP_COMMAND)
+PERMISSIONS_COMMAND = Command(
+    "permissions", "What may run here without asking, and the saved \"always allow\" grants (creator)",
+    (Option("args", "[address] | grants | revoke <grant-id>"),), access="creator",
+    examples=("", "grants", "revoke 3f2a1c", "whale_chan:dm:123"),
+    admin_help="Shows this conversation's access list, the setting for each tier (read, prepare, write, "
+               "critical), the rules that apply and the grants saved here. Rules are changed in core.yml or a "
+               "module's config.yml (`permissions:`); grants are made by answering an approval with Always allow.")
+BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND, SETUP_COMMAND, PERMISSIONS_COMMAND)
+GRANT_DAYS = 30
 CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
 LEVELS = {"member": 0, "admin": 1, "creator": 2}
 
@@ -121,10 +130,16 @@ class Manager:
         self.admins = tank.store("core:admins")
         self.routines = RoutineDesk(self)
         self.settings = tank.store("core:settings")
+        # "Always allow" grants (exact subject, one conversation) and the actions approved by hand once,
+        # which a grant requires before it is offered.
+        self.grants = tank.store("core:grants")
+        self.approved_once = tank.store("core:approved_once")
+        self.permissions = Permissions()  # set by the app once every module is loaded
+        self.secrets = Secrets()
         self.owners = owners
         self._control_config = control
         self.setup_desk = None  # core.setup.Setup, attached by the app for `$setup`
-        self.restart = None  # restart(by): set when a supervisor runs the core, for `$admin restart`
+        self.restart = None  # restart(by, where): set when a supervisor runs the core, for `$admin restart`
         self._control_reported: Address | None = None
         self._control_fallback: Address | None = None
         self.data_dir = Path(data_dir)
@@ -164,6 +179,18 @@ class Manager:
         for pattern in self._overrides.keys():
             merged[pattern] = Assignment.from_dict(self._overrides.get(pattern))
         return merged
+
+    def legacy_use(self) -> dict[str, dict]:
+        """Runtime assignments saved before permissions moved out of assignments kept `allow`/`deny`;
+        carry those restrictions over as the pattern's `use` list instead of silently dropping them."""
+        layer = {}
+        for pattern in self._overrides.keys():
+            stored = self._overrides.get(pattern) or {}
+            allow, deny = list(stored.get("allow") or ["*"]), list(stored.get("deny") or [])
+            if allow != ["*"] or deny:
+                layer[pattern] = {"use": [*allow, *(f"!{item}" for item in deny)]}
+                self.audit.record("legacy_assignment_access", pattern=pattern)
+        return layer
 
     def default_assignment(self, pattern: str, value: Mapping[str, Any]) -> None:
         """An extension's suggested assignment; configured ones of the same pattern win."""
@@ -506,9 +533,10 @@ class Manager:
                 await asyncio.gather(task, return_exceptions=True)
 
     async def _fail(self, record: RunRecord, code: str, detail: str) -> None:
+        detail = self.secrets.scrub(detail)
         self.tank.update_run(record.id, status="failed", error=f"{code}: {detail}"[:1000])
         for approval in self.tank.approvals("pending", record.id):
-            self.tank.decide_approval(approval["id"], "expired", "core")
+            self._expire(approval, "core")
         self.audit.record("run_failed", run=record.id, code=code)
         trigger = request_from_dict(record.trigger)
         await self._deliver(Reply(trigger.address, "notice", code="run_failed", in_reply_to=trigger.id,
@@ -562,20 +590,33 @@ class Manager:
             return "creator" if Assignment.from_dict(record.assignment).trusted else "member"
         return self.access_of(trigger)
 
-    def _refusal(self, record: RunRecord, capability: Capability | None, name: str) -> ToolResult | None:
+    # ---- access ----------------------------------------------------------------------------------
+    def private_to_owner(self, request: Request) -> bool:
+        """A conversation only the owner reads: their direct chat with a bot, or the control route."""
+        if request.is_direct and request.address.interface != "routine" and self.owners.is_owner(
+                request.address.interface, request.sender):
+            return True
+        return self.control is not None and request.address == self.control
+
+    def _refusal(self, record: RunRecord, capability: Capability | None, name: str,
+                 typed: bool = False) -> ToolResult | None:
+        """Access: may this caller, in this conversation, use the capability at all? The owner's own typed
+        command is not held to the conversation's `use` list or `private` (it asks to confirm instead)."""
         if capability is None:
             return ToolResult.fail(f"No capability named {name!r} exists", "unknown_tool")
-        assignment = Assignment.from_dict(record.assignment)
-        if not assignment.allows(capability.name):
+        trigger = request_from_dict(record.trigger)
+        if not typed and not self.permissions.allows(Address.parse(record.address), capability.name):
             return ToolResult.fail(f"{capability.name} is not allowed in this conversation", "not_allowed")
         if LEVELS[self.caller_access(record)] < LEVELS[capability.access]:
             who = "the owner" if capability.access == "creator" else "admins"
             return ToolResult.fail(f"{capability.name} is available only to {who}", "owner_only")
-        display = request_from_dict(record.trigger).display
-        missing = set(capability.needs) - display.features()
+        missing = set(capability.needs) - trigger.display.features()
         if missing:
             return ToolResult.fail(f"{capability.name} needs {sorted(missing)}, which this conversation lacks",
                                    "unsupported_here")
+        if capability.private and not typed and not self.private_to_owner(trigger):
+            return ToolResult.fail(f"{capability.name} shows the owner's private data, so it is offered only in "
+                                   "conversations private to the owner", "private_here")
         return None
 
     def tool_schemas(self, run_id: str) -> list[dict[str, Any]]:
@@ -584,10 +625,13 @@ class Manager:
                 if not capability.internal and self._refusal(record, capability, capability.name) is None]
 
     async def call_tool(self, run_id: str, name: str, arguments: dict, call_id: str | None = None, *,
-                        approved: bool = False, key: str | None = None) -> ToolResult:
+                        approved: bool = False, key: str | None = None, typed: bool = False) -> ToolResult:
+        """Access, then Approval, then the call, with Enforcement throughout. `typed`: the owner's own
+        `$command` (it is their approval, except for confirmations); `approved`: the owner approved
+        this exact call."""
         record = self.tank.run(run_id)
         capability = self.capabilities.get(name)
-        refusal = self._refusal(record, capability, name)
+        refusal = self._refusal(record, capability, name, typed=typed or approved)
         if refusal is not None:
             self.audit.record("tool_refused", run=run_id, tool=name, code=refusal.error_code)
             return refusal
@@ -595,13 +639,24 @@ class Manager:
             jsonschema.validate(arguments, capability.schema()["parameters"])
         except jsonschema.ValidationError as error:
             return ToolResult.fail(f"Invalid arguments for {name}: {error.message}", "invalid_arguments")
+        secret = None if approved else self._secret_problem(capability, arguments)
+        if secret is not None and not typed:
+            # Secrets never go to or come from models, so this is refused rather than asked.
+            self.audit.record("secret_refused", run=run_id, tool=name)
+            await self._tell_owner(record, "secret_refused",
+                                   f"🛡️ Refused {name} in {record.address} (run {record.id}): {secret}. Only your "
+                                   "own typed commands may carry secrets; this cannot be approved.")
+            return ToolResult.fail(f"Refused: {secret}. Secrets never go to or come from models; this cannot be "
+                                   "approved.", "secret_refused")
         key = key or (f"call:{call_id}" if call_id else signature(name, arguments))
+        stored = self.secrets.scrub_value(arguments)
+        tier = capability.tier(arguments)
         prior = self.tank.action(run_id, key)
         if prior is not None:
-            if prior["name"] != name or prior["arguments"] != arguments:
+            if prior["name"] != name or prior["arguments"] != stored:
                 return ToolResult.fail("This call_id was already used for a different call", "call_id_conflict")
             if prior["status"] == "done":
-                if call_id or capability.risk is not Risk.READ:
+                if call_id or tier is not Risk.READ:
                     result = ToolResult.from_dict(prior["result"])
                     if call_id is None:
                         result = ToolResult(result.status, "This exact action already ran in this run and was "
@@ -609,18 +664,21 @@ class Manager:
                                             {**result.data, "already_completed": True}, result.error_code,
                                             result.retryable)
                     return result
-            elif capability.risk is not Risk.READ:
+            elif tier is not Risk.READ:
                 result = ToolResult.fail("An earlier attempt of this action was interrupted by a restart and may "
                                          "have taken effect; it was not repeated.", "uncertain_previous_attempt")
                 self.tank.finish_action(run_id, key, result.to_dict())
                 return result
+        if not approved:
+            decision, final, reasons = self._approval(record, capability, arguments, typed, secret)
+            if decision == "ask":
+                return await self._request_approval(record, capability, arguments, key, final=final,
+                                                    reasons=reasons, typed=typed)
         assignment = Assignment.from_dict(record.assignment)
-        if capability.risk is Risk.WRITE and not approved and not assignment.preapproves(name):
-            return await self._request_approval(record, capability, arguments, key)
         if record.usage.get("tool_calls", 0) >= assignment.budget.tool_calls:
             return ToolResult.fail("This run used its tool-call budget", "budget_exceeded")
         self._add_usage(run_id, tool_calls=1)
-        self.tank.start_action(run_id, key, name, arguments, capability.risk.value)
+        self.tank.start_action(run_id, key, name, stored, tier.value)
         workspace = self.data_dir / "workspaces" / run_id
         workspace.mkdir(parents=True, exist_ok=True)
         context = ToolContextHandle(self, record, capability.extension, workspace)
@@ -638,43 +696,152 @@ class Manager:
         except Exception as error:
             transient = isinstance(error, (TimeoutError, ConnectionError, asyncio.TimeoutError))
             result = ToolResult.fail(f"{name} failed: {type(error).__name__}: {error}"[:1500], type(error).__name__,
-                                     retryable=transient and capability.risk is Risk.READ)
+                                     retryable=transient and tier is Risk.READ)
+        result = self.secrets.scrub_result(result)
         self.tank.finish_action(run_id, key, result.to_dict())
-        self.audit.record("tool_call", run=run_id, tool=name, risk=capability.risk.value, status=result.status,
+        self.audit.record("tool_call", run=run_id, tool=name, risk=tier.value, status=result.status,
                           code=result.error_code, duration_s=round(time.monotonic() - started, 3))
         return result
 
-    async def _request_approval(self, record: RunRecord, capability: Capability, arguments: dict,
-                                key: str) -> ToolResult:
+    # ---- approval ---------------------------------------------------------------------------------
+    def _secret_problem(self, capability: Capability, arguments: Mapping[str, Any]) -> str | None:
+        problems = []
+        subject = capability.subject_of(arguments)
+        if capability.subject_kind == "path" and subject and self.secrets.is_secret_path(subject):
+            problems.append(f"{subject} is a secret file")
+        found = self.secrets.find(arguments)
+        if found:
+            problems.append("the arguments contain " + ", ".join(found))
+        return "; ".join(problems) or None
+
+    def _approval(self, record: RunRecord, capability: Capability, arguments: Mapping[str, Any], typed: bool,
+                  secret: str | None = None) -> tuple[str, bool, list[str]]:
+        """Approval: ("auto" or "ask", whether the ask is final (no grant may be offered), reasons shown)."""
+        if typed:
+            reasons = []
+            if secret:
+                reasons.append(f"{secret}; it will leave this machine")
+            if capability.private and not self.private_to_owner(request_from_dict(record.trigger)):
+                reasons.append("this shows private data in a conversation others can read")
+            if capability.confirm and not reasons:
+                reasons.append("this command asks to be confirmed")
+            return ("ask", True, reasons) if reasons else ("auto", True, [])
+        tier = capability.tier(arguments)
+        if capability.never_auto:
+            return "ask", True, []
+        address = Address.parse(record.address)
+        setting, _ = self.permissions.tier_setting(address, tier.value)
+        if setting == "always-ask":
+            return "ask", True, []
+        if tier is Risk.CRITICAL and self._used_private(record.id):
+            # What this run saw is private; nothing critical (sending elsewhere included) runs unseen.
+            return "ask", True, ["this run has seen private data"]
+        rule = self.permissions.rule(address, capability.name, capability.subject_of(arguments),
+                                     capability.subject_kind, self.caller_access(record),
+                                     critical=tier is Risk.CRITICAL, has_subject=capability.subject is not None)
+        if (rule[0] if rule else setting) == "auto":
+            return "auto", False, []
+        if self._use_grant(record.address, capability, arguments):
+            return "auto", False, []
+        return "ask", False, []
+
+    def approval_route(self, record: RunRecord) -> Address | None:
+        """Approvals go privately to the owner: to the direct chat they asked from (on that bot), otherwise
+        to the configured control route; never to a member or a group."""
+        trigger = request_from_dict(record.trigger)
+        if trigger.is_direct and trigger.address.interface != "routine" and self.owners.is_owner(
+                trigger.address.interface, trigger.sender):
+            return trigger.address
+        if self.control is not None:
+            return self.control
+        return trigger.address if self.owners.is_owner(trigger.address.interface, trigger.sender) else None
+
+    async def _tell_owner(self, record: RunRecord, code: str, text: str) -> None:
+        route = self.approval_route(record)
+        if route is not None:
+            await self._deliver(Reply(route, "notice", code=code, run_id=record.id, text=self.secrets.scrub(text)))
+
+    # ---- grants -----------------------------------------------------------------------------------
+    @staticmethod
+    def grant_key(address: str, capability: str, subject: str) -> str:
+        return json.dumps([address, capability, subject], ensure_ascii=False)
+
+    @staticmethod
+    def grant_id(key: str) -> str:
+        return hashlib.sha256(key.encode()).hexdigest()[:6]
+
+    def _use_grant(self, address: str, capability: Capability, arguments: Mapping[str, Any]) -> bool:
+        subject = capability.subject_of(arguments)
+        if not capability.grantable or subject is None:
+            return False
+        key = self.grant_key(address, capability.name, subject)
+        grant = self.grants.get(key)
+        if not grant:
+            return False
+        if grant.get("expires", 0) < time.time():
+            self.grants.delete(key)
+            return False
+        self.grants.set(key, {**grant, "uses": int(grant.get("uses", 0)) + 1, "last_used": time.time()})
+        self.audit.record("grant_used", grant=self.grant_id(key), tool=capability.name)
+        return True
+
+    def _always_offered(self, record: RunRecord, capability: Capability, arguments: Mapping[str, Any],
+                        final: bool, typed: bool) -> bool:
+        """"Always allow" is offered only for grantable actions with a subject, never for final asks, and
+        only once that exact action was approved by hand in this conversation."""
+        subject = capability.subject_of(arguments)
+        if typed or final or not capability.grantable or subject is None:
+            return False
+        return bool(self.approved_once.get(self.grant_key(record.address, capability.name, subject)))
+
+    async def _request_approval(self, record: RunRecord, capability: Capability, arguments: dict, key: str, *,
+                                final: bool = False, reasons: list[str] = (), typed: bool = False) -> ToolResult:
         for approval in self.tank.approvals("pending", record.id):
             if approval["call_key"] == key:
                 return ToolResult("needs_approval", f"Waiting for owner approval {approval['id']}.",
                                   data={"approval_id": approval["id"]})
-        trigger = request_from_dict(record.trigger)
-        route = self.control
-        if route is None and self.owners.is_owner(trigger.address.interface, trigger.sender):
-            route = trigger.address
+        route = self.approval_route(record)
         if route is None:
-            return ToolResult.fail("No owner approval route is configured, so this write cannot run",
+            return ToolResult.fail("No owner approval route is configured, so this action cannot run",
                                    "no_approval_route")
         approval_id = secrets.token_hex(3)
         self.tank.create_approval(approval_id, record.id, key, capability.name, arguments, record.address)
         self.audit.record("approval_requested", run=record.id, approval=approval_id, tool=capability.name)
+        trigger = request_from_dict(record.trigger)
+        tier = capability.tier(arguments)
+        always = self._always_offered(record, capability, arguments, final, typed)
+        summary = self.secrets.scrub(capability.summary(arguments))
+        shown = json.dumps(self.secrets.scrub_value(arguments), ensure_ascii=False)
+        who = trigger.sender.name or trigger.sender.id
+        if typed:
+            title, asked = "Confirm", f"You typed: {summary}"
+            actions = (Action("Confirm", f"$approve {approval_id}", "success"),
+                       Action("Cancel", f"$deny {approval_id}", "danger"))
+        else:
+            persona = self.personas.get(record.personas[0]) if record.personas else None
+            asker = persona.display_name if persona and record.engine != COMMAND_ENGINE else f"{who}'s command"
+            title, asked = "Approval", f"{asker} asks to run: {summary}"
+            actions = (Action("Approve", f"$approve {approval_id}", "success"),
+                       *((Action("Always allow", f"$approve {approval_id} always", "primary"),) if always else ()),
+                       Action("Deny", f"$deny {approval_id}", "danger"))
+        lines = [f"🔐 {title} {approval_id} · {tier.value.upper()}", asked,
+                 *(f"⚠️ {reason}" for reason in reasons),
+                 f"Asked in {record.address} by {who} (run {record.id}).",
+                 f"Reply $approve {approval_id} or $deny {approval_id}"
+                 + (f"; $approve {approval_id} always stops asking for this exact action here." if always else ".")]
         await self._deliver(Reply(
-            route, "notice", code="approval_request", run_id=record.id,
-            text=(f"Approval {approval_id}: {capability.name} {json.dumps(arguments, ensure_ascii=False)}\n"
-                  f"Requested in {record.address} (run {record.id}). Reply $approve {approval_id} or "
-                  f"$deny {approval_id}."),
-            actions=(Action("Approve", f"$approve {approval_id}", "success"),
-                     Action("Deny", f"$deny {approval_id}", "danger")),
+            route, "notice", code="approval_request", run_id=record.id, text="\n".join(lines), actions=actions,
             data={"approval_id": approval_id, "capability": capability.name, "address": record.address,
-                  "arguments": json.dumps(arguments, ensure_ascii=False)}))
+                  "arguments": shown, "tier": tier.value, "kind": "confirm" if typed else "approval",
+                  "summary": summary, "warnings": " | ".join(reasons), "always": "true" if always else "false",
+                  "asked_by": who}))
         return ToolResult("needs_approval", f"Waiting for owner approval {approval_id}.",
                           data={"approval_id": approval_id})
 
-    async def decide(self, approval_id: str, approve: bool, decided_by: Request) -> str:
+    async def decide(self, approval_id: str, approve: bool, decided_by: Request, always: bool = False) -> str:
         if not self.is_owner(decided_by):
             return "Only the owner can decide approvals."
+        note = ""
         async with self._approval_locks[approval_id]:
             approval = self.tank.approval(approval_id)
             if approval is None or approval["status"] != "pending":
@@ -683,15 +850,20 @@ class Manager:
             assignment = self.assignment_for(Address.parse(approval["address"]))
             if (record is None or record.status not in ("running", "waiting_approval")
                     or (record.engine != COMMAND_ENGINE and (assignment is None or not assignment.enabled))):
-                self.tank.decide_approval(approval_id, "expired", str(decided_by.address))
+                self._expire(approval, str(decided_by.address))
                 return f"Approval {approval_id} expired; its run or conversation is no longer active."
             self.tank.decide_approval(approval_id, "approved" if approve else "denied", str(decided_by.address))
-            call = {"call_key": approval["call_key"], "name": approval["name"], "arguments": approval["arguments"]}
+            arguments = approval["arguments"]
+            # Once decided, only the scrubbed form is kept (a confirmed command may have carried a secret).
+            self.tank.redact_approval(approval_id, self.secrets.scrub_value(arguments))
+            call = {"call_key": approval["call_key"], "name": approval["name"],
+                    "arguments": self.secrets.scrub_value(arguments)}
             if approve:
-                result = await self.call_tool(record.id, approval["name"], approval["arguments"],
+                note = self._remember_approval(record, approval["name"], arguments, decided_by, always)
+                result = await self.call_tool(record.id, approval["name"], arguments,
                                               approved=True, key=approval["call_key"])
                 self.tank.append_event(record.id, "tool_result", {**call, "result": result.to_dict()})
-                summary = f"Approved {approval_id}: {approval['name']} → {result.status}."
+                summary = f"Approved {approval_id}: {approval['name']} → {result.status}.{note}"
             else:
                 result = None
                 self.tank.append_event(record.id, "approval_denied", call)
@@ -699,6 +871,32 @@ class Manager:
             self.audit.record("approval_decided", approval=approval_id, approved=approve)
         await self._resume_after_decision(record.id, result)
         return summary
+
+    def _remember_approval(self, record: RunRecord, name: str, arguments: Mapping[str, Any], decided_by: Request,
+                           always: bool) -> str:
+        """Count a hand approval of a grantable action (making "always allow" available next time), and save
+        a grant when asked and allowed. Returns a note for the owner."""
+        capability = self.capabilities.get(name)
+        subject = capability.subject_of(arguments) if capability else None
+        trigger = request_from_dict(record.trigger)
+        typed = record.engine == COMMAND_ENGINE and self.vouched(trigger) and self.is_owner(trigger)
+        if capability is None or not capability.grantable or subject is None or typed:
+            return " (Always allow is not available for this action.)" if always else ""
+        key = self.grant_key(record.address, name, subject)
+        offered = self._always_offered(record, capability, arguments,
+                                       self._approval(record, capability, arguments, False)[1], False)
+        self.approved_once.set(key, {"at": time.time(), "by": str(decided_by.address)})
+        if not always:
+            return ""
+        if not offered or not self.private_to_owner(decided_by):
+            return (" (Always allow is offered only after this exact action was approved once by hand here, "
+                    "and only from a private chat; approved once.)")
+        now = time.time()
+        self.grants.set(key, {"address": record.address, "capability": name, "subject": subject, "at": now,
+                              "expires": now + GRANT_DAYS * 86400, "by": str(decided_by.address), "uses": 0})
+        self.audit.record("grant_saved", grant=self.grant_id(key), tool=name)
+        return (f" Saved: {name}({subject}) runs without asking in {record.address} for {GRANT_DAYS} days "
+                f"(grant {self.grant_id(key)}; `$permissions revoke {self.grant_id(key)}` removes it).")
 
     async def _resume_after_decision(self, run_id: str, result: ToolResult | None) -> None:
         record = self.tank.run(run_id)
@@ -738,8 +936,23 @@ class Manager:
             return "conversation_disabled"
         return None
 
+    def _used_private(self, run_id: str) -> bool:
+        return any(getattr(self.capabilities.get(name), "private", False) for name in self.tank.action_names(run_id))
+
+    def _expire(self, approval: Mapping[str, Any], by: str) -> None:
+        self.tank.decide_approval(approval["id"], "expired", by)
+        self.tank.redact_approval(approval["id"], self.secrets.scrub_value(approval["arguments"]))
+
+    def _private_route(self, record: RunRecord, reply: Reply) -> str | None:
+        """A run that used private data speaks only in its own conversation or to the control route."""
+        if not self._used_private(record.id):
+            return None
+        resolve = getattr(self.gateway, "target", None)
+        target = resolve(reply) if resolve is not None else reply.address
+        return None if target in (reply.address, self.control) else "private_route"
+
     async def _run_output(self, record: RunRecord, reply: Reply) -> Delivery:
-        reason = self._closed(record)
+        reason = self._closed(record) or self._private_route(record, reply)
         if reason is not None:
             self.audit.record("delivery_refused", run=record.id, reason=reason)
             return Delivery(False, detail=reason)
@@ -764,6 +977,7 @@ class Manager:
         trigger = request_from_dict(record.trigger)
         if not text.strip():
             return Delivery(False, detail="empty")
+        text = self.secrets.scrub(text)
         source = "command" if record.engine == COMMAND_ENGINE else "run"
         delivery = await self._run_output(record, Reply(trigger.address, "text", text=text,
                                                         quote=quote if trigger.display.quotes else None,
@@ -788,6 +1002,7 @@ class Manager:
         if size > display.max_upload_mb * 1024 * 1024:
             return Delivery(False, detail="too_large")
         file = FileRef(str(path), file.name or path.name, file.mime, size)
+        caption = self.secrets.scrub(caption)
         source = "command" if record.engine == COMMAND_ENGINE else "run"
         delivery = await self._run_output(record, Reply(trigger.address, "file", text=caption, file=file,
                                                         in_reply_to=trigger.id, run_id=run_id, source=source))
@@ -800,8 +1015,8 @@ class Manager:
     async def progress(self, run_id: str, text: str) -> None:
         record = self.tank.run(run_id)
         trigger = request_from_dict(record.trigger)
-        await self._run_output(record, Reply(trigger.address, "progress", text=text, in_reply_to=trigger.id,
-                                             run_id=run_id, source="run",
+        await self._run_output(record, Reply(trigger.address, "progress", text=self.secrets.scrub(text),
+                                             in_reply_to=trigger.id, run_id=run_id, source="run",
                                              actions=(Action("Cancel", f"$cancel {run_id}", "danger"),)))
 
     # ---- interface reports --------------------------------------------------------------------------
@@ -865,8 +1080,9 @@ class Manager:
         owner = self.is_owner(request)
         level = LEVELS[self.access_of(request)]
         if name != "setup":  # $setup lines stay out of history, in case one carries a pasted secret
-            self.tank.record_message(str(request.address), "in", request.text, sender_id=request.sender.id,
-                                     sender_name=request.sender.name, message_id=request.id, at=request.received_at)
+            self.tank.record_message(str(request.address), "in", self.secrets.scrub(request.text),
+                                     sender_id=request.sender.id, sender_name=request.sender.name,
+                                     message_id=request.id, at=request.received_at)
 
         async def say(message: str, private: bool = False) -> None:
             await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id, private=private))
@@ -874,11 +1090,14 @@ class Manager:
         # A routine a model set up acts as its creator but cannot speak for them: its $commands are not
         # their approval, and the creator-only built-ins are closed to it.
         vouched = self.vouched(request)
-        if not vouched and name in ("approve", "deny", "admin", "call", "setup"):
+        if not vouched and name in ("approve", "deny", "admin", "call", "setup", "permissions"):
             await say(f"A routine set up through a tool cannot use ${name}; type `$routine` yourself for that.")
             return
         if name in ("approve", "deny"):
-            await say(await self.decide(rest, name == "approve", request) if rest else f"Usage: ${name} <id>")
+            parts = rest.split()
+            always = name == "approve" and len(parts) > 1 and parts[1].lower() == "always"
+            await say(await self.decide(parts[0], name == "approve", request, always) if parts
+                      else f"Usage: ${name} <id>" + (" [always]" if name == "approve" else ""))
         elif name == "runs":
             runs = self.tank.runs(limit=20, address=None if level >= 1 else str(request.address))
             pending = {item["run_id"]: item["id"] for item in self.tank.approvals("pending")}
@@ -902,7 +1121,8 @@ class Manager:
                 self.audit.record("restart_requested", by=self.identity(request.address.interface, request.sender.id))
                 await say("🔄 Restarting; I'll say when I'm back.")
                 # Let the reply go out first.
-                asyncio.get_running_loop().call_later(1.0, self.restart, request.sender.name or request.sender.id)
+                asyncio.get_running_loop().call_later(1.0, self.restart, request.sender.name or request.sender.id,
+                                                      str(request.address))
         elif name == "admin":
             await say(self.admin_command(rest, request), private=True)
         elif name == "routine":
@@ -910,10 +1130,13 @@ class Manager:
             await say(self.routines.command(caller, rest, via="command" if vouched else "tool"),
                       private=caller.admin)
         elif name == "tools":
-            assignment = self.assignment_for(request.address)
-            names = [c.name for c in self.capabilities.values()
-                     if assignment and assignment.allows(c.name) and level >= LEVELS[c.access]]
+            names = [c.name for c in self.capabilities.values() if self.usable_here(request, c)]
             await say(", ".join(sorted(names)) or "No tools here.", private=True)
+        elif name == "permissions":
+            if level < LEVELS["creator"]:
+                await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
+                return
+            await say(self.permissions_command(rest, request), private=True)
         elif name == "call":
             target, _, raw = rest.partition(" ")
             capability = self.capabilities.get(target)
@@ -952,6 +1175,65 @@ class Manager:
                 await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
                 return
             await self._command_run(request, capability, rest, owner and vouched)
+
+    def usable_here(self, request: Request, capability: Capability) -> bool:
+        """What a model in this conversation could use for this person (Access only)."""
+        return (not capability.internal and self.permissions.allows(request.address, capability.name)
+                and LEVELS[self.access_of(request)] >= LEVELS[capability.access]
+                and not set(capability.needs) - request.display.features()
+                and (not capability.private or self.private_to_owner(request)))
+
+    def permissions_command(self, text: str, request: Request) -> str:
+        """`$permissions`: what applies in a conversation, and the saved grants."""
+        code = (lambda value: f"`{value}`") if request.display.markdown else str
+        parts = text.split()
+        grants = []
+        for key in self.grants.keys():
+            grant = self.grants.get(key) or {}
+            if grant.get("expires", 0) < time.time():
+                self.grants.delete(key)
+                continue
+            grants.append((self.grant_id(key), key, grant))
+        if parts[:1] == ["revoke"]:
+            wanted = parts[1].lower() if len(parts) > 1 else ""
+            match = next((key for grant_id, key, _ in grants if grant_id == wanted), None)
+            if match is None:
+                return f"No grant {wanted!r}. {code('$permissions grants')} lists them."
+            self.grants.delete(match)
+            self.audit.record("grant_revoked", grant=wanted)
+            return f"Grant {wanted} revoked; that action asks again."
+
+        def grant_line(grant_id, grant):
+            day = dt.datetime.fromtimestamp(grant["expires"]).astimezone().strftime("%Y-%m-%d")
+            return (f"{code(grant_id)} {grant['capability']}({grant['subject']}) in {grant['address']} · until {day}"
+                    f" · used {grant.get('uses', 0)}×")
+        if parts[:1] == ["grants"]:
+            lines = [grant_line(grant_id, grant) for grant_id, _, grant in grants]
+            return "\n".join(["Always-allow grants:", *lines]) if lines else "No always-allow grants."
+        try:
+            address = Address.parse(parts[0]) if parts else request.address
+        except ValueError:
+            return self.help_text("permissions", request)
+        view = self.permissions.describe(address)
+        where = lambda pattern: f" ({pattern})" if pattern else " (built-in)"
+        lines = [f"Permissions in {address}",
+                 "Use: " + ", ".join(view["use"]) + where(view["use_pattern"]),
+                 "Tiers: " + " · ".join(f"{tier} {item['decision']}{where(item['pattern'])}"
+                                        for tier, item in view["tiers"].items())]
+        always = {tier for tier, item in view["tiers"].items() if item["decision"] == "always-ask"}
+        for rule in view["rules"]:
+            levels = ", ".join(f"{level}+ {decision}" for level, decision in rule["levels"].items())
+            capability = self.capabilities.get(rule["rule"].split("(", 1)[0])
+            idle = (f" · not applied: {capability.risk.value} is always-ask here"
+                    if capability is not None and capability.risk.value in always else "")
+            lines.append(f"• {rule['rule']}: {levels} ({rule['pattern']}, {rule['source']}){idle}")
+        if not view["rules"]:
+            lines.append("No rules apply here.")
+        here = [grant_line(grant_id, grant) for grant_id, _, grant in grants if grant["address"] == str(address)]
+        lines += ["Grants here:", *here] if here else ["No grants here."]
+        lines.append("Your own typed commands run without asking, except confirmations. Critical actions are "
+                     "never approved by a pattern; secrets never go to models.")
+        return "\n".join(lines)
 
     @staticmethod
     def vouched(request: Request) -> bool:
@@ -1126,14 +1408,16 @@ class Manager:
         record = RunRecord(id=uuid.uuid4().hex[:12], address=str(request.address),
                            lane=f"{request.address}$command", engine=COMMAND_ENGINE,
                            personas=list(assignment.personas[:1]), assignment=assignment.to_dict(),
-                           status="running", origin=request.origin, trigger=request_to_dict(request),
+                           status="running", origin=request.origin,
+                           trigger=request_to_dict(dataclasses.replace(request, text=self.secrets.scrub(request.text))),
                            usage={"model_calls": 0, "tool_calls": 0, "seconds": 0.0})
         self.tank.create_run(record)
         # Registered like an engine run, so cancelling the run (its Cancel button) stops the work.
         self._tasks[record.id] = asyncio.current_task()
         try:
-            # An explicit $command from the owner is the owner's approval of that exact action.
-            result = await self.call_tool(record.id, capability.name, arguments, approved=owner)
+            # An explicit $command from the owner is the owner's approval of that exact action (some still
+            # ask to confirm: a `confirm` capability, a secret, private data in a shared conversation).
+            result = await self.call_tool(record.id, capability.name, arguments, typed=owner)
         finally:
             self._tasks.pop(record.id, None)
         if result.status == "needs_approval":
@@ -1174,7 +1458,7 @@ class Manager:
                 return
             self.tank.update_run(record.id, status="cancelled", error=reason[:500])
             for approval in self.tank.approvals("pending", record.id):
-                self.tank.decide_approval(approval["id"], "expired", reason[:100])
+                self._expire(approval, reason[:100])
         task = self._tasks.get(record.id)
         if task is not None and DRIVING.get() == record.id:
             # Cancelled from inside its own work (an interface cancelling during delivery): waiting for

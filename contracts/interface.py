@@ -19,7 +19,8 @@ class Operation:
     It becomes the capability `<interface>.<name>`; `command`, if set, also makes it available as
     `$<command> <text>` with the text passed as `command_argument`. Operations are owner-only unless
     `owner_only=False`; a public operation must act only on the calling conversation
-    (`context.address`), never on others.
+    (`context.address`), never on others. `risk` and the attributes (`private`, `subject`, `subject_kind`,
+    `never_auto`, `grantable`, `confirm`) mean the same as on a Capability.
     """
 
     name: str
@@ -31,6 +32,12 @@ class Operation:
     command_argument: str | None = None
     timeout_s: float = 120.0
     owner_only: bool = True
+    private: bool = False
+    subject: str | None = None
+    subject_kind: str = "value"
+    never_auto: bool = False
+    grantable: bool = False
+    confirm: bool = False
 
 
 class InterfacePort(Protocol):

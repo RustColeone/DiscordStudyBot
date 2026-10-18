@@ -209,7 +209,7 @@ class ExtensionApiTests(CoreCase):
         self.assertEqual(outgoing.reply_to, "native-2")
 
     async def test_operation_commands_and_cancel_capability(self):
-        core = await self.core({"assignments": {"*": {"preapprove": ["core.cancel_runs"]}}})
+        core = await self.core({"permissions": {"*": {"rules": {"core.cancel_runs": "auto"}}}})
         chat = iface(core)
         await chat.say("$echoop hello", sender="boss")
         await settle(core)

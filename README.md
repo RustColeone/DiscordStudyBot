@@ -15,8 +15,9 @@ that touches a platform, decides what to say or does work is a module.
 * **`extensions/` is built-in**: maintained and tested here, trusted like the core.
   **`plugins/` is external**: someone else's code, or code for one person or machine.
 * **Everything loads; you exclude.** Both kinds load by default; `modules: {exclude: [...]}` turns one off.
-* **Your machine is yours.** Anything that touches the computer is creator-only, and a model's
-  actions on it wait for your approval.
+* **Your machine is yours.** Anything that touches the computer is creator-only; a model's critical
+  actions on it (shell lines, saving files, sending as you) wait for your approval, and secrets never
+  go to models.
 
 ## Quick start
 
@@ -54,13 +55,16 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Routines | `$routine every 1h $status`, `$routine weekdays 09:00 <question for the bot>`, or just ask ("check the server every hour"); `$routine` lists, `$routine pause/resume/delete <id>` |
 | Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging; the creator can `$admin restart` it |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images; progress with a Cancel button, reactions (✅/❌/🛑) that press buttons, and optional per-task threads (`thread_channels`) |
-| Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (each action waits for your approval) |
+| Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (looking works in your private chats without asking; saving, opening and copying wait for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
-| Owner | `$approve`/`$deny`, `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
+| Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
-Writes (sending elsewhere, changing settings, saving notes) need the owner's approval unless an
-assignment pre-approves them. Every run is durable: approvals and questions wait across restarts.
+Reads and prepares run; writes and critical actions (sending elsewhere, changing settings, the shell)
+ask the owner, except what `permissions:` in core.yml lets run (by default anyone may use reminders,
+music, the study clock and their own routines). Approvals come to the chat you asked from when it is
+your own direct chat with the bot, otherwise privately to the control route. Every run is durable:
+approvals and questions wait across restarts. See [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md#permissions).
 
 ## Modules
 

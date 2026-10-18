@@ -34,7 +34,8 @@
 #   discord: ["123456789012345678"]
 #   cli: [local]
 
-# Where approvals, failure details and interface events go. Default: the Discord owner's DM.
+# Where approvals (other than those you start in your own direct chat with a bot, which come back
+# there), failure details and interface events go. Default: the Discord owner's DM.
 # control: "discord:dm:123456789012345678"
 
 # Provider settings merge over the defaults, e.g. a provider whose models cannot see images
@@ -57,15 +58,12 @@
 #     prompt: |
 #       You are a helpful, concise assistant for a small private server.
 
-# Which engine and personas handle a conversation, what it may use and its budget.
+# Which engine and personas handle a conversation, and its budget.
 # Most specific pattern wins: "interface:conversation", then "interface:*", then "*".
 # assignments:
 #   "*":
 #     engine: assistant
 #     personas: [assistant]
-#     allow: ["*"]
-#     preapprove: [reminders.create, reminders.cancel, discord.music, discord.music_control, discord.queue_music,
-#                  discord.clock_start, discord.clock_stop]   # write capabilities that run without asking the owner
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
 #     options: {instructions: "Keep replies short.", diary: true}   # diary: persona notes about each person
@@ -78,6 +76,24 @@
 #     engine: room
 #     personas: [luna, gemini, claude, deepseek]   # this order is also the rotation order
 #     budget: {model_calls: 40, tool_calls: 24, seconds: 900}
+
+# Permissions: what a conversation may use (use), what runs there without asking per tier (tiers:
+# read, prepare, write, critical → auto | ask | always-ask; critical never auto) and exceptions per
+# capability (rules → auto | ask, optionally per level). Per setting, the most specific pattern wins;
+# modules may suggest their own (鲸酱 always asks before writes). By default reads and prepares run,
+# writes and critical actions ask, and anyone may use the basic features (reminders, music, the study
+# clock, their own routines) without asking. `$permissions` shows what applies; see
+# docs/core/ARCHITECTURE.md, Permissions.
+# permissions:
+#   "wechat:*":
+#     use: ["*", "!system.*"]
+#     tiers: {write: always-ask}
+#   "discord:dm:123456789012345678":
+#     rules: {"services.restart(navidrome.service)": {creator: auto}}
+
+# Files models may never read, besides the built-in list (.env, keys, SSH and cloud credentials, cookie
+# stores, modules' config.yml, the core's databases):
+# secrets: ["~/Projects/AudioManager/music_manager.toml"]
 
 # Gateway admission rules. In servers the bot answers mentions and replies to its messages.
 # admission:

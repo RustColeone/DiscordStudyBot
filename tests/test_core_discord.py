@@ -316,13 +316,15 @@ class DiscordInterfaceTests(unittest.IsolatedAsyncioTestCase):
         dm = FakeChannel(78, private=True)
         await self.say(incoming(dm, self.alice, 'tool tools.write_value {"key": "k", "value": "v"}'))
         approval = self.owner.dm_channel.texts()[0]
-        first, second = approval.split("\n")
-        match = re.fullmatch(r'🔐 Approval `(\w+)` · `tools\.write_value` `\{"key": "k", "value": "v"\}`', first)
+        first, summary, last = approval.split("\n")
+        match = re.fullmatch(r'🔐 Approval `(\w+)` · \*\*WRITE\*\* · `tools\.write_value` '
+                             r'`\{"key": "k", "value": "v"\}`', first)
         self.assertIsNotNone(match, first)
         approval_id = match.group(1)
+        self.assertEqual(summary, '> tools.write_value {"key": "k", "value": "v"}')
         run_id = self.core.tank.runs(("waiting_approval",))[0].id
-        self.assertEqual(second, f"Requested in `discord:dm:1` (run `{run_id}`). "
-                                 f"Reply `$approve {approval_id}` or `$deny {approval_id}`.")
+        self.assertEqual(last, f"Requested in `discord:dm:1` (run `{run_id}`). "
+                               f"Reply `$approve {approval_id}` or `$deny {approval_id}`.")
         owner_dm = self.owner.dm_channel
         buttons = [(button.label, button.custom_id) for button in owner_dm.sent[0].view.children]
         self.assertEqual(buttons, [("Approve", f"cmd:$approve {approval_id}"), ("Deny", f"cmd:$deny {approval_id}")])
@@ -475,8 +477,10 @@ class DefaultConfigurationTests(unittest.TestCase):
         self.assertEqual(config.profiles["gemini"][:2], [{"provider": "gemini", "model": "gemini-3.8-flash"},
                                                          {"provider": "gemini", "model": "gemini-3.6-flash"}])
         self.assertEqual(len(config.profiles["luna"]), 4)
-        self.assertIn("reminders.create", config.assignments["*"].preapprove)
-        self.assertIn("discord.music", config.assignments["*"].preapprove)
+        self.assertEqual(config.builtin_permissions["*"]["rules"]["reminders.create"], "auto")
+        self.assertEqual(config.builtin_permissions["*"]["rules"]["discord.music"], "auto")
+        self.assertEqual(config.builtin_permissions["routine:*"], {"use": ["basic.*"]})
+        self.assertEqual(config.permissions, {})
         self.assertEqual(config.assignments["*"].engine, "assistant")
         self.assertIsNone(config.control)
         with tempfile.TemporaryDirectory() as directory:

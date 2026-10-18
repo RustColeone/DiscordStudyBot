@@ -40,8 +40,9 @@ class RoutineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.now = [time.time()]
-        self.core = await start_core(Path(self._tmp.name), {"assignments": {"*": {
-            "engine": "probe", "personas": ["p"], "preapprove": ["core.add_routine", "core.delete_routine"]}}},
+        self.core = await start_core(Path(self._tmp.name), {
+            "assignments": {"*": {"engine": "probe", "personas": ["p"]}},
+            "permissions": {"*": {"rules": {"core.add_routine": "auto", "core.delete_routine": "auto"}}}},
             clock=lambda: self.now[0])
         self.chat = iface(self.core)
 

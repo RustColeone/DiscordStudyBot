@@ -1,7 +1,8 @@
 """Capabilities owned by the core itself (namespace `core`) plus interface operations.
 
-They act on gateway data (routes, admission rules, routines) and on conversations, so they are
-owner-only; changes are writes and go through approval unless pre-approved.
+They act on gateway data (routes, admission rules, routines) and on conversations, so most are
+owner-only. Changing policy (rules, routes, forwards, routines, assignments) is critical and never runs
+without the owner's approval when a model asks; sending elsewhere is critical, grantable per target.
 """
 
 from __future__ import annotations
@@ -115,18 +116,19 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
     capabilities = [
         Capability("core.send_message", "Send a text message to another conversation (interface:conversation).",
                    guarded(send_message), {"address": {"type": "string"}, "text": {"type": "string"}},
-                   ("address", "text"), Risk.WRITE, owner_only=True),
+                   ("address", "text"), Risk.CRITICAL, owner_only=True, subject="address", grantable=True,
+                   describe=lambda a: f"Send to {a.get('address')}: {str(a.get('text', ''))[:300]}"),
         Capability("core.list_rules", "List gateway admission rules by address pattern.",
-                   guarded(lister(admin.rules, "rules")), risk=Risk.READ, owner_only=True),
+                   guarded(lister(admin.rules, "rules")), risk=Risk.READ, owner_only=True, private=True),
         Capability("core.set_rule", "Set or delete (rule=null) the admission rule for an address pattern.",
                    guarded(set_rule), {"pattern": {"type": "string"}, "rule": rule_schema}, ("pattern",),
-                   Risk.WRITE, owner_only=True),
+                   Risk.CRITICAL, owner_only=True, never_auto=True),
         Capability("core.list_routes", "List reply routes by address pattern.",
-                   guarded(lister(admin.routes, "routes")), risk=Risk.READ, owner_only=True),
+                   guarded(lister(admin.routes, "routes")), risk=Risk.READ, owner_only=True, private=True),
         Capability("core.set_route", "Set or delete (route=null) where replies for an address pattern go. "
                    "route: {target: 'interface:conversation', kinds: ['text','file','progress','notice']}",
                    guarded(set_route), {"pattern": {"type": "string"}, "route": {"type": ["object", "null"]}},
-                   ("pattern",), Risk.WRITE, owner_only=True),
+                   ("pattern",), Risk.CRITICAL, owner_only=True, never_auto=True),
         Capability("core.add_routine",
                    "Repeat a message or a $command on a schedule in this conversation, sent as the person who "
                    "asked (plain text goes to the bot as their message; '$status' runs that command). schedule: "
@@ -145,24 +147,26 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                    guarded(set_routine),
                    {"name": {"type": "string"}, "text": {"type": "string"},
                     "every_minutes": {"type": "number", "minimum": 1}, "daily_at": {"type": "string"},
-                    "enabled": {"type": "boolean"}}, ("name", "text"), Risk.WRITE, owner_only=True),
+                    "enabled": {"type": "boolean"}}, ("name", "text"), Risk.CRITICAL, owner_only=True,
+                   never_auto=True),
         Capability("core.delete_routine", "Delete a routine by ID (your own here; admins: any).",
                    guarded(changer("delete")), {"id": {"type": "string"}}, ("id",), Risk.WRITE),
         Capability("core.list_assignments", "List engine/persona/policy assignments by address pattern.",
-                   guarded(list_assignments), risk=Risk.READ, owner_only=True),
+                   guarded(list_assignments), risk=Risk.READ, owner_only=True, private=True),
         Capability("core.set_assignment", "Create or replace the runtime assignment for an address pattern. "
-                   "assignment: {engine, personas, allow, deny, preapprove, budget, trusted, lane, enabled, options}",
+                   "assignment: {engine, personas, budget, trusted, lane, enabled, options}. What may run there is set "
+                   "under permissions in core.yml.",
                    guarded(set_assignment), {"pattern": {"type": "string"}, "assignment": {"type": "object"}},
-                   ("pattern", "assignment"), Risk.WRITE, owner_only=True),
+                   ("pattern", "assignment"), Risk.CRITICAL, owner_only=True, never_auto=True),
         Capability("core.delete_assignment", "Delete a runtime assignment (configured ones stay).",
-                   guarded(delete_assignment), {"pattern": {"type": "string"}}, ("pattern",), Risk.WRITE,
-                   owner_only=True),
+                   guarded(delete_assignment), {"pattern": {"type": "string"}}, ("pattern",), Risk.CRITICAL,
+                   owner_only=True, never_auto=True),
         Capability("core.list_forwards", "List conversations whose owner messages are forwarded elsewhere.",
-                   guarded(lister(admin.forwards, "forwards")), risk=Risk.READ, owner_only=True),
+                   guarded(lister(admin.forwards, "forwards")), risk=Risk.READ, owner_only=True, private=True),
         Capability("core.set_forward", "Forward the owner's ordinary messages in one conversation (exact address) "
                    "to another (target), or remove it (target=null). The target must be admitted.",
                    guarded(set_forward), {"address": {"type": "string"}, "target": {"type": ["string", "null"]}},
-                   ("address",), Risk.WRITE, owner_only=True),
+                   ("address",), Risk.CRITICAL, owner_only=True, never_auto=True),
         Capability("core.cancel_runs", "Cancel all open runs in a conversation (interface:conversation).",
                    guarded(cancel_runs), {"address": {"type": "string"}}, ("address",), Risk.WRITE, owner_only=True),
     ]
@@ -178,4 +182,6 @@ def _operation_capability(gateway: "GatewayLink", interface: str, operation) -> 
     return Capability(f"{interface}.{operation.name}", operation.description, run, dict(operation.parameters),
                       tuple(operation.required), operation.risk, owner_only=operation.owner_only,
                       command=operation.command,
-                      command_argument=operation.command_argument, timeout_s=operation.timeout_s)
+                      command_argument=operation.command_argument, timeout_s=operation.timeout_s,
+                      private=operation.private, subject=operation.subject, subject_kind=operation.subject_kind,
+                      never_auto=operation.never_auto, grantable=operation.grantable, confirm=operation.confirm)

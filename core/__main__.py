@@ -62,7 +62,8 @@ async def main(arguments: argparse.Namespace) -> int:
         await core.build()
         describe(core)
         if supervised.supervised():
-            core.manager.restart = lambda by: (supervised.request(by), core.request_stop(supervisor.RESTART))
+            core.manager.restart = lambda by, where=None: (supervised.request(by, where),
+                                                           core.request_stop(supervisor.RESTART))
             background.append(asyncio.create_task(supervised.report(core)))
         await core.run_forever(idle_exit=arguments.idle_exit)
     except asyncio.CancelledError:

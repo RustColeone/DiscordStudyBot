@@ -66,22 +66,23 @@ class WeChatInterface(Interface):
         Operation("status", "WeChat account, reader and polling status; with `chat`, that conversation's address, "
                   "admission, assignment and notification settings",
                   {"chat": {"type": "string", "description": "Chat name, native ID or address"}},
-                  command="wechat_status", command_argument="chat"),
+                  command="wechat_status", command_argument="chat", private=True),
         Operation("login", "Open WeChat if needed and return the login QR code, or confirm a pending login",
-                  risk=Risk.WRITE, command="wechat_login"),
+                  risk=Risk.CRITICAL, command="wechat_login", never_auto=True),
         Operation("chats", "List WeChat conversations with their addresses",
                   {"query": {"type": "string", "description": "Optional part of the name"}},
-                  command="wechat_chats", command_argument="query"),
+                  command="wechat_chats", command_argument="query", private=True),
         Operation("messages", "Read recent messages of one WeChat conversation",
                   {"chat": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
-                  ("chat",), command="wechat_read", command_argument="chat"),
+                  ("chat",), command="wechat_read", command_argument="chat", private=True),
         Operation("send", "Send a text message as the owner to a WeChat conversation (cancels its open runs)",
                   {"chat": {"type": "string"}, "text": {"type": "string"},
                    "spec": {"type": "string", "description": "$wechat_send form: `chat | text`"}},
-                  risk=Risk.WRITE, command=Command(
+                  risk=Risk.CRITICAL, command=Command(
                       "wechat_send", "Send a WeChat message as the account owner",
                       (Option("chat", "Chat name or ID", required=True), Option("text", "Message", required=True)),
-                      template="{chat} | {text}", access="creator"), command_argument="spec"),
+                      template="{chat} | {text}", access="creator"), command_argument="spec",
+                  subject="chat", grantable=True),
         Operation("notify", "Tell the owner about incoming messages of a conversation (`*` = all): on, off or inherit",
                   {"chat": {"type": "string"}, "mode": {"type": "string", "enum": ["on", "off", "inherit"]},
                    "spec": {"type": "string", "description": "$wechat_notify form: `on|off|inherit chat`"}},
@@ -92,7 +93,7 @@ class WeChatInterface(Interface):
                       template="{mode} {chat}", access="creator"), command_argument="spec"),
         Operation("configure", "Set the minimum seconds between the bot's messages in one conversation",
                   {"chat": {"type": "string"}, "send_interval_s": {"type": "number", "minimum": 5, "maximum": 3600}},
-                  ("chat", "send_interval_s"), risk=Risk.WRITE),
+                  ("chat", "send_interval_s"), risk=Risk.CRITICAL, never_auto=True),
         Operation("pause", "Pause reading and sending without logging out", risk=Risk.WRITE, command="wechat_pause"),
         Operation("resume", "Resume reading and sending", risk=Risk.WRITE, command="wechat_resume"),
     )
@@ -640,6 +641,10 @@ class WeChatInterface(Interface):
 
     async def _op_send(self, arguments, context) -> ToolResult:
         chat_name, text = arguments.get("chat"), arguments.get("text")
+        if arguments.get("spec") and (chat_name or text):
+            # The chat is what approvals and grants are about; it must be the one the message goes to.
+            return ToolResult.fail("Give either chat and text, or spec (`chat | text`), not both.",
+                                   "invalid_arguments")
         if arguments.get("spec"):
             chat_name, separator, text = arguments["spec"].partition("|")
             if not separator:
