@@ -69,9 +69,7 @@ class Supervisor:
         self.command = list(command)
         self.hang_s, self.grace_s, self.backoff = hang_s, grace_s, tuple(backoff)
         self.max_crashes, self.window_s, self.poll_s, self.stop_grace_s = max_crashes, window_s, poll_s, stop_grace_s
-        self.folder = Path(tempfile.mkdtemp(prefix="core-supervisor-"))
-        self.heartbeat = self.folder / "heartbeat"
-        self.reason = self.folder / "reason.json"
+        self.folder: Path | None = None  # made by run() and removed when it ends
         self.stopping = False
         self.child: subprocess.Popen | None = None
 
@@ -148,7 +146,16 @@ class Supervisor:
         return None
 
     # ---- the loop -------------------------------------------------------------------------------------
+    @property
+    def heartbeat(self) -> Path:
+        return self.folder / "heartbeat"
+
+    @property
+    def reason(self) -> Path:
+        return self.folder / "reason.json"
+
     def run(self) -> int:
+        self.folder = Path(tempfile.mkdtemp(prefix="core-supervisor-"))
         self._install()
         crashes: deque[float] = deque()
         try:
