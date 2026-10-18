@@ -184,6 +184,21 @@ send and is not subject to admission.
 Config values for rules, routes and routines are written at startup; runtime edits through the
 `core.*` capabilities persist for patterns not in the config.
 
+## Supervisor
+
+`python -m core` runs [`core/supervisor.py`](../../core/supervisor.py), a parent of about 200 lines that
+imports nothing from the core and never talks to a platform, and it runs the core as its child
+(`python -m core serve`), sharing the console. Like a hardware watchdog, the simple part watches the
+complicated one, and nothing watches the watchdog. The child touches a heartbeat file every 5 s from
+its event loop ([`core/supervised.py`](../../core/supervised.py)) and stops if the supervisor is gone.
+Exit code 0 stops both; 75 (`$admin restart`) starts a fresh core at once; any other code, or a
+heartbeat silent for 60 s (180 s while starting), is a crash or hang: the child and everything it
+started are ended, and a fresh core starts after 1, 5, 30 or 60 s, until five crashes within ten
+minutes, when the supervisor gives up. Before each restart it writes why (requested, crash with the
+end of the error, hang) for the new core, which reports it to the control route as a `restarted`
+notice once that interface is connected. Durable runs, approvals, routines and reminders carry over as
+they always do. Starting at boot stays the job of the system (systemd, Task Scheduler).
+
 ## Files
 
 | Path | Contents |
@@ -199,6 +214,7 @@ Config values for rules, routes and routines are written at startup; runtime edi
 | [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
 | [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's four personas), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
+| [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |
 | [`core/setup.py`](../../core/setup.py), [`core/wizard.py`](../../core/wizard.py) | Setting up: module settings, file edits (one key at a time), `$setup`, and the guided `python -m core setup` |
 
 Run with `python -m core` (`--check` validates the modules and exits). Without a `core.yml` the

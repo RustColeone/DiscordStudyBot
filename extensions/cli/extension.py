@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import time
 
 from contracts import (Address, Contributions, Delivery, Display, Extension, Setting, Interface, Reply, Request, Sender)
@@ -50,8 +51,19 @@ class CLIInterface(Interface):
 
     async def _read_loop(self) -> None:
         loop = asyncio.get_running_loop()
+        lines: asyncio.Queue[str] = asyncio.Queue()
+
+        def read() -> None:
+            while True:
+                line = self._stdin.readline()
+                loop.call_soon_threadsafe(lines.put_nowait, line)
+                if not line:
+                    return
+        # A daemon thread: a pending console read must never keep the process from exiting (a restart or
+        # Ctrl-C would otherwise wait for, and swallow, the next line typed).
+        threading.Thread(target=read, name="cli-stdin", daemon=True).start()
         while True:
-            line = await loop.run_in_executor(None, self._stdin.readline)
+            line = await lines.get()
             if not line:
                 self._port.log("stdin_closed")
                 return

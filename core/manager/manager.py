@@ -54,13 +54,14 @@ BUILTIN_COMMANDS = (
 ADMIN_COMMAND = Command(
     "admin", "Admins and maintenance: status, list, add/remove admins (creator), lock, your admin view",
     (Option("action", "What to do", required=False,
-            choices=("status", "list", "add", "remove", "lock", "unlock", "on", "off")),
+            choices=("status", "list", "add", "remove", "lock", "unlock", "on", "off", "restart")),
      Option("user", "User ID or mention (add/remove), e.g. 123456 or wechat:wxid_…")),
     template="[{action}][ --user {user}]", access="admin",
     examples=("", "add --user 123456789", "lock", "unlock", "off"),
     admin_help="lock: only the creator and admins are answered (members are told it is maintenance); "
                "unlock ends it. off/on: switch your own admin view (off = see the bot as a member). "
-               "add/remove: creator only.")
+               "add/remove: creator only. restart: creator only; a fresh core reloads every setting and module, "
+               "and says when it is back.")
 ROUTINE_COMMAND = Command(
     "routine", "Repeat a message or a command on a schedule in this chat",
     (Option("action", "What to do (default: add when a schedule is given, else list)",
@@ -123,6 +124,7 @@ class Manager:
         self.owners = owners
         self._control_config = control
         self.setup_desk = None  # core.setup.Setup, attached by the app for `$setup`
+        self.restart = None  # restart(by): set when a supervisor runs the core, for `$admin restart`
         self._control_reported: Address | None = None
         self._control_fallback: Address | None = None
         self.data_dir = Path(data_dir)
@@ -890,6 +892,17 @@ class Manager:
                                       run_id=cancelled))
         elif name == "memory":
             await say(self.memory_command(rest, request), private=True)
+        elif name == "admin" and rest.split()[:1] == ["restart"]:
+            if level < LEVELS["creator"]:
+                await say("Only the creator can restart the bot.", private=True)
+            elif self.restart is None:
+                await say("This core runs without its supervisor (`python -m core serve`), so it cannot restart "
+                          "itself; restart it yourself.", private=True)
+            else:
+                self.audit.record("restart_requested", by=self.identity(request.address.interface, request.sender.id))
+                await say("🔄 Restarting; I'll say when I'm back.")
+                # Let the reply go out first.
+                asyncio.get_running_loop().call_later(1.0, self.restart, request.sender.name or request.sender.id)
         elif name == "admin":
             await say(self.admin_command(rest, request), private=True)
         elif name == "routine":
@@ -923,9 +936,12 @@ class Manager:
             if level < LEVELS["creator"] or self.setup_desk is None:
                 await self._deliver(Reply(request.address, "notice", code="not_permitted", in_reply_to=request.id))
                 return
-            from core.setup import command as setup_command
-            await say(await setup_command(self.setup_desk, rest, request.address.interface,
-                                          request.display.markdown), private=True)
+            from core.setup import RESTART, command as setup_command
+            message = await setup_command(self.setup_desk, rest, request.address.interface, request.display.markdown)
+            actions = (Action("Restart now", "$admin restart", "danger"),) \
+                if RESTART in message and self.restart is not None else ()
+            await self._deliver(Reply(request.address, "text", text=message, in_reply_to=request.id, private=True,
+                                      actions=actions))
         else:
             capability = next((c for c in self.capabilities.values() if c.command and c.command.name == name), None)
             if capability is None:

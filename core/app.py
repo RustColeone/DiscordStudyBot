@@ -22,6 +22,8 @@ class Core:
         self._tick_seconds, self._clock = tick_seconds, clock
         self.extensions: list[LoadedExtension] = []
         self.started = False
+        self.exit_code = 0  # 75 asks the supervisor for a restart (core/supervisor.py)
+        self._stopping = asyncio.Event()
 
     async def build(self) -> None:
         try:
@@ -115,14 +117,20 @@ class Core:
         self.bottle.close()
         self.audit.close()
 
+    def request_stop(self, exit_code: int = 0) -> None:
+        """End run_forever cleanly; exit_code 75 asks the supervisor to start a fresh core."""
+        self.exit_code = exit_code
+        self._stopping.set()
+
     async def run_forever(self, idle_exit: float | None = None) -> None:
         await self.start()
         try:
             if idle_exit is None:
-                await asyncio.Event().wait()
+                await self._stopping.wait()
+                return
             quiet_since = asyncio.get_running_loop().time()
             seen = len(self.audit.events)
-            while True:
+            while not self._stopping.is_set():
                 await asyncio.sleep(0.5)
                 now = asyncio.get_running_loop().time()
                 busy = self.manager._tasks or len(self.audit.events) != seen

@@ -236,7 +236,7 @@ after `submit` returns.** Submit messages of one conversation in order; differen
 be submitted concurrently. Messages starting with `$` and a letter are commands (subject to the
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
 `$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
-`$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins),
+`$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins and can `$admin restart` a core run by its supervisor),
 `$routine` (anyone: repeat a message or command on a schedule; see Routine examples),
 `$setup` (the creator: modules on or off, and their declared settings; secrets only on the machine with
 `python -m core setup`; `$setup` lines are not kept in history; changes apply after a restart),
@@ -315,6 +315,7 @@ conversation carry `data["origin_address"]`.
 
 | Notice `code` | When | `data` |
 | --- | --- | --- |
+| `restarted` | The core restarted (control route); `text` says why (requested, crash, hang) and how long it was down. | `reason` |
 | `run_failed` | The request could not be finished. Show a short neutral message in the conversation's language (or suppress it). | `error_code` |
 | `run_failed_detail` | Details for the owner (control route). `text` is English. | `error_code`, `address` |
 | `approval_request` | An action needs the owner's approval (control route). `text` is an English summary. | `approval_id`, `capability`, `address`, `arguments` (JSON) |

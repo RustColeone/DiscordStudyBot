@@ -13,7 +13,8 @@ from core.storage.bottle import Bottle
 from core.storage.tank import RunRecord, Tank
 from tests.core_support import FakeAdapter, ROOT, make_config
 
-THIRD_PARTY_ALLOWED = {"yaml", "jsonschema", "openai", "google", "anthropic"}
+# psutil: the supervisor ends a hung core together with what it started (shells, ffmpeg).
+THIRD_PARTY_ALLOWED = {"yaml", "jsonschema", "openai", "google", "anthropic", "psutil"}
 
 
 def imports(path: Path) -> list[tuple[str, int]]:

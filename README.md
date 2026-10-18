@@ -52,7 +52,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Video | `$video <url>` fitted to the upload limit; `$clip -u <url> -s 1:05 -e 1:20` then `$clip --confirm` |
 | Reminders | `$remind 10m drink water`, `$reminders`, `$unremind <id>` |
 | Routines | `$routine every 1h $status`, `$routine weekdays 09:00 <question for the bot>`, or just ask ("check the server every hour"); `$routine` lists, `$routine pause/resume/delete <id>` |
-| Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging |
+| Admins | The creator adds admins (`$admin add --user <id>`); admins see every chat's routines and runs, and `$admin lock` limits the bot to admins while debugging; the creator can `$admin restart` it |
 | Discord | `$music` in your voice channel, `$time`, `$start`/`$stop` live study clock, `$$math$$` rendered as images; progress with a Cancel button, reactions (✅/❌/🛑) that press buttons, and optional per-task threads (`thread_channels`) |
 | Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (each action waits for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
@@ -75,7 +75,17 @@ like a personal AI web client on DeepSeek.
 * [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy.
 * [plugins/README.md](plugins/README.md): external modules, settings and secrets.
 
-## Running as a service
+## Staying up
+
+`python -m core` runs the bot under a small supervisor: the bot is its child process, sharing the same
+console. When the bot crashes, stops responding for a minute, or the creator types `$admin restart`
+(or presses **Restart now** after a `$setup` change), the supervisor starts a fresh one that re-reads
+every setting and module, and the bot then tells you (in your DM, or the console) why and for how long
+it was down. After five crashes within ten minutes it stops trying and says why.
+`python -m core serve` runs the bot alone, without the supervisor.
+
+To start it at boot, have the system run `python -m core`. On Linux, a systemd service (it only
+starts the supervisor; restarts are the supervisor's job):
 
 ```ini
 # /etc/systemd/system/discordstudybot.service
@@ -96,6 +106,9 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+On Windows, a task that starts it when you log in (the host module needs your desktop session):
+`schtasks /Create /SC ONLOGON /TN DiscordStudyBot /TR "C:\path\to\DiscordStudyBot\venv\Scripts\python.exe -m core --config C:\path\to\DiscordStudyBot\core.yml"`.
 
 Runtime data (databases, module data, the audit log) lives in `data/core/`.
 
