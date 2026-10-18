@@ -134,6 +134,7 @@ class WebUI(Interface):
         app.add_routes([
             web.get("/", self._index), web.get("/login", self._login_page), web.post("/login", self._login),
             web.get("/static/{name}", self._static), web.get("/avatars/{key}", self._avatar),
+            web.get("/favicon.ico", self._favicon),
             web.get("/files/{file_id}", self._file), web.get("/api/history", self._history),
             web.post("/api/upload", self._upload), web.get("/ws", self._socket)])
         self._runner = web.AppRunner(app, access_log=None)
@@ -175,7 +176,7 @@ class WebUI(Interface):
         if origin is not None and origin != f"{request.scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
             return self._secured(web.Response(status=403, text="Cross-site requests are refused."))
-        public = request.path in ("/login", "/static/style.css")
+        public = request.path in ("/login", "/static/style.css", "/favicon.ico")
         if self.passphrase and not public and not self._signed_in(request):
             if request.method == "GET" and request.path == "/":
                 raise web.HTTPSeeOther("/login")
@@ -245,6 +246,12 @@ class WebUI(Interface):
         if not re.fullmatch(r"[a-z0-9_-]+\.(js|css)", name) or not path.is_file():
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def _favicon(self, request: web.Request) -> web.StreamResponse:
+        path = self.folder / "static" / "favicon.png"
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Content-Type": "image/png", "Cache-Control": "max-age=86400"})
 
     def avatars(self) -> list[str]:
         folder = self.folder / "avatars"

@@ -263,6 +263,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         for path in ("/api/history", "/static/app.js"):
             async with self.http.get(self.base + path) as response:
                 self.assertEqual(response.status, 401, path)
+        async with self.http.get(f"{self.base}/favicon.ico") as response:  # the sign-in page shows it too
+            self.assertEqual((response.status, response.headers["Content-Type"]), (200, "image/png"))
         with self.assertRaises(aiohttp.WSServerHandshakeError):
             await self.http.ws_connect(f"{self.base}/ws")
         async with self.http.post(f"{self.base}/login", data={"passphrase": "wrong"}) as response:
