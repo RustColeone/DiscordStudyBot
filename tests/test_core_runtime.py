@@ -387,6 +387,46 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     for event in core.tank.events(run_id, ("tool_result",))]
         self.assertEqual(outcomes, [(first["call_key"], "failed"), ("call:t2", "success")])
 
+    async def approve_slow(self, overrides=None):
+        """A run asks to use tools.slow, which waits for SLOW_RELEASE; the owner approves it (not awaited)."""
+        core = await self.core({"permissions": {"*": {"rules": {"tools.slow": "ask"}}}, **(overrides or {})})
+        tools = extension_module(core, "tools")
+        tools.SLOW_RELEASE = asyncio.Event()
+        await iface(core).say("tool tools.slow {}")
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        await iface(core, "owner").say(f"$approve {approval['id']}", conversation="dm", sender="boss")
+        await asyncio.sleep(0.05)  # being carried out now
+        return core, tools, approval
+
+    def reported(self, core, approval):
+        return [event.data["result"] for event in core.tank.events(approval["run_id"], ("tool_result",))]
+
+    async def test_cancel_stops_an_approved_action_being_carried_out(self):
+        core, tools, approval = await self.approve_slow()
+        await iface(core).say("$cancel")
+        await asyncio.sleep(0.05)
+        tools.SLOW_RELEASE.set()  # had it gone on, it would finish now
+        await settle(core)
+        self.assertTrue(iface(core).texts("room")[-1].startswith("Cancelled run"))
+        self.assertEqual([result.get("error_code") for result in self.reported(core, approval)], ["cancelled"])
+        self.assertEqual(core.tank.action(approval["run_id"], approval["call_key"])["status"], "done")
+
+    async def test_an_approved_action_runs_within_the_runs_time_budget(self):
+        core, tools, approval = await self.approve_slow({"assignments": {"*": {"budget": {"seconds": 0.2}}}})
+        await asyncio.sleep(0.4)  # longer than the run had left
+        tools.SLOW_RELEASE.set()
+        await settle(core)
+        self.assertEqual([result.get("error_code") for result in self.reported(core, approval)], ["budget_exceeded"])
+        self.assertGreaterEqual(core.tank.run(approval["run_id"]).usage["seconds"], 0.15)  # its time was counted
+
+    async def test_stopping_the_core_during_an_approved_action_leaves_it_to_the_next_start(self):
+        core, tools, approval = await self.approve_slow()
+        core = await self.restart(core)  # a stop, not a cancel: the action is cut off, not reported cancelled
+        await settle(core)
+        self.assertEqual([result.get("error_code") for result in self.reported(core, approval)],
+                         ["uncertain_previous_attempt"])
+
     async def test_a_decision_cut_off_in_a_run_kept_running_reaches_it_when_it_resumes(self):
         core = await self.core()
         await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')

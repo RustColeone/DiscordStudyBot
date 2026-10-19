@@ -153,6 +153,7 @@ class Manager:
         self._tasks: dict[str, asyncio.Task] = {}
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._approval_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._carrying: dict[str, set[asyncio.Task]] = {}  # run → approved actions being carried out for it
         self.gateway: GatewayLink | None = None
         self._stopping = False
         self._delivery_seconds: dict[str, float] = defaultdict(float)
@@ -940,8 +941,7 @@ class Manager:
                     "arguments": self.secrets.scrub_value(arguments)}
             if approve:
                 note = self._remember_approval(record, approval["name"], arguments, decided_by, always)
-                result = await self.call_tool(record.id, approval["name"], arguments,
-                                              approved=True, key=approval["call_key"])
+                result = await self._carry_out(record, approval, arguments)
                 self.tank.append_event(record.id, "tool_result", {**call, "result": result.to_dict()})
                 summary = f"Approved {approval_id}: {approval['name']} → {result.status}.{note}"
             else:
@@ -951,6 +951,40 @@ class Manager:
             self.audit.record("approval_decided", approval=approval_id, approved=approve)
         await self._resume_after_decision(record.id, result)
         return summary
+
+    async def _carry_out(self, record: RunRecord, approval: Mapping[str, Any], arguments: Any) -> ToolResult:
+        """An approved action, carried out as the run's own work: `$cancel` stops it too, and it gets only the time
+        the run has left, which it counts. Stopped part-way, it may have taken effect: reported uncertain, never
+        repeated."""
+        budget = Assignment.from_dict(record.assignment).budget
+        remaining = budget.seconds - float(self.tank.run(record.id).usage.get("seconds", 0))
+        if remaining <= 0:
+            return ToolResult.fail("The run's time budget was used up, so the approved action was not run.",
+                                   "budget_exceeded")
+        work = asyncio.ensure_future(self.call_tool(record.id, approval["name"], arguments, approved=True,
+                                                    key=approval["call_key"]))
+        self._carrying.setdefault(record.id, set()).add(work)
+        started = time.monotonic()
+        try:
+            return await asyncio.wait_for(work, timeout=remaining)
+        except asyncio.TimeoutError:
+            reason, code = "The run's time budget ran out while it was carried out", "budget_exceeded"
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise  # the core is stopping, not the run being cancelled
+            reason, code = "The run was cancelled while it was carried out", "cancelled"
+        finally:
+            carrying = self._carrying.get(record.id, set())
+            carrying.discard(work)
+            if not carrying:
+                self._carrying.pop(record.id, None)
+            self._add_usage(record.id, seconds=round(time.monotonic() - started, 3))
+        prior = self.tank.action(record.id, approval["call_key"])
+        if prior is not None and prior["status"] == "started":
+            result = ToolResult.fail(f"{reason}; it may have taken effect and was not repeated.", code)
+            self.tank.finish_action(record.id, approval["call_key"], result.to_dict())
+            return result
+        return ToolResult.fail(f"{reason}, before it started; it was not run.", code)
 
     def _remember_approval(self, record: RunRecord, name: str, arguments: Mapping[str, Any], decided_by: Request,
                            always: bool) -> str:
@@ -1570,4 +1604,13 @@ class Manager:
         elif task is not None and task is not asyncio.current_task():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        # Approved actions being carried out for it stop too, before the cancel is reported.
+        carrying = list(self._carrying.get(record.id, ()))
+        for work in carrying:
+            if work is asyncio.current_task():  # an action cancelling its own run: it stops once this step returns
+                asyncio.get_running_loop().call_soon(work.cancel)
+            else:
+                work.cancel()
+        await asyncio.gather(*(work for work in carrying if work is not asyncio.current_task()),
+                             return_exceptions=True)
         self.audit.record("run_cancelled", run=record.id)
