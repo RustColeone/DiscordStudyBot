@@ -154,6 +154,7 @@ class Manager:
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._approval_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._carrying: dict[str, set[asyncio.Task]] = {}  # run → approved actions being carried out for it
+        self._clocks: dict[str, list] = {}  # run → [holders, counting since]: its active-time clock (_clock_hold)
         self.gateway: GatewayLink | None = None
         self._stopping = False
         self._delivery_seconds: dict[str, float] = defaultdict(float)
@@ -509,24 +510,20 @@ class Manager:
         if record is None or record.status != "running":
             return
         engine = self.engines.get(record.engine)
-        assignment = Assignment.from_dict(record.assignment)
         failure: tuple[str, str] | None = None
         outcome: Any = None
         started_events = len(self.tank.events(run_id))
-        remaining = assignment.budget.seconds - float(record.usage.get("seconds", 0))
-        started = time.monotonic()
         if engine is None:
             failure = ("engine_missing", f"Engine {record.engine!r} is not registered")
-        elif remaining <= 0:
+        elif self._time_left(run_id) <= 0:
             failure = ("budget_exceeded", "The run's time budget is used up")
         else:
             events = self.tank.events(run_id, ("input", "tool_result", "approval_denied", "resumed"))
             session = SessionHandle(self, record, events, resumed)
-            self._delivery_seconds[run_id] = 0.0
+            self._clock_hold(run_id)
             try:
-                outcome = await self._watch(run_id, engine.run(session), started, remaining)
+                outcome = await self._watch(run_id, engine.run(session))
             except asyncio.CancelledError:
-                self._add_usage(run_id, seconds=self._active_seconds(run_id, started))
                 self._answered.pop(run_id, None)
                 raise
             except asyncio.TimeoutError:
@@ -535,8 +532,8 @@ class Manager:
                 failure = (error.kind, str(error))
             except Exception as error:
                 failure = ("engine_error", f"{type(error).__name__}: {error}"[:500])
-        self._add_usage(run_id, seconds=self._active_seconds(run_id, started))
-        self._delivery_seconds.pop(run_id, None)
+            finally:
+                self._clock_release(run_id)
         self._answered.pop(run_id, None)
         address = record.address
         async with self._locks[address]:
@@ -585,11 +582,42 @@ class Manager:
         ongoing = now - delivering if delivering is not None else 0.0
         return max(0.0, now - started - self._delivery_seconds.get(run_id, 0.0) - ongoing)
 
-    async def _watch(self, run_id: str, coroutine, started: float, remaining: float):
-        task = asyncio.ensure_future(coroutine)
+    def _clock_hold(self, run_id: str) -> None:
+        """The run's active-time clock, held while its engine runs and while an approved action is carried out for
+        it. It counts the time anything holds it, once (side by side counts the overlap once), less the time spent
+        delivering, and adds that to the run's usage when the last holder lets go."""
+        clock = self._clocks.get(run_id)
+        if clock is None:
+            self._clocks[run_id] = [1, time.monotonic()]
+            self._delivery_seconds[run_id] = 0.0
+        else:
+            clock[0] += 1
+
+    def _clock_release(self, run_id: str) -> None:
+        clock = self._clocks.get(run_id)
+        if clock is None:
+            return
+        clock[0] -= 1
+        if clock[0] == 0:
+            seconds = self._active_seconds(run_id, clock[1])
+            del self._clocks[run_id]
+            self._delivery_seconds.pop(run_id, None)
+            self._add_usage(run_id, seconds=round(seconds, 3))
+
+    def _time_left(self, run_id: str) -> float:
+        """The run's time budget less what it used: recorded, and on its clock now."""
+        record = self.tank.run(run_id)
+        clock = self._clocks.get(run_id)
+        used = float(record.usage.get("seconds", 0)) + (self._active_seconds(run_id, clock[1]) if clock else 0.0)
+        return Assignment.from_dict(record.assignment).budget.seconds - used
+
+    async def _watch(self, run_id: str, work):
+        """Await `work` (a coroutine or task) while the run has time left; TimeoutError (and `work` cancelled) when
+        it runs out."""
+        task = asyncio.ensure_future(work)
         try:
             while True:
-                left = remaining - self._active_seconds(run_id, started)
+                left = self._time_left(run_id)
                 if left <= 0:
                     raise asyncio.TimeoutError()
                 done, _ = await asyncio.wait({task}, timeout=min(left, 5.0))
@@ -956,17 +984,15 @@ class Manager:
         """An approved action, carried out as the run's own work: `$cancel` stops it too, and it gets only the time
         the run has left, which it counts. Stopped part-way, it may have taken effect: reported uncertain, never
         repeated."""
-        budget = Assignment.from_dict(record.assignment).budget
-        remaining = budget.seconds - float(self.tank.run(record.id).usage.get("seconds", 0))
-        if remaining <= 0:
+        if self._time_left(record.id) <= 0:
             return ToolResult.fail("The run's time budget was used up, so the approved action was not run.",
                                    "budget_exceeded")
         work = asyncio.ensure_future(self.call_tool(record.id, approval["name"], arguments, approved=True,
                                                     key=approval["call_key"]))
         self._carrying.setdefault(record.id, set()).add(work)
-        started = time.monotonic()
+        self._clock_hold(record.id)
         try:
-            return await asyncio.wait_for(work, timeout=remaining)
+            return await self._watch(record.id, work)
         except asyncio.TimeoutError:
             reason, code = "The run's time budget ran out while it was carried out", "budget_exceeded"
         except asyncio.CancelledError:
@@ -978,7 +1004,7 @@ class Manager:
             carrying.discard(work)
             if not carrying:
                 self._carrying.pop(record.id, None)
-            self._add_usage(record.id, seconds=round(time.monotonic() - started, 3))
+            self._clock_release(record.id)
         prior = self.tank.action(record.id, approval["call_key"])
         if prior is not None and prior["status"] == "started":
             result = ToolResult.fail(f"{reason}; it may have taken effect and was not repeated.", code)
@@ -1093,8 +1119,8 @@ class Manager:
         finally:
             if not nested:
                 self._delivering.pop(record.id, None)
-                self._delivery_seconds[record.id] = (self._delivery_seconds.get(record.id, 0.0)
-                                                     + time.monotonic() - started)
+                if record.id in self._clocks:  # left out of the run's active time
+                    self._delivery_seconds[record.id] += time.monotonic() - started
 
     async def reply(self, run_id: str, text: str, quote: str | None = None, speaker: str = "",
                     label: str = "", data: Mapping[str, str] | None = None,

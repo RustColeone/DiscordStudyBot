@@ -66,7 +66,7 @@ def setup(context):
                    {"key": {"type": "string"}, "value": {"type": "string"}}, ("key", "value"), Risk.WRITE,
                    command="setvalue", command_argument="value"),
         Capability("tools.make_file", "Create a file", make_file, {"name": {"type": "string"}}, ("name",),
-                   Risk.PREPARE, needs={"files"}),
+                   Risk.PREPARE, needs={"files"}, command="makefile", command_argument="name"),
         Capability("tools.secret", "Owner-only data", secret, owner_only=True),
         Capability("tools.slow", "A long conversion", slow, risk=Risk.PREPARE),
         Capability("tools.broken", "Always times out", broken),

@@ -420,6 +420,37 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([result.get("error_code") for result in self.reported(core, approval)], ["budget_exceeded"])
         self.assertGreaterEqual(core.tank.run(approval["run_id"]).usage["seconds"], 0.15)  # its time was counted
 
+    async def test_approved_actions_side_by_side_count_their_time_once(self):
+        core = await self.core({"permissions": {"*": {"rules": {"tools.slow": "ask"}}},
+                                "assignments": {"*": {"budget": {"seconds": 0.4}}}})
+        tools = extension_module(core, "tools")
+        tools.SLOW_RELEASE = asyncio.Event()
+        await iface(core).say("tool tools.slow {}")
+        await settle(core)
+        first = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        core.tank.create_approval("second", first["run_id"], "call:t2", "tools.slow", {}, first["address"])
+        owner = iface(core, "owner")
+        await owner.say(f"$approve {first['id']}", conversation="dm", sender="boss")
+        await owner.say("$approve second", conversation="dm", sender="boss")
+        await asyncio.sleep(0.25)  # both carried out at once for about this long
+        tools.SLOW_RELEASE.set()
+        await settle(core)
+        self.assertEqual([result["status"] for result in self.reported(core, first)], ["success", "success"])
+        self.assertLess(core.tank.run(first["run_id"]).usage["seconds"], 0.4)
+        self.assertEqual(core.tank.run(first["run_id"]).status, "done")  # not failed for time it did not use
+
+    async def test_waiting_for_a_delivery_does_not_use_an_approved_actions_time(self):
+        core = await self.core({"permissions": {"*": {"rules": {"tools.make_file": "ask"}}},
+                                "assignments": {"*": {"budget": {"seconds": 0.2}}},
+                                "extension_config": {"fake": {"interfaces": {"chat": {"delay": 0.3, "progress": True}}}}})
+        await iface(core).say("$makefile notes.txt")  # a member's command, waiting for the owner
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        await iface(core, "owner").say(f"$approve {approval['id']}", conversation="dm", sender="boss")
+        await settle(core)  # its progress message takes 0.3 seconds to deliver, longer than the whole budget
+        self.assertEqual([result["status"] for result in self.reported(core, approval)], ["success"])
+        self.assertIn("file ready", iface(core).texts("room", "progress"))
+
     async def test_stopping_the_core_during_an_approved_action_leaves_it_to_the_next_start(self):
         core, tools, approval = await self.approve_slow()
         core = await self.restart(core)  # a stop, not a cancel: the action is cut off, not reported cancelled
