@@ -362,6 +362,79 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(iface(core).texts("guest", "text")[-1], "1. buy milk")
 
+    async def test_a_decision_cut_off_is_recorded_while_another_approval_still_waits(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        first = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        run_id = first["run_id"]
+        # The same run also waits on a second approval (as parallel room jobs can).
+        core.tank.create_approval("second", run_id, "call:t2", "tools.write_value", {"key": "k2", "value": "v2"},
+                                  first["address"])
+        core.tank.decide_approval(first["id"], "approved", "owner:dm")
+        core.tank.start_action(run_id, first["call_key"], first["name"], first["arguments"], "write")
+        core = await self.restart(core)
+        await settle(core)
+        recorded = [event.data["call_key"] for event in core.tank.events(run_id, ("tool_result",))]
+        self.assertEqual(recorded, [first["call_key"]])  # the first outcome is recorded now,
+        self.assertEqual(core.tank.run(run_id).status, "waiting_approval")  # but the run waits for the second
+        self.assertEqual(iface(core).texts("room"), [])
+        await iface(core, "owner").say("$approve second", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(self.counts(), {"write_value": 1})  # the second ran; the first was not repeated
+        self.assertIn("may have taken effect; it was not repeated", iface(core).texts("room")[-1])
+        outcomes = [(event.data["call_key"], event.data["result"]["status"])
+                    for event in core.tank.events(run_id, ("tool_result",))]
+        self.assertEqual(outcomes, [(first["call_key"], "failed"), ("call:t2", "success")])
+
+    async def test_a_decision_cut_off_in_a_run_kept_running_reaches_it_when_it_resumes(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        run_id = approval["run_id"]
+        core.tank.update_run(run_id, status="running")  # as a room run stays while other jobs work
+        core.tank.decide_approval(approval["id"], "approved", "owner:dm")
+        core.tank.start_action(run_id, approval["call_key"], approval["name"], approval["arguments"], "write")
+        core = await self.restart(core)
+        await settle(core)
+        kinds = [event.kind for event in core.tank.events(run_id) if event.kind in ("tool_result", "resumed")]
+        self.assertEqual(kinds, ["tool_result", "resumed"])  # its outcome was there before it went on
+        self.assertTrue(iface(core).texts("room")[-1].startswith("approved: An earlier attempt"))  # read, not redone
+        self.assertEqual(self.counts(), {})
+
+    async def asked_twice(self):
+        """A run whose call call:t1 was decided and reported once, then asked again (same call key)."""
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        first = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        core.tank.decide_approval(first["id"], "approved", "owner:dm")
+        core.tank.append_event(first["run_id"], "tool_result", {"call_key": first["call_key"], "name": first["name"],
+                                                                "arguments": first["arguments"],
+                                                                "result": {"status": "failed", "summary": "earlier"}})
+        await asyncio.sleep(0.01)
+        core.tank.create_approval("again", first["run_id"], first["call_key"], first["name"], first["arguments"],
+                                  first["address"])
+        return core, first
+
+    async def test_a_call_asked_again_is_recovered_on_its_own(self):
+        core, first = await self.asked_twice()
+        core.tank.decide_approval("again", "approved", "owner:dm")
+        core.tank.start_action(first["run_id"], first["call_key"], first["name"], first["arguments"], "write")
+        core = await self.restart(core)
+        await settle(core)
+        outcomes = [event.data["result"]["summary"] for event in core.tank.events(first["run_id"], ("tool_result",))]
+        self.assertEqual(len(outcomes), 2)  # the earlier report did not count for the new approval
+        self.assertIn("may have taken effect", outcomes[-1])
+
+    async def test_a_recovered_denial_resumes_with_no_result_not_an_older_one(self):
+        core, first = await self.asked_twice()
+        core.tank.decide_approval("again", "denied", "owner:dm")
+        self.assertIsNone(core.manager._record_decisions(core.tank.run(first["run_id"])))
+        self.assertEqual(core.tank.events(first["run_id"], ("tool_result", "approval_denied"))[-1].kind,
+                         "approval_denied")
+
     async def test_a_command_cut_off_while_its_approval_ran_is_closed_with_its_outcome(self):
         core = await self.core()
         await iface(core).say("$remember buy milk", conversation="guest")
