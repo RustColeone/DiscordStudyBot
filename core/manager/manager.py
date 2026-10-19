@@ -263,6 +263,14 @@ class Manager:
         name = str(options.get("diary_scope") or "").strip()
         return f"scope:{name}" if name else address
 
+    @staticmethod
+    def diary_subject(address: str, scope: str, sender_id: str) -> str:
+        """Who a diary note is about. In its own conversation a sender ID is enough; a scope shared across
+        conversations may span interfaces, where sender IDs collide, so there it is `<interface>:<sender>`."""
+        if not sender_id or scope == address:
+            return sender_id
+        return f"{Address.parse(address).interface}:{sender_id}"
+
     def register_capability(self, capability: Capability, extension: str) -> None:
         if capability.name in self.capabilities:
             raise ValueError(f"Capability {capability.name!r} is already registered")
@@ -1521,9 +1529,10 @@ class Manager:
     def memory_command(self, text: str, request: Request) -> str:
         """`$memory`: what personas keep about the sender in this conversation (or in the conversations sharing
         its `diary_scope`); only theirs. Also this chat's rolling summary (`summary`, `clear summary`)."""
-        conversation, subject = str(request.address), request.sender.id
+        conversation = str(request.address)
         assignment = self.assignment_for(request.address)
         address = self.diary_scope(conversation, assignment.options if assignment else {})
+        subject = self.diary_subject(conversation, address, request.sender.id)
         here = "here" if address == conversation else "in the chats that share this memory"
         code = (lambda value: f"`{value}`") if request.display.markdown else str
         usage = (f"Personas keep short notes about you {here}.\n"

@@ -99,10 +99,9 @@ class Tank:
         return [self._history_item(row) for row in reversed(rows)]
 
     def search_messages(self, address: str, text: str, limit: int = 20) -> list[HistoryItem]:
-        """Messages of one conversation containing `text` (any case for Latin letters), newest first."""
-        pattern = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        rows = self.db.query("SELECT * FROM messages WHERE address=? AND text LIKE ? ESCAPE '\\' "
-                             "ORDER BY seq DESC LIMIT ?", (address, pattern, max(1, min(int(limit), 100))))
+        """Messages of one conversation containing `text` in any case (Unicode case folding), newest first."""
+        rows = self.db.query("SELECT * FROM messages WHERE address=? AND instr(casefold(text), ?) > 0 "
+                             "ORDER BY seq DESC LIMIT ?", (address, text.casefold(), max(1, min(int(limit), 100))))
         return [self._history_item(row) for row in rows]
 
     @staticmethod

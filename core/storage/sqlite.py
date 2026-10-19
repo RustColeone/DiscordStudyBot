@@ -16,6 +16,10 @@ class Database:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
+        # SQLite's own case handling is ASCII-only; casefold() also matches "café" with "CAFÉ", "Москва"
+        # with "москва".
+        self._conn.create_function("casefold", 1, lambda value: value.casefold() if isinstance(value, str) else value,
+                                   deterministic=True)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")

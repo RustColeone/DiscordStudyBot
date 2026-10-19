@@ -51,6 +51,12 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(store(address=other, person=True).get("k"), "alice")  # person: across conversations
         self.assertEqual(store(persona="luna", person=True).get("k"), "luna-alice")
         self.assertEqual(core.tank.store("extension:room").get("k"), "module")  # no scope = ToolContext.storage
+        # A conversation ID may contain anything, even what looks like another scope's name.
+        tricky = Address("chat", 'room|persona:luna')
+        store(conversation=True, persona="luna").set("t", "luna in room")
+        self.assertIsNone(store(address=tricky, conversation=True).get("t"))
+        store(sender=Sender('x", "person'), person=True).set("t", "x")
+        self.assertIsNone(store(sender=Sender("x"), person=True).get("t"))
         with self.assertRaises(ValueError):
             store(persona="claude")  # not one of the run's personas
         with self.assertRaises(ValueError):
@@ -66,6 +72,10 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.text for item in history.search("50%")], ["50% off_sale today"])  # % and _ are literal
         self.assertEqual(history.search("off_s")[0].text, "50% off_sale today")
         self.assertEqual(history.search("x_y"), [])
+        for text in ("Le CAFÉ du coin", "Встреча в Москве"):
+            core.tank.record_message("chat:room", "in", text, sender_id="alice")
+        self.assertEqual([item.text for item in history.search("café")], ["Le CAFÉ du coin"])  # beyond ASCII
+        self.assertEqual([item.text for item in history.search("москве")], ["Встреча в Москве"])
         self.assertIsNone(history.summary())
         from core.manager.secrets import Secrets
         core.manager.secrets = Secrets({"TEST_TOKEN": "very-secret-value"})
@@ -114,13 +124,31 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         adapter = core.providers._adapters["fake"]
         self.assertIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])  # the group shares it
         self.assertNotIn("Likes spicy noodles", adapter.calls[2]["messages"][0]["content"])  # elsewhere does not
-        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "alice")], ["food.favorite"])
+        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "chat:alice")], ["food.favorite"])
         await iface(core).say("$memory", conversation="group")  # the DM's note, read from the group chat
         await settle(core)
         self.assertIn("Likes spicy noodles", iface(core).texts("group")[-1])
         await iface(core).say("$memory", conversation="elsewhere")
         await settle(core)
         self.assertIn("Nobody keeps notes about you here", iface(core).texts("elsewhere")[-1])
+
+    async def test_a_shared_diary_keeps_people_of_different_interfaces_apart(self):
+        shared = {"engine": "assistant", "personas": ["p"], "options": {"diary_scope": "mine"}}
+        core = await self.core({"assignments": {"*": {"engine": "assistant", "personas": ["p"]},
+                                                "chat:dm": shared, "owner:dm": shared}},
+                               [turn("Noted!", diary=[{"key": "food.favorite", "kind": "fact",
+                                                       "note": "Likes spicy noodles", "importance": 4}]),
+                                turn("Hi.")])
+        await iface(core).say("I love 担担面, the spicy one", conversation="dm")  # alice on chat
+        await settle(core)
+        await iface(core, "owner").say("hello", conversation="dm")  # a different alice, on owner
+        await settle(core)
+        adapter = core.providers._adapters["fake"]
+        self.assertNotIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])
+        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "chat:alice")], ["food.favorite"])
+        await iface(core, "owner").say("$memory clear p", conversation="dm")
+        await settle(core)
+        self.assertEqual(len(core.tank.notes("p", "scope:mine", "chat:alice")), 1)  # not hers to clear
 
 
 if __name__ == "__main__":

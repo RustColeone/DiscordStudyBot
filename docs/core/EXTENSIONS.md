@@ -616,7 +616,8 @@ to any conversation:
 `session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
 only by default; a DM disclosure never shows up in a server. An assignment's `diary_scope: <name>` option
 makes every conversation with that scope share them instead: the same character remembering the same person
-across them (the web UI's chats, which only their owner reads). `$memory` follows the scope. `recall(text, limit)` returns `DiaryNote`s, those
+across them (the web UI's chats, which only their owner reads). In a shared scope a person is their interface
+and sender ID together, since sender IDs are only unique within one interface. `$memory` follows the scope. `recall(text, limit)` returns `DiaryNote`s, those
 matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
 under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses
 (`ValueError`) invalid keys or values, notes over 400 characters, notes that copy the message instead

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
+import json
 import time
 
 from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, HistorySummary, ModelError,
@@ -73,18 +74,25 @@ def module_store(manager: "Manager", module: str, address: Address, sender: Send
     """A module's store, scoped by any combination of conversation, persona and person (contracts 1.5). The
     module's name comes first, so no module can reach another's; with no scope it is the module's store
     everywhere (the same as ToolContext.storage)."""
-    scope = "extension:" + module
+    parts: dict[str, str] = {}
     if conversation:
-        scope += f"|conversation:{address}"
+        parts["conversation"] = str(address)
     if persona is not None:
         if persona not in personas:
             raise ValueError(f"No persona {persona!r} in this run")
-        scope += f"|persona:{persona}"
+        parts["persona"] = persona
     if person:
         if not sender.id:
             raise ValueError("This run has no person (a routine without a sender)")
-        scope += f"|person:{address.interface}:{sender.id}"
+        parts["person"] = person_id(address, sender)
+    # The parts as JSON, so no conversation, persona or sender ID can spell another scope's name.
+    scope = "extension:" + module + (" " + json.dumps(parts, ensure_ascii=False, sort_keys=True) if parts else "")
     return manager.tank.store(scope)
+
+
+def person_id(address: Address, sender: Sender) -> str:
+    """A person across conversations: sender IDs are only unique within one interface, so it leads."""
+    return json.dumps([address.interface, sender.id], ensure_ascii=False)
 
 
 class SessionHandle:
@@ -125,7 +133,8 @@ class SessionHandle:
         if persona not in {item.name for item in self.personas}:
             raise ValueError("A session can only open the diary of its own personas")
         record = self._manager.tank.run(self.run_id)
-        return DiaryHandle(self._manager, record, persona, self.trigger.text, self.trigger.sender.id,
+        return DiaryHandle(self._manager, record, persona, self.trigger.text,
+                           self._manager.diary_subject(record.address, self._diary_scope, self.trigger.sender.id),
                            scope=self._diary_scope)
 
     def inbox(self) -> list[Request]:
