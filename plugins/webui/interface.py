@@ -40,6 +40,9 @@ INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "audio/mpe
                 "audio/webm", "audio/mp4", "video/mp4", "video/webm", "application/pdf"}
 LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
 DECISION = re.compile(r"^\$(approve|deny)\s+([0-9a-f]{4,12})(\s+always)?\s*$", re.I)
+# The member list's model menu asks the core with `$model` in the background (see _quiet_command).
+PERSONA = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+MODEL = re.compile(r"^(reset|[A-Za-z0-9._-]{1,40}/[A-Za-z0-9._:/@+-]{1,160})$")
 COOKIE = "webui_session"
 KATEX = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/"  # pinned; the page checks its integrity hashes
 CSP = (f"default-src 'self'; script-src 'self' {KATEX}katex.min.js; style-src 'self' 'unsafe-inline' {KATEX}; "
@@ -119,6 +122,7 @@ class WebUI(Interface):
         self._sockets: set[web.WebSocketResponse] = set()
         self._progress: dict[str, dict] = {}  # run (or conversation) → the latest progress event
         self._failures: dict[str, deque] = {}
+        self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose}: the page's own `$model` asks
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
 
@@ -373,6 +377,28 @@ class WebUI(Interface):
             await self._delete(conversation)
         elif kind == "send":
             await self._send(ws, conversation, event)
+        elif kind == "models":  # the member list's model menu: who answers with what, and what is offered
+            await self._quiet_command(ws, conversation, "$model", "overview")
+        elif kind == "model":  # a choice from that menu (or `reset`)
+            persona, model = str(event.get("persona") or ""), str(event.get("model") or "")
+            if PERSONA.fullmatch(persona) and MODEL.fullmatch(model):
+                await self._quiet_command(ws, conversation, f"$model {persona} {model}", "choose")
+
+    async def _quiet_command(self, ws: web.WebSocketResponse, conversation: str, text: str, purpose: str) -> None:
+        """A `$command` the page sends for itself: it is not shown in the chat, and its answer comes back to the
+        page as a `models` event (with the command's result data) instead of a bubble. The core still sees and
+        records it like a typed command (the room leaves commands out of what its characters read)."""
+        key = f"web-quiet-{uuid.uuid4().hex}"
+        while len(self._quiet) >= 100:  # answers that never came (the core was restarted, say)
+            self._quiet.pop(next(iter(self._quiet)))
+        self._quiet[key] = {"conversation": conversation, "purpose": purpose}
+        result = await self.port.submit(Request(
+            id=key, address=Address(self.name, conversation), sender=Sender(self.user_id, self.user_name), text=text,
+            received_at=time.time(), is_direct=True, mentions_me=True, display=self.display))
+        if not result.accepted:
+            self._quiet.pop(key, None)
+            await ws.send_json({"type": "models", "conversation": conversation, "purpose": purpose, "ok": False,
+                                "code": result.reason, "text": "", "result": {}})
 
     async def _delete(self, conversation: str) -> None:
         """Remove a chat from the page: its open work is cancelled and its transcript and files are deleted.
@@ -443,6 +469,20 @@ class WebUI(Interface):
         await asyncio.gather(*(send(ws) for ws in list(self._sockets)))
 
     # ---- delivery ------------------------------------------------------------------------------------
+    async def _answer_quietly(self, reply: Reply, quiet: dict) -> Delivery:
+        """An answer to one of the page's own commands: to the page as data, not into the chat."""
+        if reply.kind == "progress" or (reply.kind == "notice" and reply.code == "waiting_approval"):
+            return Delivery(True, message_id=f"quiet-{reply.id}")  # the answer itself comes later
+        self._quiet.pop(reply.in_reply_to, None)
+        try:
+            result = json.loads(reply.data.get("result") or "{}")
+        except ValueError:
+            result = {}
+        await self._broadcast({"type": "models", "conversation": quiet["conversation"], "purpose": quiet["purpose"],
+                               "ok": reply.kind == "text", "code": reply.code or "", "text": reply.text,
+                               "result": result if isinstance(result, dict) else {}})
+        return Delivery(True, message_id=f"quiet-{reply.id}")
+
     async def deliver(self, reply: Reply) -> Delivery:
         if self.store is None:
             return Delivery(False, detail="not_started")
@@ -452,6 +492,9 @@ class WebUI(Interface):
         if self.store.conversation(conversation) is None:
             self.store.ensure(conversation, "Notices" if conversation.startswith("_") else conversation)
             await self._broadcast({"type": "conversations", "items": self.store.conversations()})
+        quiet = self._quiet.get(reply.in_reply_to or "")
+        if quiet is not None:
+            return await self._answer_quietly(reply, quiet)
         key = reply.run_id or conversation
         if reply.kind == "progress":
             event = {"type": "progress", "conversation": conversation, "run_id": key, "text": reply.text,

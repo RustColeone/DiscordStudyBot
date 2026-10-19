@@ -14,6 +14,7 @@
     gemini: { accent: "#9a86f2", ink: "#7a63de" },
     claude: { accent: "#e5896a", ink: "#c4694a" },
     deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
+    grok: { accent: "#e2b545", ink: "#a8801c" },
     you: { accent: "#f0a04b", ink: "#b8741f" },
     bot: { accent: "#b39c8a", ink: "#8c7a6b" },
   };
@@ -29,6 +30,9 @@
     conversations: [], current: localStorage.getItem("webui.chat") || "classroom", lastId: 0,
     progress: new Map(), unread: new Set(), pending: [], files: [], ws: null, retry: 0, paletteIndex: 0,
     spoke: new Map(), menuFor: null, dragging: null, drafts: new Map(),
+    // The model menu: `$model`'s overview for the current chat (each classmate's model and what the providers
+    // offer), the model that last answered for each classmate here, and whether `$model` is allowed at all.
+    models: null, answered: new Map(), modelsAllowed: true, modelMenuFor: null,
   };
   const messages = $("#messages");
   const input = $("#input");
@@ -159,6 +163,7 @@
     $("#members-title").textContent = `In class — ${state.classmates.length}`;
     for (const name of state.classmates) {
       const spoke = (state.spoke.get(name) || 0) > Date.now() - 4000;
+      const card = paint(make("div", "member-card"), keyOf(name));
       const member = paint(make("button", "member"), keyOf(name));
       member.type = "button";
       member.title = `Mention @${name}`;
@@ -171,7 +176,10 @@
         make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : "in class"));
       member.append(face, text);
       member.onclick = () => { mention(name); if (level() === "narrow") setPanel("members", false); };
-      list.append(member);
+      card.append(member);
+      const model = modelLine(name);
+      if (model) card.append(model);
+      list.append(card);
     }
     const you = make("div", "members-you");
     you.append(make("div", "members-subhead", "You"));
@@ -183,6 +191,84 @@
     me.append(face, text);
     you.append(me);
     list.append(you);
+  }
+
+  // ---- models: who answers with what, and choosing (`$model`, asked in the background) ----------------
+  const personaOf = (name) => state.models?.personas.find((row) => row.display_name === name);
+  const shortModel = (model) => String(model || "").split("/").slice(1).join("/") || String(model || "");
+  function askModels() {
+    if (state.modelsAllowed) transmit({ type: "models", conversation: state.current });
+  }
+  function modelLine(name) {
+    const row = personaOf(name);
+    const answered = state.answered.get(name);
+    if (!state.modelsAllowed || (!row && !answered)) return null;
+    // What she answers with here: the model chosen for this chat, else her own (until the overview arrives, the
+    // one that last answered). Each of her messages shows the model that actually wrote it.
+    const shown = row ? row.model : answered;
+    const line = make("button", "member-model" + (row?.chosen ? " is-chosen" : ""),
+      `${shortModel(shown) || "no model"}${row?.chosen ? " · chosen" : ""} ▾`);
+    line.type = "button";
+    line.title = [answered && `Answered last: ${answered}`, row && `Set here: ${row.model || "none"}${row.chosen ? " (chosen)" : " (her own)"}`]
+      .filter(Boolean).join("\n") + "\nChoose her model in this chat";
+    line.onclick = (event) => { event.stopPropagation(); showModelMenu(name, line); };
+    return line;
+  }
+  function showModelMenu(name, anchor) {
+    const menu = $("#model-menu");
+    menu.replaceChildren();
+    state.modelMenuFor = name;
+    const row = personaOf(name);
+    menu.append(make("div", "menu-label", `${name}'s model here`));
+    const entry = (label, action, current = false) => {
+      const item = make("button", "menu-item" + (current ? " is-current" : ""), label);
+      item.type = "button";
+      item.disabled = !action;
+      if (action) item.onclick = () => { hideModelMenu(); action(); };
+      menu.append(item);
+    };
+    const choose = (model) => transmit({ type: "model", conversation: state.current, persona: row.name, model });
+    if (!row) {
+      entry("Loading…");
+      askModels();
+    } else {
+      entry(row.chosen ? "↺ Her own model" : `✓ Her own (${shortModel(row.model) || "none"})`,
+            row.chosen ? () => choose("reset") : null, !row.chosen);
+      for (const [provider, models] of Object.entries(state.models.models || {})) {
+        if (!models || !models.length) continue;
+        menu.append(make("div", "menu-label", provider));
+        for (const model of models) {
+          const id = `${provider}/${model}`;
+          entry(model, () => choose(id), row.chosen && row.model === id);
+        }
+      }
+      for (const provider of Object.keys(state.models.errors || {})) {
+        menu.append(make("div", "menu-label", `${provider} · unavailable now`));
+      }
+    }
+    menu.hidden = false;
+    const box = anchor.getBoundingClientRect();
+    menu.style.top = `${Math.max(8, Math.min(box.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+    menu.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+    if (Date.now() - (state.models?.at || 0) > 60000) askModels();  // lists are kept fresh enough by the core
+  }
+  function hideModelMenu() { $("#model-menu").hidden = true; state.modelMenuFor = null; }
+  function receiveModels(event) {
+    if (event.purpose === "choose") {
+      toast(event.text || NOTICES[event.code] || "Not changed.");
+      askModels();
+      return;
+    }
+    if (event.conversation !== state.current) return;
+    if (event.ok && event.result.personas) {
+      state.models = { ...event.result, at: Date.now() };
+    } else if (event.code === "not_permitted") {
+      state.modelsAllowed = false;  // `$model` is for admins; the menu stays away
+    }
+    renderMembers();
+    const open = state.modelMenuFor && [...document.querySelectorAll(".member-card")]
+      .find((card) => card.querySelector(".member-name")?.textContent === state.modelMenuFor);
+    if (open?.querySelector(".member-model")) showModelMenu(state.modelMenuFor, open.querySelector(".member-model"));
   }
 
   // ---- chats ---------------------------------------------------------------------------------------
@@ -405,6 +491,11 @@
     name.append(make("span", "", who.name));
     if (item.label) name.append(make("span", "label", item.label));
     name.append(make("span", "time", time(item.at)));
+    if (item.data?.model) {  // the model that wrote it
+      const model = make("span", "time model-tag", `· ${item.data.model}`);
+      model.title = `${item.data.provider}/${item.data.model}`;
+      name.append(model);
+    }
     const bubble = make("div", "bubble");
     if (item.label) {
       const note = make("details", "work-note");
@@ -435,6 +526,10 @@
     row.dataset.at = item.at;
     messages.append(row);
     state.lastId = Math.max(state.lastId, item.id);
+    if (item.speaker && item.data?.model) {
+      state.answered.set(classmateIn(item.speaker) || item.speaker, `${item.data.provider}/${item.data.model}`);
+      if (live) renderMembers();
+    }
     if (live && item.speaker && item.kind === "text" && !item.label) {
       const name = classmateIn(item.speaker);
       if (name) { state.spoke.set(name, Date.now()); renderMembers(); setTimeout(renderMembers, 4100); }
@@ -454,6 +549,10 @@
     localStorage.setItem("webui.chat", conversation);
     state.unread.delete(conversation);
     state.lastId = 0;
+    state.models = null;
+    state.answered = new Map();
+    hideModelMenu();
+    askModels();
     messages.querySelectorAll(".row").forEach((row) => row.remove());
     $("#empty").hidden = false;
     renderChats();
@@ -471,6 +570,7 @@
       const { messages: items } = await response.json();
       if (conversation !== state.current) return;
       items.forEach((item) => append(item));
+      renderMembers();
       scrollDown();
     } catch (error) { /* the next reconnect loads it */ }
   }
@@ -530,6 +630,9 @@
       renderChats();
       renderTyping();
       loadHistory();
+      askModels();
+    } else if (event.type === "models") {
+      receiveModels(event);
     } else if (event.type === "message") {
       if (event.item.conversation === state.current) append(event.item, true);
       else { state.unread.add(event.item.conversation); renderChats(); }
@@ -739,10 +842,12 @@
     if (event.key !== "Escape") return;
     $("#viewer").hidden = true;
     hideMenu();
+    hideModelMenu();
     closePanels();
   });
   document.addEventListener("click", (event) => {
     if (!$("#chat-menu").hidden && !event.target.closest("#chat-menu, .chat-more")) hideMenu();
+    if (!$("#model-menu").hidden && !event.target.closest("#model-menu, .member-model")) hideModelMenu();
   });
 
   messages.addEventListener("click", (event) => {

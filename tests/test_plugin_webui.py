@@ -108,6 +108,29 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["kind"] for item in history], ["user", "text"])
         await ws.close()
 
+    async def test_the_model_menu_asks_and_chooses_quietly_outside_the_chat(self):
+        await self.start()
+        ws, _ = await self.socket()
+        await ws.send_json({"type": "models", "conversation": "classroom"})
+        overview, seen = await self.until(ws, lambda e: e["type"] == "models")
+        self.assertTrue(overview["ok"])
+        self.assertEqual(overview["purpose"], "overview")
+        self.assertEqual(overview["result"]["personas"][0]["model"], "fake/fake-model")
+        await ws.send_json({"type": "model", "conversation": "classroom", "persona": "p", "model": "fake/fake-model"})
+        chosen, more = await self.until(ws, lambda e: e["type"] == "models")
+        self.assertEqual((chosen["purpose"], chosen["result"]["chosen"]), ("choose", True))
+        self.assertEqual(self.core.manager.model_choices.get("webui:classroom", "p"), "fake/fake-model")
+        await ws.send_json({"type": "model", "conversation": "classroom", "persona": "p", "model": "reset"})
+        reset, rest = await self.until(ws, lambda e: e["type"] == "models")
+        self.assertFalse(reset["result"]["chosen"])
+        self.assertNotIn("message", [event["type"] for event in [*seen, *more, *rest]])  # no bubbles
+        self.assertEqual(self.web.store.messages("classroom"), [])  # nor anything in the page's transcript
+        await ws.send_json({"type": "model", "conversation": "classroom", "persona": "p", "model": "x; $call"})
+        await ws.send_json({"type": "models", "conversation": "classroom"})
+        follow, _ = await self.until(ws, lambda e: e["type"] == "models")  # the malformed one was never sent
+        self.assertEqual(follow["purpose"], "overview")
+        await ws.close()
+
     async def test_new_chats_are_their_own_conversations_and_take_their_first_line_as_title(self):
         await self.start()
         ws, _ = await self.socket()

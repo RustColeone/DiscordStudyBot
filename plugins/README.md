@@ -70,6 +70,9 @@ printed at startup) from a laptop or phone at home:
   [`webui/avatars/`](webui/avatars/README.md); until then, coloured initials);
 * the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
   click someone, or type `@`, to ask them directly (`@Luna …` gets Luna's answer alone);
+* under each classmate, the model she answers with in this chat; click it to choose another of the models
+  the providers offer, or her own again (this is `$model`, for admins, asked in the background and kept
+  per chat); each of her messages shows the model that wrote it;
 * work notes fold away; Markdown, code and LaTeX are rendered in the page (KaTeX); files and pictures go
   both ways (drop, paste or 📎);
 * approvals arrive as cards with their tier and buttons; type `$` (or `/`) for the command palette;

@@ -142,6 +142,12 @@ def signature(action: dict) -> str:
     return json.dumps([action["tool"], action["arguments"]], sort_keys=True, ensure_ascii=False)
 
 
+def is_command(text: str) -> bool:
+    """A `$command`, as the core tells them apart (`$` and a letter)."""
+    text = text.strip()
+    return len(text) > 1 and text[0] == "$" and text[1].isalpha()
+
+
 def chinese(text: str) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", text))
 
@@ -541,9 +547,14 @@ class RoomEngine(Engine):
         return merged
 
     def _history(self, session: Session) -> list:
+        """The conversation before this request, without `$commands` and their answers (`$model`'s lists, `$help`):
+        those are for the person who typed them, not part of what the room talks about."""
         limit = int(session.options.get("history_limit") or self.history_limit)
         started = session.trigger.received_at
-        return [item for item in session.history.recent(limit * 2) if item.at < started][-limit:]
+        items = [item for item in session.history.recent(limit * 3) if item.at < started]
+        commands = {item.message_id for item in items if item.direction == "in" and is_command(item.text)}
+        return [item for item in items if not (item.direction == "in" and is_command(item.text))
+                and not (item.direction == "out" and item.reply_to and item.reply_to in commands)][-limit:]
 
     @staticmethod
     def _image_window(session: Session) -> float:

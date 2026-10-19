@@ -150,6 +150,19 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(core.tank.run(run.id).status, "done")
         self.assertTrue({("Luna", "", "Converted."), ("Gemini", "", "Saved.")} <= set(self.spoken(core)))
 
+    async def test_commands_and_their_answers_stay_out_of_the_rooms_history(self):
+        script = Script(Luna=[turn("Hi.")])
+        core = await self.core(script)
+        await iface(core).say("$help")
+        await iface(core).say("We meet at noon.")  # plain talk stays (no one is named, so Luna answers it)
+        await settle(core)
+        await iface(core).say("Luna, when do we meet?")
+        await settle(core)
+        seen = "\n".join(message["content"] for message in script.prompts["Luna"][-1])
+        self.assertIn("We meet at noon.", seen)
+        self.assertNotIn("$help", seen)
+        self.assertNotIn("$memory", seen)  # from the help text that answered it
+
     async def test_question_waits_and_the_answer_resumes_the_same_job(self):
         script = Script(Luna=[turn("Which city?", "needs_input"), turn("Paris it is.")])
         core = await self.core(script)

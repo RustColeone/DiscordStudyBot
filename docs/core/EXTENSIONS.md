@@ -602,8 +602,9 @@ to Luna's) and Grok's provider. The room's `config.yml` overrides them, and core
   (`speaker` set) before tools run; `work_note` is a short public explanation sent with label
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
-* Every persona sees the conversation history (her own messages as hers), the board, recent room
-  messages, shared tool results, the images attached to the run's messages, and only her own diary.
+* Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
+  left out), the board, recent room messages, shared tool results, the images attached to the run's
+  messages, and only her own diary.
 * Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
   person's answer. Both keep the board in the run, so they survive restarts. New messages during a
   run answer waiting questions or open new jobs.
