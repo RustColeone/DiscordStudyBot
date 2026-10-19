@@ -1,8 +1,8 @@
 # $search / $read settings. Copy to config.yml (git-ignored); extension_config.web in core.yml overrides it.
 
 # Where $search looks, in order: the first backend that finds something answers, and the reply says why
-# any before it did not (a rate limit, an error). Leave a backend out to switch it off. One without its key
-# or URL is skipped quietly.
+# any before it did not (a rate limit, an error). Leave a backend out to switch it off; `backends: []`
+# switches search off (and models are not offered it). One without its key or URL is skipped quietly.
 search:
   backends: [google, deepseek, searxng, duckduckgo]
   google: {model: gemini-3.8-flash}   # Google Search through Gemini grounding (GEMINI_API_KEY); also web.maps

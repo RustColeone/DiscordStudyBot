@@ -134,6 +134,21 @@ class SearchBackendTests(unittest.TestCase):
         post.assert_not_called()
         ddgs.assert_not_called()  # left out of the list: off
 
+    def test_an_empty_list_switches_search_off_and_a_missing_one_means_the_default(self):
+        _, searcher = self.searcher({"search": {"backends": []}})
+        self.assertEqual(searcher.order, [])
+        _, searcher = self.searcher({"search": {"backends": None}})  # `backends:` written with nothing after it
+        self.assertEqual(searcher.order, [])
+        _, searcher = self.searcher({"search": {}})
+        self.assertEqual(searcher.order, ["google", "deepseek", "searxng", "duckduckgo"])
+        from types import SimpleNamespace as Context
+        from core.loader import import_extension
+        extension, _ = import_extension(ROOT / "extensions" / "web")
+        names = lambda config: {c.name for c in extension.setup(Context(config=config, log=lambda *a, **k: None,
+                                                                         data_dir=Path("."))).capabilities}
+        self.assertNotIn("web.search", names({"search": {"backends": []}}))  # off: not offered to models
+        self.assertIn("web.search", names({}))
+
     def test_the_older_settings_still_count(self):
         _, searcher = self.searcher({"grounding": False, "grounding_model": "gemini-x", "searxng_url": "http://s.local"})
         self.assertEqual(searcher.order, ["deepseek", "searxng", "duckduckgo"])

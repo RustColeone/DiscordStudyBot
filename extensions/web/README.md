@@ -39,7 +39,9 @@ search:
 ```
 
 * `search.backends`: the order `$search` tries them in. The first that finds something answers; a
-  backend left out is never asked. One without its key or URL is skipped quietly.
+  backend left out is never asked. One without its key or URL is skipped quietly. `backends: []` (or
+  `backends:` with nothing) switches search off, and `web.search` is then not offered at all; without a
+  `backends` key the default order applies.
 * Each backend's own section: `google.model` (the Gemini model, used for maps too), `deepseek.count`
   (results asked for, 1–50; `url` and `api_key_env` can point elsewhere), `searxng.url`.
 * A section may set `kind` to list one kind twice under different names, for example

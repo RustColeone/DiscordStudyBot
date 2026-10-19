@@ -39,7 +39,8 @@ class Searcher:
         # Older settings still count: `grounding: false` leaves Google out, `grounding_model`, `searxng_url`.
         self.grounding_model = str(google.get("model") or config.get("grounding_model") or "gemini-3.8-flash")
         default = [name for name in DEFAULT_BACKENDS if name != "google" or bool(config.get("grounding", True))]
-        self.order = [str(name) for name in (search.get("backends") or default)]
+        # `backends` absent: the default order. Present but empty (`[]`, or nothing written after it): search is off.
+        self.order = [str(name) for name in search["backends"] or []] if "backends" in search else default
         legacy_url = str(config.get("searxng_url") or os.getenv("SEARXNG_URL", "")).strip()
         self.backends = {}
         for name in self.order:
@@ -242,11 +243,14 @@ def setup(context) -> Contributions:
         summary = "\n\n".join(f"## {pod['title']}\n{pod['text']}".rstrip() for pod in pods)
         return ToolResult.ok(summary, data={"query": query, "pods": pods})
 
+    # With no search backends listed, search is off: web.search is not offered (rather than always failing).
+    searching = [Capability("web.search", "Search the web for current information. Returns an answer with sources "
+                            "when available, otherwise result links; read a page for detail.", search,
+                            {"query": {"type": "string"},
+                             "max_results": {"type": "integer", "minimum": 1, "maximum": 10}},
+                            ("query",), Risk.READ, command="search", command_argument="query", timeout_s=60)]
     return Contributions(capabilities=[
-        Capability("web.search", "Search the web for current information. Returns an answer with sources when "
-                   "available, otherwise result links; read a page for detail.", search,
-                   {"query": {"type": "string"}, "max_results": {"type": "integer", "minimum": 1, "maximum": 10}},
-                   ("query",), Risk.READ, command="search", command_argument="query", timeout_s=60),
+        *(searching if searcher.order else []),
         Capability("web.read_page", "Read the text of a public web page or PDF by URL.", read_page,
                    {"url": {"type": "string"}, "max_links": {"type": "integer", "minimum": 0, "maximum": 100}},
                    ("url",), Risk.READ, command="read", command_argument="url", timeout_s=60),
