@@ -280,6 +280,47 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         extension_module(core, "probe").RELEASE.set()
         await settle(core)
 
+    async def crash_after_deciding(self, status="approved", action=None):
+        """Ask for a write, then leave the tank as a crash during the decision would: decided, with the action
+        started, finished or not reached (`action`), and no result reported to the run. Restart."""
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        approval = core.tank.approval(approval_id)
+        core.tank.decide_approval(approval_id, status, "owner:dm")
+        if action:
+            core.tank.start_action(approval["run_id"], approval["call_key"], approval["name"],
+                                   approval["arguments"], "write")
+        if action == "finished":
+            core.tank.finish_action(approval["run_id"], approval["call_key"], {"status": "success",
+                                                                                "summary": "wrote k (before)"})
+        core = await self.restart(core)
+        await settle(core)
+        return core, approval_id
+
+    async def test_an_approved_write_cut_off_while_running_is_reported_uncertain_not_repeated(self):
+        core, approval_id = await self.crash_after_deciding(action="started")
+        self.assertEqual(self.counts(), {})  # not run again
+        self.assertIn("may have taken effect; it was not repeated", iface(core).texts("room")[-1])
+        self.assertEqual(core.tank.runs(("done",))[0].status, "done")
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(self.counts(), {})
+
+    async def test_an_approved_write_cut_off_before_it_ran_is_not_run_without_the_owner(self):
+        core, _ = await self.crash_after_deciding()
+        self.assertEqual(self.counts(), {})
+        self.assertIn("restart came before it ran", iface(core).texts("room")[-1])
+
+    async def test_a_finished_write_whose_report_was_lost_reports_its_result(self):
+        core, _ = await self.crash_after_deciding(action="finished")
+        self.assertEqual(iface(core).texts("room")[-1], "approved: wrote k (before)")
+
+    async def test_a_denial_whose_report_was_lost_reaches_the_run(self):
+        core, _ = await self.crash_after_deciding(status="denied")
+        self.assertEqual(iface(core).texts("room")[-1], "denied")
+
     async def test_preapproved_write_runs_without_asking(self):
         core = await self.core({"permissions": {"*": {"rules": {"tools.*": "auto"}}}})
         await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
@@ -320,6 +361,19 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await iface(core).say("$notes", conversation="guest")
         await settle(core)
         self.assertEqual(iface(core).texts("guest", "text")[-1], "1. buy milk")
+
+    async def test_a_command_cut_off_while_its_approval_ran_is_closed_with_its_outcome(self):
+        core = await self.core()
+        await iface(core).say("$remember buy milk", conversation="guest")
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        core.tank.decide_approval(approval["id"], "approved", "owner:dm")
+        core.tank.start_action(approval["run_id"], approval["call_key"], approval["name"], approval["arguments"],
+                               "write")
+        core = await self.restart(core)
+        await settle(core)
+        self.assertIn("may have taken effect; it was not repeated", iface(core).texts("guest", "text")[-1])
+        self.assertEqual(core.tank.run(approval["run_id"]).status, "done")
 
     async def test_cancel_stops_a_waiting_run_and_expires_its_approval(self):
         core = await self.core()
