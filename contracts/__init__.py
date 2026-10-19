@@ -7,12 +7,14 @@ from contracts.engine import (DIARY_KINDS, Activity, Diary, DiaryNote, Engine, E
 from contracts.extension import Contributions, Extension, ExtensionContext, Setting
 from contracts.interface import Interface, InterfacePort, Operation
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
-from contracts.models import ModelError, ModelRequest, ModelResult, Models
+from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter, ModelError, ModelRequest,
+                              ModelResult, Models, NotConfigured)
 from contracts.stores import Store
 
-CONTRACTS_VERSION = "1.1"
+CONTRACTS_VERSION = "1.2"
 
 __all__ = [
+    "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",
     "Action", "Activity", "Address", "Command", "Option", "Capability", "Contributions", "CONTRACTS_VERSION", "DIARY_KINDS", "Delivery", "Diary",
     "DiaryNote", "Display", "Engine",
     "EngineSpec", "Event", "Extension", "ExtensionContext", "FileRef", "Handler", "History", "HistoryItem",

@@ -414,6 +414,19 @@ def setup(context):
 EXTENSION = Extension("dropin", setup, contracts="1")
 '''
 
+# A provider kind of a module's own (contracts.ModelAdapter): answers "<prefix><model>: <last message>".
+ECHO_KIND = '''
+from contracts import AdapterResult
+
+
+class Echo:
+    def __init__(self, settings):
+        self.prefix = settings["prefix"]
+
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=()):
+        return AdapterResult(f"{self.prefix}{model}: {messages[-1]['content']}")
+'''
+
 
 class PluginTests(CoreCase):
     def plugin(self, config: str) -> Path:
@@ -466,6 +479,29 @@ class PluginTests(CoreCase):
         self.assertIn("sage", core.providers.profiles())
         self.assertFalse(core.providers._sees({"provider": "lab"}))  # core.yml's setting wins over the module's
         self.assertIn("LAB_ACCESS", core.manager.secrets.values)  # its key is kept from models like any other
+
+    async def test_a_module_kind_serves_its_own_providers_and_core_yml_ones(self):
+        from contracts import ModelRequest
+        folder = self.plugin("interface: sage_bot\n")
+        (folder / "extension.py").write_text(ECHO_KIND + DROP_IN.replace(
+            'profiles={"sage": [{"provider": "fake", "model": "big"}]},',
+            'adapters={"echo": Echo}, providers={"lab": {"kind": "echo", "prefix": "lab/"}},\n'
+            '                         profiles={"sage": [{"provider": "lab", "model": "big"}]},'))
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]},
+                                "providers": {"desk": {"kind": "echo", "prefix": "desk/"}},
+                                "profiles": {"desk": [{"provider": "desk", "model": "m"}]}})
+        hello = [{"role": "user", "content": "hi"}]
+        self.assertEqual((await core.providers.generate(ModelRequest(hello, profile="sage"))).text, "lab/big: hi")
+        self.assertEqual((await core.providers.generate(ModelRequest(hello, profile="desk"))).text, "desk/m: hi")
+
+    async def test_a_module_cannot_replace_an_existing_kind(self):
+        from core.config import ConfigError
+        folder = self.plugin("interface: sage_bot\n")
+        (folder / "extension.py").write_text(ECHO_KIND + DROP_IN.replace(
+            'profiles={"sage": [{"provider": "fake", "model": "big"}]},',
+            'adapters={"openai_compatible": Echo}, profiles={"sage": [{"provider": "fake", "model": "big"}]},'))
+        with self.assertRaisesRegex(ConfigError, "dropin: Provider kind 'openai_compatible' already exists"):
+            await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
 
     async def test_configured_profile_can_override_one_using_a_contributed_provider(self):
         folder = self.plugin("interface: sage_bot\n")

@@ -52,6 +52,20 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             Providers({}, {"default": [{"provider": "ghost", "model": "m"}]})
 
+    def test_the_key_comes_from_its_env_variable_else_from_the_settings(self):
+        from core.providers.adapters import NotConfigured, api_key
+        settings = {"api_key_env": "CORE_TEST_KEY", "api_key": "written-in-config"}
+        with patch.dict(os.environ, {"CORE_TEST_KEY": "from-env"}):
+            self.assertEqual(api_key(settings), "from-env")
+        with patch.dict(os.environ, {}):
+            os.environ.pop("CORE_TEST_KEY", None)
+            self.assertEqual(api_key(settings), "written-in-config")
+            with self.assertRaises(NotConfigured):
+                api_key({"api_key_env": "CORE_TEST_KEY"})
+            providers = Providers({"x": {"kind": "openai_compatible", **settings}},
+                                  {"default": [{"provider": "x", "model": "m"}]})
+            self.assertEqual(providers.configured(), ["x"])
+
 
 class FakeOpenAIClient:
     def __init__(self, fail_effort=False):

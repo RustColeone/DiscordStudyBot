@@ -39,6 +39,7 @@ class Providers:
         self._profiles = {name: [dict(candidate) for candidate in candidates]
                           for name, candidates in (profiles or {}).items()}
         self._adapters = dict(adapters or {})
+        self._kinds = dict(ADAPTERS)  # provider kind → adapter factory: the built-in ones, then modules'
         self._record = record or (lambda *args, **kwargs: None)
         self._spacing: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
@@ -46,6 +47,14 @@ class Providers:
             for candidate in candidates:
                 if candidate.get("provider") not in self._settings and candidate.get("provider") not in self._adapters:
                     raise ValueError(f"Profile {name!r} uses unknown provider {candidate.get('provider')!r}")
+
+    def add_kind(self, kind: str, factory) -> None:
+        """A provider kind a module adds (contracts.AdapterFactory); an existing kind is never replaced."""
+        if kind in self._kinds:
+            raise ValueError(f"Provider kind {kind!r} already exists")
+        if not callable(factory):
+            raise ValueError(f"Provider kind {kind!r} needs an adapter factory")
+        self._kinds[kind] = factory
 
     def add_provider(self, name: str, settings: Mapping[str, Any]) -> None:
         """A provider an extension suggests; settings already configured (core.yml) win key by key."""
@@ -69,8 +78,8 @@ class Providers:
         """Providers used by some profile whose API key is present (or that were injected)."""
         import os
         used = {candidate["provider"] for candidates in self._profiles.values() for candidate in candidates}
-        return sorted(name for name in used if name in self._adapters or os.getenv(
-            str(self._settings.get(name, {}).get("api_key_env") or ""), "").strip())
+        return sorted(name for name in used if name in self._adapters or self._settings.get(name, {}).get("api_key")
+                      or os.getenv(str(self._settings.get(name, {}).get("api_key_env") or ""), "").strip())
 
     def _sees(self, candidate: Mapping[str, Any]) -> bool:
         return bool(candidate.get("vision", self._settings.get(candidate["provider"], {}).get("vision", True)))
@@ -91,9 +100,9 @@ class Providers:
         if name not in self._adapters:
             settings = self._settings[name]
             kind = settings.get("kind")
-            if kind not in ADAPTERS:
+            if kind not in self._kinds:
                 raise NotConfigured(f"Provider {name!r} has unknown kind {kind!r}")
-            self._adapters[name] = ADAPTERS[kind](settings)
+            self._adapters[name] = self._kinds[kind](settings)
         return self._adapters[name]
 
     async def generate(self, request: ModelRequest, profile: str | None = None) -> ModelResult:

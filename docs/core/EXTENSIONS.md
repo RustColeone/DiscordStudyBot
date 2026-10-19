@@ -121,6 +121,46 @@ personas:
 A profile is an ordered list of candidates; the next is tried when one fails. An extension may ship
 default personas in `Contributions.personas`; a configured persona with the same name wins.
 
+### Model providers
+
+A module may bring the models it needs. A vendor with an OpenAI-compatible API (most of them) needs only
+a provider of the built-in kind `openai_compatible`; a vendor with an API of its own needs a kind: an
+adapter class (`contracts.ModelAdapter`) whose `complete(...)` makes one request and returns an
+`AdapterResult` with the raw text. The core does the rest: fallback, schema validation, spacing, images.
+
+```python
+import os
+
+from contracts import AdapterResult, Contributions, Extension, NotConfigured, Setting
+
+class Acme:                                    # contracts.ModelAdapter
+    def __init__(self, settings):              # the provider's settings, as in core.yml
+        self.key = os.getenv(settings["api_key_env"], "")
+
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=()):
+        if not self.key:
+            raise NotConfigured("ACME_API_KEY is not set")       # this candidate is skipped
+        ...                                                       # one request to the API
+        return AdapterResult(text, input_tokens, output_tokens, truncated)
+
+def setup(context):
+    return Contributions(adapters={"acme": Acme},
+                         providers={"acme": {"kind": "acme", "api_key_env": "ACME_API_KEY"}},
+                         profiles={"acme_chat": [{"provider": "acme", "model": "acme-large"}]})
+
+EXTENSION = Extension("acme", setup, contracts="1", settings=(
+    Setting("acme_api_key", "Acme API key", "secret", env="ACME_API_KEY"),))
+```
+
+* Kinds register first, then providers, then profiles, so each may use the ones before; core.yml's
+  providers may use a module's kind too. A kind that already exists (built-in or another module's) refuses
+  to load. An adapter may also define `async list_models() -> list[str]`.
+* **Keys, the proper way:** name the variable in `api_key_env`, keep the key in `.env`, and declare it
+  as a `secret` setting so `python -m core setup` asks for it. Keys kept this way are scrubbed from what
+  models see. The built-in kinds also accept `api_key` written in a provider's settings (for example in
+  your module's `config.yml`), and your own kind may read its key from anywhere; the core does not look
+  for keys kept that way and does not protect them. That is the owner's choice.
+
 ## Layout and declaration
 
 ```

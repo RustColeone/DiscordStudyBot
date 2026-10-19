@@ -1,28 +1,19 @@
-"""Thin provider adapters. Each turns one model call into one API request and reports raw text."""
+"""Thin provider adapters, the built-in kinds. Each turns one model call into one API request and reports raw
+text. Modules may add kinds of their own (contracts.ModelAdapter, Contributions.adapters)."""
 
 from __future__ import annotations
 
-import base64
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from contracts.models import AdapterResult, Image, NotConfigured
 
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
                ".webp": "image/webp"}
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGES = 6
-
-
-@dataclass(frozen=True)
-class Image:
-    mime: str
-    data: bytes
-
-    @property
-    def base64(self) -> str:
-        return base64.b64encode(self.data).decode("ascii")
 
 
 def load_images(files) -> list[Image]:
@@ -37,19 +28,6 @@ def load_images(files) -> list[Image]:
         except OSError:
             continue
     return images
-
-
-@dataclass(frozen=True)
-class AdapterResult:
-    text: str
-    input_tokens: int = 0
-    output_tokens: int = 0
-    truncated: bool = False
-    schema_mode: str = ""
-
-
-class NotConfigured(RuntimeError):
-    pass
 
 
 def schema_instruction(schema: Mapping[str, Any]) -> str:
@@ -72,9 +50,12 @@ def with_schema_instruction(messages: Sequence[Mapping[str, str]], schema: Mappi
 
 
 def api_key(settings: Mapping[str, Any]) -> str:
+    """The key from the environment variable `api_key_env` names (.env: kept from models), else `api_key` written
+    in the settings themselves (the owner's choice; nothing protects it)."""
     value = os.getenv(str(settings.get("api_key_env") or ""), "").strip().strip("\"'")
+    value = value or str(settings.get("api_key") or "").strip()
     if not value or value.lower() in {"disabled", "none", "null"}:
-        raise NotConfigured(f"{settings.get('api_key_env')} is not set")
+        raise NotConfigured(f"{settings.get('api_key_env') or 'api_key'} is not set")
     return value
 
 

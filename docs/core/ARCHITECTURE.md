@@ -58,6 +58,10 @@ flowchart TB
 6. Engines never start detached work. Autonomy comes from gateway routines.
 7. Permissions are decided in one place, the Manager, in three layers (access, approval, enforcement).
    Configuration can make a capability stricter than it declares, never weaker.
+8. The core owns how models are called (the Providers block, its fallback, and the built-in kinds
+   `openai_compatible`, `gemini` and `anthropic`), not which vendors exist. Its default vendors and
+   models ([`core/defaults.py`](../../core/defaults.py)) are configuration. A module may add provider
+   kinds of its own, providers and profiles, so a new vendor never needs a core change.
 
 ## Request lifecycle
 

@@ -125,14 +125,19 @@ class Core:
                                paths=[*paths, *self.config.secret_paths])
 
     def _register_defaults(self, loaded: LoadedExtension) -> None:
-        """Providers, profiles, assignments and admission an extension suggests; core.yml and runtime edits
-        win."""
+        """Provider kinds an extension adds; providers, profiles, assignments and admission it suggests (core.yml
+        and runtime edits win)."""
         contributions, name = loaded.contributions, loaded.extension.name
         own = {interface.name for interface in contributions.interfaces}
         for pattern in [*contributions.assignments, *contributions.admission]:
             if pattern.split(":", 1)[0] not in own or ":" not in pattern:
                 raise ConfigError(f"{name}: defaults may only cover its own interfaces, not {pattern!r}")
-        # Providers first, so the extension's own profiles may use them.
+        # Kinds, then providers, then profiles: each may use the ones before.
+        for kind, factory in contributions.adapters.items():
+            try:
+                self.providers.add_kind(kind, factory)
+            except ValueError as error:
+                raise ConfigError(f"{name}: {error}") from error
         for provider, settings in contributions.providers.items():
             self.providers.add_provider(provider, settings)
         for profile, candidates in contributions.profiles.items():

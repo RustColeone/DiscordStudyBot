@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 from contracts.capability import Capability
 from contracts.engine import Engine, Persona
 from contracts.interface import Interface
+from contracts.models import AdapterFactory
 
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -35,12 +36,16 @@ class Contributions:
     `permissions` suggests permission defaults in the core.yml `permissions:` form
     (`{pattern: {use, tiers, rules}}`): `use` and `tiers` only for its own interfaces' addresses, `rules`
     only for its own capabilities. The module's config.yml `permissions:` overrides these, and core.yml
-    overrides both, setting by setting."""
+    overrides both, setting by setting.
+
+    `adapters` adds provider kinds (kind → AdapterFactory) for APIs the built-in kinds do not speak; its
+    providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused."""
 
     interfaces: Sequence[Interface] = ()
     engines: Sequence[Engine] = ()
     capabilities: Sequence[Capability] = ()
     personas: Sequence[Persona] = ()
+    adapters: Mapping[str, AdapterFactory] = field(default_factory=dict)
     providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     profiles: Mapping[str, Sequence[Mapping[str, Any]]] = field(default_factory=dict)
     assignments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)

@@ -1,9 +1,10 @@
-"""Model access through the core's Providers block."""
+"""Model access through the core's Providers block, and the adapter protocol a module may implement."""
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 from contracts.messages import FileRef
 
@@ -61,3 +62,50 @@ class Models(Protocol):
     async def generate(self, request: ModelRequest) -> ModelResult: ...
 
     def profiles(self) -> Sequence[str]: ...
+
+
+# ---- adapters: one provider kind's protocol -------------------------------------------------------------------
+@dataclass(frozen=True)
+class Image:
+    """An image shown with the last user message."""
+
+    mime: str
+    data: bytes
+
+    @property
+    def base64(self) -> str:
+        return base64.b64encode(self.data).decode("ascii")
+
+
+@dataclass(frozen=True)
+class AdapterResult:
+    """One API call's raw answer. `truncated`: the output hit the token limit. `schema_mode`: how the
+    schema was enforced (for example `native`), for the audit log."""
+
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    truncated: bool = False
+    schema_mode: str = ""
+
+
+class NotConfigured(RuntimeError):
+    """Raised by an adapter whose provider cannot be used (no key, missing settings): the candidate is skipped."""
+
+
+class ModelAdapter(Protocol):
+    """Talks to one provider's API: one `complete` call is one request, returning the raw text. The core does
+    the rest (fallback between candidates, schema validation, spacing, images for models that cannot see).
+
+    `messages` use roles `system`, `user` and `assistant`. With `schema`, ask the API for JSON matching it
+    (natively if it can, otherwise in the prompt). `images` go with the last user message. Raise
+    NotConfigured when the provider cannot be used; any other exception moves on to the next candidate.
+    An adapter may also define `async list_models() -> list[str]`, the models its provider offers."""
+
+    async def complete(self, model: str, messages: Sequence[Mapping[str, str]], schema: Mapping[str, Any] | None,
+                       schema_name: str, effort: Effort, max_tokens: int, timeout_s: float,
+                       images: Sequence[Image] = ()) -> AdapterResult: ...
+
+
+# Builds the adapter for one provider from its settings (as in core.yml `providers:`), once, on first use.
+AdapterFactory = Callable[[Mapping[str, Any]], ModelAdapter]
