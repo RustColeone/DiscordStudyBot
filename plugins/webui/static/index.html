@@ -47,7 +47,7 @@
       <section class="messages" id="messages" aria-live="polite">
         <div class="empty" id="empty">
           <div class="empty-wave">👋</div>
-          <div class="empty-title">Everyone's here.</div>
+          <div class="empty-title" id="empty-title">Everyone's here.</div>
           <div class="empty-text">Say hello, <kbd>@</kbd> someone, or drop a file in. Type <kbd>$</kbd> for commands.</div>
         </div>
       </section>
@@ -81,5 +81,16 @@
   <div class="menu" id="chat-menu" role="menu" hidden></div>
   <div class="menu model-menu" id="model-menu" role="menu" hidden></div>
   <div class="viewer" id="viewer" hidden><img alt=""></div>
+  <div class="picker" id="picker" role="dialog" aria-modal="true" aria-labelledby="picker-title" hidden>
+    <form class="picker-card" id="picker-form">
+      <div class="picker-title" id="picker-title">New chat</div>
+      <div class="picker-hint">Who's in it? Pick one classmate for a direct message.</div>
+      <div class="picker-list" id="picker-list"></div>
+      <div class="picker-actions">
+        <button class="picker-cancel" id="picker-cancel" type="button">Cancel</button>
+        <button class="picker-start" id="picker-start" type="submit">Start</button>
+      </div>
+    </form>
+  </div>
 </body>
 </html>

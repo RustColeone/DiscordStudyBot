@@ -79,7 +79,12 @@ printed at startup) from a laptop or phone at home:
   both ways (drop, paste or 📎);
 * approvals arrive as cards with their tier and buttons; type `$` (or `/`) for the command palette;
 * chats in the sidebar, each a separate conversation (`webui:<chat>`): drag to reorder, or ⋯ to rename,
-  pin, move or delete (deleting removes its messages and files from the page; the core keeps its history).
+  pin, move or delete (deleting removes its messages and files from the page; the core keeps its history);
+* ＋ New chat asks who is in it: everyone, a few classmates, or one for a direct message (also 💬 on her
+  card); direct messages have their own heading in the sidebar;
+* a message naming no one gets an answer from whoever's turn it is, and the others may chime in; long
+  chats are summarised as they scroll out of view, and every web chat shares the classmates' diary, so
+  they remember you across the class and your direct messages.
 
 Whoever opens the page is the bot's creator, like the console. So it answers only the local network
 (private and link-local addresses, or `networks:`), refuses other websites in your browser and

@@ -9,7 +9,7 @@ from pathlib import Path
 import aiohttp
 
 from contracts import Address, Reply, Request, Sender
-from tests.core_support import ROOT, iface, make_config, settle, start_core
+from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
 
 PLUGIN = ROOT / "plugins" / "webui"
 
@@ -304,6 +304,102 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         async with self.http.get(f"{self.base}/") as response:
             self.assertEqual(response.status, 200)
         ws, _ = await self.socket()
+        await ws.close()
+
+    # ---- who is in a chat -----------------------------------------------------------------------------
+    async def start_room(self):
+        """The web UI with its own default (the room and the five classmates) and a fake model for each."""
+        spoke = []
+
+        def model(messages, schema):
+            import re
+            speaker = re.search(r"Your name here is (\w+)", messages[0]["content"]).group(1)
+            spoke.append(speaker)
+            return {"status": "complete", "message": f"Hi from {speaker}", "work_note": "", "actions": [], "jobs": []}
+        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(PLUGIN)]
+        self.core = await start_core(self.tmp, {
+            "extensions": paths,
+            "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo"}},
+            "profiles": {name: [{"provider": "fake", "model": name}]
+                         for name in ("luna", "gemini", "claude", "deepseek", "grok")}}, FakeAdapter(handler=model))
+        self.web = iface(self.core, "webui")
+        self.base = f"http://127.0.0.1:{self.web.port_number}"
+        return spoke
+
+    def assignment(self, conversation):
+        return self.web.port.policy(Address("webui", conversation))["assignment"]
+
+    async def test_a_new_chat_has_the_classmates_picked_for_it_and_one_makes_a_direct_chat(self):
+        spoke = await self.start_room()
+        ws, state = await self.socket()
+        self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek"})
+        self.assertEqual(self.assignment("classroom")["options"],
+                         {"history_limit": 40, "compact": True, "chime_in": True, "diary_scope": "webui"})
+        await ws.send_json({"type": "new", "conversation": "chat-two", "title": "New chat",
+                            "personas": ["claude", "luna"]})
+        await self.say(ws, "hello you two", conversation="chat-two")  # sent at once: it waits for the setup
+        answer, seen = await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text")
+        chats = next(e for e in seen if e["type"] == "conversations")["items"]
+        self.assertEqual(next(chat for chat in chats if chat["id"] == "chat-two")["personas"], ["luna", "claude"])
+        assigned = self.assignment("chat-two")
+        self.assertEqual((assigned["pattern"], assigned["engine"], assigned["personas"]),
+                         ("webui:chat-two", "room", ["luna", "claude"]))
+        self.assertEqual(assigned["options"]["diary_scope"], "webui")  # everything else as the web UI's
+        self.assertEqual(assigned["budget"]["model_calls"], 40)
+        await settle(self.core)
+        self.assertEqual(set(spoke), {"Luna", "Claude"})  # Luna in turn; Claude may chime in
+        self.assertEqual([item["kind"] for item in self.web.store.messages("chat-two")],
+                         ["user", "text", "text"])  # the quiet $call shows nowhere
+        spoke.clear()
+        await ws.send_json({"type": "new", "conversation": "dm-gemini", "title": "Gemini", "personas": ["gemini"]})
+        await self.say(ws, "just you and me", conversation="dm-gemini")
+        await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text"
+                         and e["item"]["conversation"] == "dm-gemini")
+        await settle(self.core)
+        self.assertEqual((spoke, self.assignment("dm-gemini")["personas"]), (["Gemini"], ["gemini"]))
+        self.assertEqual(self.web.store.conversation("dm-gemini")["title"], "Gemini")  # not its first line
+        await ws.close()
+
+    async def test_picking_the_whole_class_or_nobody_real_sets_no_assignment(self):
+        await self.start_room()
+        ws, _ = await self.socket()
+        await ws.send_json({"type": "new", "conversation": "chat-all", "title": "New chat",
+                            "personas": ["grok", "luna", "gemini", "claude", "deepseek"]})
+        await self.until(ws, lambda e: e["type"] == "conversations")
+        self.assertEqual(self.assignment("chat-all")["pattern"], "webui:*")
+        self.assertEqual(self.web.store.conversation("chat-all")["personas"],
+                         ["luna", "gemini", "claude", "deepseek", "grok"])
+        for chosen in (["luna", "root"], [], "luna", [{"x": 1}]):
+            await ws.send_json({"type": "new", "conversation": "chat-bad", "title": "x", "personas": chosen})
+            error, _ = await self.until(ws, lambda e: e["type"] == "error")
+            self.assertIn("Pick classmates", error["text"])
+        self.assertIsNone(self.web.store.conversation("chat-bad"))
+        await ws.close()
+
+    async def test_deleting_a_chat_removes_its_own_assignment(self):
+        await self.start_room()
+        ws, _ = await self.socket()
+        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        await self.until(ws, lambda e: e["type"] == "conversations")
+        for _ in range(50):
+            if self.assignment("dm-luna")["pattern"] == "webui:dm-luna":
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual(self.assignment("dm-luna")["personas"], ["luna"])
+        await ws.send_json({"type": "delete", "conversation": "dm-luna"})
+        await self.until(ws, lambda e: e["type"] == "deleted")
+        for _ in range(50):
+            if self.assignment("dm-luna")["pattern"] == "webui:*":
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:*")
+        self.assertIsNone(self.web.store.conversation("dm-luna"))  # the answer did not bring the chat back
+        # A chat the core cannot give those classmates (here: an engine for one persona) is not kept.
+        self.core.manager.set_assignment("webui:*", {"engine": "probe", "personas": ["p"]})
+        await ws.send_json({"type": "new", "conversation": "chat-pair", "title": "x", "personas": ["luna", "grok"]})
+        error, _ = await self.until(ws, lambda e: e["type"] == "error")
+        self.assertIn("Couldn't start that chat", error["text"])
+        self.assertIsNone(self.web.store.conversation("chat-pair"))
         await ws.close()
 
     async def test_the_room_is_the_default_for_its_conversations(self):

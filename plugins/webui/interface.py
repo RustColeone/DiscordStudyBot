@@ -41,6 +41,9 @@ INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "audio/mpe
 LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
 DECISION = re.compile(r"^\$(approve|deny)\s+([0-9a-f]{4,12})(\s+always)?\s*$", re.I)
 # The member list's model menu asks the core with `$model` in the background (see _quiet_command).
+MODEL_PURPOSES = ("overview", "choose")
+DISPLAY = {"luna": "Luna", "gemini": "Gemini", "claude": "Claude", "deepseek": "DeepSeek", "grok": "Grok"}
+QUIET_TIMEOUT_S = 20
 PERSONA = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 MODEL = re.compile(r"^(reset|[A-Za-z0-9._-]{1,40}/[A-Za-z0-9._:/@+-]{1,160})$")
 COOKIE = "webui_session"
@@ -110,8 +113,12 @@ class WebUI(Interface):
         self.user_id = str(config.get("user_id", "creator"))
         self.user_name = str(config.get("user_name") or getpass.getuser() or "You")
         self.title = str(config.get("title", "Study Room"))
-        self.classmates = [str(item) for item in config.get("classmates")
-                           or ["Luna", "Gemini", "Claude", "DeepSeek", "Grok"]]
+        # Who may be in a chat (`personas`, in order) and their names on the page (`classmates`, the same order).
+        self.personas = [str(item) for item in config.get("personas") or list(DISPLAY)]
+        shown = [str(item) for item in config.get("classmates") or []]
+        self.classmates = [shown[index] if index < len(shown) else DISPLAY.get(name, name.capitalize())
+                           for index, name in enumerate(self.personas)]
+        self.roster = [{"name": name, "display": display} for name, display in zip(self.personas, self.classmates)]
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
         self.networks = [ipaddress.ip_network(str(item), strict=False) for item in config.get("networks") or []]
         upload_mb = float(config.get("max_upload_mb", 50))
@@ -122,7 +129,8 @@ class WebUI(Interface):
         self._sockets: set[web.WebSocketResponse] = set()
         self._progress: dict[str, dict] = {}  # run (or conversation) → the latest progress event
         self._failures: dict[str, deque] = {}
-        self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose}: the page's own `$model` asks
+        self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose, future}: the page's own commands
+        self._setups: dict[str, asyncio.Future] = {}  # a new chat whose classmates are being set up
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
 
@@ -332,7 +340,7 @@ class WebUI(Interface):
                      "examples": [example for example in command.examples if example]}
                     for command in self.port.commands()]
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
-                "classmates": self.classmates, "avatars": self.avatars(), "commands": commands,
+                "classmates": self.classmates, "roster": self.roster, "avatars": self.avatars(), "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
                 "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb}
 
@@ -367,7 +375,8 @@ class WebUI(Interface):
         if not CONVERSATION_ID.fullmatch(conversation):
             return
         if kind == "new":
-            self.store.ensure(conversation, str(event.get("title") or "New chat")[:80])
+            if self.store.conversation(conversation) is None:
+                await self._new(ws, conversation, str(event.get("title") or "New chat")[:80], event.get("personas"))
             await self._broadcast({"type": "conversations", "items": self.store.conversations()})
         elif kind == "rename":
             if self.store.conversation(conversation):
@@ -381,34 +390,101 @@ class WebUI(Interface):
         elif kind == "send":
             await self._send(ws, conversation, event)
         elif kind == "models":  # the member list's model menu: who answers with what, and what is offered
-            await self._quiet_command(ws, conversation, "$model", "overview")
+            await self._ask_models(ws, conversation, "$model", "overview")
         elif kind == "model":  # a choice from that menu (or `reset`)
             persona, model = str(event.get("persona") or ""), str(event.get("model") or "")
             if PERSONA.fullmatch(persona) and MODEL.fullmatch(model):
-                await self._quiet_command(ws, conversation, f"$model {persona} {model}", "choose")
+                await self._ask_models(ws, conversation, f"$model {persona} {model}", "choose")
 
-    async def _quiet_command(self, ws: web.WebSocketResponse, conversation: str, text: str, purpose: str) -> None:
-        """A `$command` the page sends for itself: it is not shown in the chat, and its answer comes back to the
-        page as a `models` event (with the command's result data) instead of a bubble. The core still sees and
-        records it like a typed command (the room leaves commands out of what its characters read)."""
+    async def _quiet_command(self, conversation: str, text: str, purpose: str) -> asyncio.Future:
+        """A `$command` the page sends for itself: it is not shown in the chat, and its answer comes back as
+        data instead of a bubble (the returned future: {ok, code, text, result}). The core still sees and records
+        it like a typed command (the room leaves commands out of what its characters read)."""
         key = f"web-quiet-{uuid.uuid4().hex}"
         while len(self._quiet) >= 100:  # answers that never came (the core was restarted, say)
-            self._quiet.pop(next(iter(self._quiet)))
-        self._quiet[key] = {"conversation": conversation, "purpose": purpose}
+            lost = self._quiet.pop(next(iter(self._quiet)))["future"]
+            if not lost.done():
+                lost.set_result({"ok": False, "code": "lost", "text": "", "result": {}})
+        future = asyncio.get_running_loop().create_future()
+        self._quiet[key] = {"conversation": conversation, "purpose": purpose, "future": future}
         result = await self.port.submit(Request(
             id=key, address=Address(self.name, conversation), sender=Sender(self.user_id, self.user_name), text=text,
             received_at=time.time(), is_direct=True, mentions_me=True, display=self.display))
         if not result.accepted:
             self._quiet.pop(key, None)
-            await ws.send_json({"type": "models", "conversation": conversation, "purpose": purpose, "ok": False,
-                                "code": result.reason, "text": "", "result": {}})
+            if not future.done():
+                future.set_result({"ok": False, "code": result.reason, "text": "", "result": {}, "refused": True})
+        return future
+
+    async def _quietly(self, conversation: str, text: str, purpose: str) -> dict:
+        """A quiet command, waiting for its answer."""
+        future = await self._quiet_command(conversation, text, purpose)
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), QUIET_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            return {"ok": False, "code": "timeout", "text": "", "result": {}}
+
+    async def _ask_models(self, ws: web.WebSocketResponse, conversation: str, text: str, purpose: str) -> None:
+        """The model menu's `$model`: its answer is broadcast as a `models` event when it comes; a refusal is told
+        to this page at once."""
+        future = await self._quiet_command(conversation, text, purpose)
+        if future.done() and future.result().get("refused"):
+            answer = {key: value for key, value in future.result().items() if key != "refused"}
+            await ws.send_json({"type": "models", "conversation": conversation, "purpose": purpose, **answer})
+
+    # ---- who is in a chat -----------------------------------------------------------------------------
+    async def _new(self, ws: web.WebSocketResponse, conversation: str, title: str, chosen) -> None:
+        """A new chat, with the whole class (`chosen` absent) or the classmates picked for it; one classmate
+        makes a direct chat with her. A chat whose classmates differ from the web UI's assignment gets its own
+        (`core.set_assignment`, asked quietly as the creator); messages sent to it meanwhile wait for that."""
+        if chosen is None:
+            self.store.ensure(conversation, title)
+            return
+        picked = {str(item) for item in chosen[:50]} if isinstance(chosen, list) else set()
+        personas = [name for name in self.personas if name in picked]
+        if not personas or len(personas) != len(picked):
+            await ws.send_json({"type": "error", "text": "Pick classmates from the list."})
+            return
+        self.store.ensure(conversation, title, personas)
+        await self._broadcast({"type": "conversations", "items": self.store.conversations()})
+        setup = asyncio.get_running_loop().create_future()
+        self._setups[conversation] = setup
+        try:
+            problem = await self._assign(conversation, personas)
+        finally:
+            self._setups.pop(conversation, None)
+            setup.set_result(None)
+        if problem:
+            await self._delete(conversation)
+            await ws.send_json({"type": "error", "text": f"Couldn't start that chat: {problem}"})
+
+    async def _assign(self, conversation: str, personas: list[str]) -> str:
+        """Give one chat these personas, keeping everything else of the assignment it has now. Returns what went
+        wrong, or "" (checked against the core's policy, not the command's wording)."""
+        address = Address(self.name, conversation)
+        base = self.port.policy(address).get("assignment")
+        if base is None:
+            return "no engine is assigned to the web UI's chats"
+        if list(base["personas"]) == personas:
+            return ""
+        value = {key: item for key, item in base.items() if key not in ("pattern", "since")}
+        arguments = {"pattern": str(address), "assignment": {**value, "personas": personas}}
+        answer = await self._quietly(conversation, "$call core.set_assignment "
+                                     + json.dumps(arguments, ensure_ascii=False), "assign")
+        now = self.port.policy(address).get("assignment") or {}
+        if now.get("pattern") == str(address) and list(now.get("personas") or []) == personas:
+            self.port.log("chat_assigned", personas=len(personas))
+            return ""
+        return answer.get("text") or answer.get("code") or "the core did not take it"
 
     async def _delete(self, conversation: str) -> None:
-        """Remove a chat from the page: its open work is cancelled and its transcript and files are deleted.
-        (The core keeps its own history of the conversation, as for any other interface.)"""
+        """Remove a chat from the page: its open work is cancelled, its transcript and files are deleted, and
+        its own assignment (from the new-chat picker) is removed. (The core keeps its own history of the
+        conversation, as for any other interface.)"""
         if self.store.conversation(conversation) is None:
             return
-        await self.port.cancel(Address(self.name, conversation), "chat deleted in the web UI")
+        address = Address(self.name, conversation)
+        await self.port.cancel(address, "chat deleted in the web UI")
         kept = {(self.data_dir / "files").resolve(), (self.data_dir / "uploads").resolve()}
         for path in self.store.delete(conversation):
             if path.resolve().parent.parent in kept:  # only the file's own folder under files/ or uploads/
@@ -420,6 +496,9 @@ class WebUI(Interface):
         self.port.log("chat_deleted")
         await self._broadcast({"type": "deleted", "conversation": conversation,
                                "items": self.store.conversations()})
+        if (self.port.policy(address).get("assignment") or {}).get("pattern") == str(address):
+            await self._quietly(conversation, "$call core.delete_assignment "
+                                + json.dumps({"pattern": str(address)}), "unassign")
 
     async def _send(self, ws: web.WebSocketResponse, conversation: str, event: dict) -> None:
         request_id = str(event.get("id") or "")[:64] or uuid.uuid4().hex
@@ -431,6 +510,9 @@ class WebUI(Interface):
                 files.append(record)
         if not text.strip() and not files:
             return
+        setup = self._setups.get(conversation)
+        if setup is not None:  # its own assignment first, or the message would go to the whole class
+            await asyncio.wait({setup}, timeout=QUIET_TIMEOUT_S + 5)
         record = self.store.conversation(conversation) or self.store.ensure(conversation, "New chat")
         if record["title"] == "New chat" and text.strip() and not text.startswith("$"):
             self.store.rename(conversation, text.strip().splitlines()[0][:48])
@@ -481,23 +563,27 @@ class WebUI(Interface):
             result = json.loads(reply.data.get("result") or "{}")
         except ValueError:
             result = {}
-        await self._broadcast({"type": "models", "conversation": quiet["conversation"], "purpose": quiet["purpose"],
-                               "ok": reply.kind == "text", "code": reply.code or "", "text": reply.text,
-                               "result": result if isinstance(result, dict) else {}})
+        answer = {"ok": reply.kind == "text", "code": reply.code or "", "text": reply.text,
+                  "result": result if isinstance(result, dict) else {}}
+        if not quiet["future"].done():
+            quiet["future"].set_result(answer)
+        if quiet["purpose"] in MODEL_PURPOSES:
+            await self._broadcast({"type": "models", "conversation": quiet["conversation"],
+                                   "purpose": quiet["purpose"], **answer})
         return Delivery(True, message_id=f"quiet-{reply.id}")
 
     async def deliver(self, reply: Reply) -> Delivery:
         if self.store is None:
             return Delivery(False, detail="not_started")
+        quiet = self._quiet.get(reply.in_reply_to or "")
+        if quiet is not None:  # (before the chat is re-created: removing a deleted chat's assignment answers too)
+            return await self._answer_quietly(reply, quiet)
         conversation = reply.address.conversation
         if not CONVERSATION_ID.fullmatch(conversation):
             conversation = DEFAULT_CONVERSATION
         if self.store.conversation(conversation) is None:
             self.store.ensure(conversation, "Notices" if conversation.startswith("_") else conversation)
             await self._broadcast({"type": "conversations", "items": self.store.conversations()})
-        quiet = self._quiet.get(reply.in_reply_to or "")
-        if quiet is not None:
-            return await self._answer_quietly(reply, quiet)
         key = reply.run_id or conversation
         if reply.kind == "progress":
             event = {"type": "progress", "conversation": conversation, "run_id": key, "text": reply.text,

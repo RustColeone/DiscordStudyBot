@@ -20,6 +20,10 @@ from contracts import Contributions, Extension, Setting
 from .interface import WebUI
 
 CLASSMATES = ["luna", "gemini", "claude", "deepseek", "grok"]
+# How the room behaves here (the assignment's `options`, merged under `assignment: {options: ...}`): a long
+# window with a rolling summary, classmates who chime in, and one diary shared by every web chat, so a
+# classmate remembers you across the class and your direct messages with her.
+OPTIONS = {"history_limit": 40, "compact": True, "chime_in": True, "diary_scope": "webui"}
 
 
 def setup(context) -> Contributions:
@@ -27,10 +31,12 @@ def setup(context) -> Contributions:
     name = str(config.get("interface", "webui"))
     config["passphrase"] = str(config.get("passphrase") or os.getenv(str(config.get("passphrase_env",
                                                                                      "WEBUI_PASSPHRASE")), ""))
+    config["personas"] = [str(name) for name in config.get("personas") or CLASSMATES]
     interface = WebUI(name, config, context.data_dir, Path(__file__).resolve().parent)
-    assignment = {"engine": "room", "personas": list(config.get("personas") or CLASSMATES),
+    custom = dict(config.get("assignment") or {})
+    assignment = {"engine": "room", "personas": list(config["personas"]),
                   "budget": {"model_calls": 40, "tool_calls": 24, "seconds": 900},
-                  **dict(config.get("assignment") or {})}
+                  **custom, "options": {**OPTIONS, **dict(custom.get("options") or {})}}
     return Contributions(interfaces=[interface], assignments={f"{name}:*": assignment},
                          admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": False}})
 

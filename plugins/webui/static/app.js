@@ -26,7 +26,7 @@
     locked: "🔧 The bot is in maintenance right now.",
   };
   const state = {
-    title: "Study Room", user: { name: "You" }, classmates: [], avatars: new Set(), commands: [],
+    title: "Study Room", user: { name: "You" }, classmates: [], roster: [], avatars: new Set(), commands: [],
     conversations: [], current: localStorage.getItem("webui.chat") || "classroom", lastId: 0,
     progress: new Map(), unread: new Set(), pending: [], files: [], ws: null, retry: 0, paletteIndex: 0,
     spoke: new Map(), menuFor: null, dragging: null, drafts: new Map(),
@@ -69,6 +69,11 @@
   const initial = (name) => (String(name || "?").trim().charAt(0) || "?").toUpperCase();
   const classmateIn = (text) => state.classmates.find((name) => String(text || "").toLowerCase()
     .startsWith(name.toLowerCase()));
+  // Who is in a chat: the classmates picked for it, or (picked by nobody) the whole class. One makes it direct.
+  const displayOf = (name) => state.roster.find((item) => item.name === name)?.display || name;
+  const chatOf = (id) => state.conversations.find((chat) => chat.id === id);
+  const membersOf = (chat) => (chat?.personas ? chat.personas.map(displayOf) : state.classmates);
+  const isDirect = (chat) => chat?.personas?.length === 1;
 
   // ---- panels: chats on the left, classmates on the right ------------------------------------------
   // Three widths: wide shows both panels, medium the chats only, narrow neither (they slide over the chat
@@ -160,8 +165,10 @@
       const name = classmateIn(event.text);
       if (name) typing.add(name);
     }
-    $("#members-title").textContent = `In class — ${state.classmates.length}`;
-    for (const name of state.classmates) {
+    const chat = chatOf(state.current);
+    const members = membersOf(chat);
+    $("#members-title").textContent = isDirect(chat) ? "Direct message" : `In this chat — ${members.length}`;
+    for (const name of members) {
       const spoke = (state.spoke.get(name) || 0) > Date.now() - 4000;
       const card = paint(make("div", "member-card"), keyOf(name));
       const member = paint(make("button", "member"), keyOf(name));
@@ -176,7 +183,18 @@
         make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : "in class"));
       member.append(face, text);
       member.onclick = () => { mention(name); if (level() === "narrow") setPanel("members", false); };
-      card.append(member);
+      const row = make("div", "member-row");
+      row.append(member);
+      const persona = state.roster.find((item) => item.display === name)?.name;
+      if (persona && !isDirect(chat)) {
+        const direct = make("button", "member-dm", "💬");
+        direct.type = "button";
+        direct.title = `Message ${name}`;
+        direct.setAttribute("aria-label", `Message ${name}`);
+        direct.onclick = () => { startChat([persona]); if (level() === "narrow") setPanel("members", false); };
+        row.append(direct);
+      }
+      card.append(row);
       const model = modelLine(name);
       if (model) card.append(model);
       list.append(card);
@@ -279,13 +297,18 @@
   function renderChats() {
     const list = $("#chats");
     list.replaceChildren();
-    for (const chat of state.conversations) {
-      const item = make("div", "chat" + (chat.id === state.current ? " is-current" : ""));
+    // Group chats first, then direct messages, each in the order the user arranged.
+    const direct = state.conversations.filter(isDirect);
+    for (const chat of [...state.conversations.filter((item) => !isDirect(item)), ...direct]) {
+      if (chat === direct[0]) list.append(make("div", "chats-subhead", "Direct messages"));
+      const item = make("div", "chat" + (chat.id === state.current ? " is-current" : "") + (isDirect(chat) ? " is-direct" : ""));
       item.draggable = true;
       item.dataset.id = chat.id;
       const name = make("button", "chat-name", chat.title || chat.id);
       name.type = "button";
+      name.title = chat.personas ? membersOf(chat).join(", ") : "The whole class";
       name.onclick = () => { open(chat.id); if (level() === "narrow") setPanel("sidebar", false); };
+      if (isDirect(chat)) name.prepend(avatar(membersOf(chat)[0]));
       item.append(name);
       if (chat.pinned) item.append(make("span", "chat-pin", "📌"));
       if (state.unread.has(chat.id)) item.append(make("span", "dot"));
@@ -322,6 +345,10 @@
     const current = state.conversations.find((chat) => chat.id === state.current);
     $("#chat-title").textContent = current ? current.title : "New chat";
     document.title = `${current ? current.title + " · " : ""}${state.title}`;
+    const members = membersOf(current);
+    $("#empty-title").textContent = isDirect(current) ? `Just you and ${members[0]}.`
+      : current?.personas ? `${members.join(", ")} are here.` : "Everyone's here.";
+    input.placeholder = isDirect(current) ? `Message ${members[0]}…` : "Message the class…";
   }
 
   function move(id, target, below) {
@@ -622,7 +649,8 @@
     if (event.type === "hello") {
       const s = event.state;
       Object.assign(state, { title: s.title, user: s.user, classmates: s.classmates, commands: s.commands,
-                             conversations: s.conversations, avatars: new Set(s.avatars) });
+                             conversations: s.conversations, avatars: new Set(s.avatars),
+                             roster: s.roster || s.classmates.map((name) => ({ name: keyOf(name), display: name })) });
       state.progress = new Map(s.progress.map((item) => [item.run_id, item]));
       $("#brand").textContent = s.title;
       renderMembers();
@@ -664,6 +692,8 @@
     } else if (event.type === "progress_clear") {
       state.progress.delete(event.run_id);
       renderTyping();
+    } else if (event.type === "error") {
+      toast(event.text);
     } else if (event.type === "ack" && !event.ok) {
       toast(event.reason === "disabled" ? "This chat is switched off." : `Not sent (${event.reason}).`);
     }
@@ -728,7 +758,7 @@
     const at = /(?:^|\s)@(\w*)$/.exec(input.value.slice(0, input.selectionStart ?? input.value.length));
     if (at) {
       const word = at[1].toLowerCase();
-      return state.classmates.filter((name) => name.toLowerCase().startsWith(word))
+      return membersOf(chatOf(state.current)).filter((name) => name.toLowerCase().startsWith(word))
         .map((name) => ({ kind: "mention", item: name }));
     }
     return [];
@@ -847,6 +877,7 @@
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     $("#viewer").hidden = true;
+    hidePicker();
     hideMenu();
     hideModelMenu();
     closePanels();
@@ -874,12 +905,56 @@
     }
   });
 
-  $("#new-chat").onclick = () => {
-    const id = `chat-${Date.now().toString(36)}`;
-    transmit({ type: "new", conversation: id, title: "New chat" });
-    state.conversations.unshift({ id, title: "New chat" });
+  // ---- new chats: pick who is in it (one classmate: a direct message with her) -----------------------
+  function startChat(personas) {
+    if (personas.length === 1) {
+      const existing = state.conversations.find((chat) => isDirect(chat) && chat.personas[0] === personas[0]);
+      if (existing) { open(existing.id); return; }
+    }
+    const everyone = personas.length === state.roster.length;
+    const id = `${personas.length === 1 ? "dm" : "chat"}-${Date.now().toString(36)}`;
+    const title = personas.length === 1 ? displayOf(personas[0]) : "New chat";
+    state.conversations.unshift({ id, title, personas: everyone ? null : personas });  // shown at once; the
+    transmit({ type: "new", conversation: id, title, ...(everyone ? {} : { personas }) });  // server's list follows
     open(id);
-  };
+  }
+  function showPicker() {
+    const list = $("#picker-list");
+    list.replaceChildren();
+    for (const { name, display } of state.roster) {
+      const option = paint(make("label", "picker-option"), keyOf(display));
+      const box = make("input");
+      box.type = "checkbox";
+      box.value = name;
+      box.checked = true;
+      box.onchange = pickerChanged;
+      option.append(box, avatar(display), make("span", "picker-name", display));
+      list.append(option);
+    }
+    pickerChanged();
+    $("#picker").hidden = false;
+    $("#picker-start").focus();
+  }
+  const picked = () => [...document.querySelectorAll("#picker-list input:checked")].map((box) => box.value);
+  function pickerChanged() {
+    const chosen = picked();
+    $("#picker-start").disabled = !chosen.length;
+    $("#picker-start").textContent = !chosen.length ? "Pick someone" : chosen.length === 1
+      ? `Message ${displayOf(chosen[0])}` : chosen.length === state.roster.length ? "Start with everyone"
+        : `Start with ${chosen.length}`;
+  }
+  const hidePicker = () => { $("#picker").hidden = true; };
+  $("#picker-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const chosen = picked();
+    if (!chosen.length) return;
+    hidePicker();
+    startChat(chosen);
+    if (level() === "narrow") setPanel("sidebar", false);
+  });
+  $("#picker-cancel").onclick = hidePicker;
+  $("#picker").addEventListener("click", (event) => { if (event.target.id === "picker") hidePicker(); });
+  $("#new-chat").onclick = showPicker;
   $("#chat-title").onclick = () => {
     rename(state.conversations.find((chat) => chat.id === state.current) || { id: state.current, title: "" });
   };

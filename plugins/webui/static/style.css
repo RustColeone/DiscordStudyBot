@@ -75,6 +75,10 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .chat.is-dragging { opacity: .4; }
 .chat.drop-above { box-shadow: inset 0 3px 0 -1px var(--accent); }
 .chat.drop-below { box-shadow: inset 0 -3px 0 -1px var(--accent); }
+.chats-subhead { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+                 color: var(--muted); padding: 12px 10px 2px; }
+.chat.is-direct .chat-name { display: flex; align-items: center; gap: 8px; padding-top: 5px; padding-bottom: 5px; }
+.chat-name .avatar { width: 26px; height: 26px; font-size: .78rem; }
 @media (hover: none) { .chat-more { opacity: 1; } }
 .menu { position: fixed; z-index: 40; background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
         box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; min-width: 180px; }
@@ -122,6 +126,12 @@ button.member:hover { background: color-mix(in srgb, var(--paper) 75%, transpare
 .member.is-speaking { background: color-mix(in srgb, var(--c) 16%, var(--paper)); }
 /* each classmate's model: the one that last answered here; the line opens the model menu */
 .member-card { display: flex; flex-direction: column; }
+.member-row { display: flex; align-items: center; }
+.member-dm { flex: 0 0 auto; border: 0; background: transparent; border-radius: 10px; padding: 4px 7px; font-size: .95rem;
+             opacity: 0; }
+.member-card:hover .member-dm, .member-dm:focus-visible { opacity: .85; }
+.member-dm:hover { opacity: 1; background: color-mix(in srgb, var(--paper) 75%, transparent); }
+@media (hover: none) { .member-dm { opacity: .7; } }
 .member-model { align-self: flex-start; max-width: calc(100% - 50px); margin: -7px 0 3px 50px; padding: 1px 6px;
                 border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: .72rem;
                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -290,6 +300,26 @@ button.member:hover { background: color-mix(in srgb, var(--paper) 75%, transpare
 .viewer { position: fixed; inset: 0; background: rgba(20, 14, 10, .82); display: grid; place-items: center; z-index: 30;
           cursor: zoom-out; }
 .viewer[hidden] { display: none; }
+/* the new-chat picker: who is in it */
+.picker { position: fixed; inset: 0; z-index: 35; display: grid; place-items: center; padding: 16px;
+          background: rgba(40, 28, 18, .35); }
+.picker[hidden] { display: none; }
+.picker-card { width: min(380px, 100%); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: 10px;
+               background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+               padding: 18px; }
+.picker-title { font-weight: 700; font-size: 1.1rem; }
+.picker-hint { color: var(--muted); font-size: .88rem; }
+.picker-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
+.picker-option { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 12px; cursor: pointer; }
+.picker-option:hover { background: var(--panel); }
+.picker-option input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+.picker-option .avatar { width: 34px; height: 34px; }
+.picker-name { font-weight: 700; color: var(--ci); }
+.picker-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.picker-actions button { border: 0; border-radius: 12px; padding: 8px 14px; font-weight: 600; }
+.picker-cancel { background: var(--panel); }
+.picker-start { background: var(--accent); color: var(--accent-ink); }
+.picker-start:disabled { opacity: .5; cursor: default; }
 .viewer img { max-width: 94vw; max-height: 94vh; border-radius: 12px; }
 body.is-dragging .composer-row { border: 2px dashed var(--accent); }
 

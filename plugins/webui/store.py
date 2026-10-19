@@ -40,32 +40,42 @@ class Store:
                 self._db.execute("ALTER TABLE conversations ADD COLUMN position REAL")
                 self._db.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
                 self._db.execute("UPDATE conversations SET position = -updated_at")
+            if "personas" not in columns:
+                # Who is in each chat (a JSON list of persona names); NULL: the web UI's whole roster.
+                self._db.execute("ALTER TABLE conversations ADD COLUMN personas TEXT")
 
     def close(self) -> None:
         with self._lock:
             self._db.close()
 
     # ---- conversations ----------------------------------------------------------------------------
+    @staticmethod
+    def _row(row) -> dict[str, Any]:
+        value = dict(row)
+        value["personas"] = json.loads(value["personas"]) if value.get("personas") else None
+        return value
+
     def conversations(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._db.execute("SELECT * FROM conversations ORDER BY pinned DESC, position, created_at DESC"
                                     ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._row(row) for row in rows]
 
     def conversation(self, conversation: str) -> dict[str, Any] | None:
         with self._lock:
             row = self._db.execute("SELECT * FROM conversations WHERE id=?", (conversation,)).fetchone()
-        return dict(row) if row else None
+        return self._row(row) if row else None
 
-    def ensure(self, conversation: str, title: str = "") -> dict[str, Any]:
+    def ensure(self, conversation: str, title: str = "", personas: list[str] | None = None) -> dict[str, Any]:
         now = time.time()
         with self._lock:
             top = self._db.execute("SELECT MIN(position) FROM conversations").fetchone()[0]
-            self._db.execute("INSERT OR IGNORE INTO conversations(id, title, created_at, updated_at, position) "
-                             "VALUES(?,?,?,?,?)", (conversation, title or conversation, now, now,
-                                                   (top if top is not None else 0) - 1))
+            self._db.execute("INSERT OR IGNORE INTO conversations(id, title, created_at, updated_at, position, personas) "
+                             "VALUES(?,?,?,?,?,?)", (conversation, title or conversation, now, now,
+                                                     (top if top is not None else 0) - 1,
+                                                     json.dumps(personas) if personas else None))
             row = self._db.execute("SELECT * FROM conversations WHERE id=?", (conversation,)).fetchone()
-        return dict(row)
+        return self._row(row)
 
     def rename(self, conversation: str, title: str) -> None:
         with self._lock:
