@@ -112,9 +112,11 @@ class SharedProfileTests(unittest.IsolatedAsyncioTestCase):
         self.fake = ListingAdapter(["fake-model"], handler=lambda messages, schema: "from fake")
         self.other = ListingAdapter(["m2"], handler=lambda messages, schema: "from other")
         config = make_config(Path(self._tmp.name), {
-            "personas": {"q": {"display_name": "Quinn", "prompt": "You are Quinn.", "profile": "default"}},
+            "personas": {"q": {"display_name": "Quinn", "prompt": "You are Quinn.", "profile": "default"},
+                         "r": {"display_name": "Pat", "prompt": "You are the other Pat.", "profile": "default"}},
             "assignments": {"*": {"engine": "probe_many", "personas": ["p", "q"]}, "chat:solo": {"engine": "probe",
-                                                                                         "personas": ["p"]}}})
+                                                                                         "personas": ["p"]},
+                            "chat:twins": {"engine": "probe_many", "personas": ["p", "r"]}}})
         self.core = Core(config, provider_adapters={"fake": self.fake, "other": self.other}, tick_seconds=3600)
         await self.core.start()
         self.chat = iface(self.core)
@@ -135,6 +137,12 @@ class SharedProfileTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((pat.text, pat.data["model"]), ("from fake", "fake-model"))
         unnamed = await self.say("speak")  # two share the profile and none is named: nobody's choice, no label
         self.assertEqual((unnamed.text, unnamed.data), ("from fake", {}))
+
+    async def test_personas_sharing_a_display_name_keep_their_own_labels(self):
+        await self.say("$model r other/m2", conversation="twins")
+        other_pat, pat = await self.say("speak r", conversation="twins"), await self.say("speak p", conversation="twins")
+        self.assertEqual([(reply.speaker, reply.data["model"]) for reply in (other_pat, pat)],
+                         [("Pat", "m2"), ("Pat", "fake-model")])
 
     async def test_a_single_persona_runs_unnamed_replies_say_her_model(self):
         reply = await self.say("speak", conversation="solo")  # as the assistant engine replies

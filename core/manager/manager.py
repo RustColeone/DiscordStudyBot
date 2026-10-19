@@ -1029,7 +1029,8 @@ class Manager:
                                                      + time.monotonic() - started)
 
     async def reply(self, run_id: str, text: str, quote: str | None = None, speaker: str = "",
-                    label: str = "", data: Mapping[str, str] | None = None) -> Delivery:
+                    label: str = "", data: Mapping[str, str] | None = None,
+                    persona: str | None = None) -> Delivery:
         record = self.tank.run(run_id)
         trigger = request_from_dict(record.trigger)
         if not text.strip():
@@ -1037,11 +1038,11 @@ class Manager:
         text = self.secrets.scrub(text)
         source = "command" if record.engine == COMMAND_ENGINE else "run"
         data = dict(data or {})
-        # A persona's message says which model wrote it (her last call in this run). Without a speaker it is
-        # the run's only persona's, if it has one persona.
+        # A persona's message says which model wrote it (her last call in this run): `persona` is her name, from the
+        # session (display names may repeat). Without one, it is the run's only persona's, if it has one.
         names = [name for name in record.personas if name in self.personas]
-        persona = next((name for name in names if self.personas[name].display_name == speaker), None) if speaker \
-            else (names[0] if len(names) == 1 else None)
+        if persona not in names:
+            persona = names[0] if len(names) == 1 and not speaker else None
         answered = self._answered.get(run_id, {}).get(persona) if persona else None
         if answered:
             data.update(provider=answered[0], model=answered[1])

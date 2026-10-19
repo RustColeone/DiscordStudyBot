@@ -96,7 +96,7 @@ class SessionHandle:
             if match is None:
                 raise ValueError("A session can only speak as its own personas")
             speaker = match.display_name
-        return await self._manager.reply(self.run_id, text, quote, speaker, label)
+        return await self._manager.reply(self.run_id, text, quote, speaker, label, persona=persona)
 
     async def send_file(self, file: FileRef, caption: str = "") -> Delivery:
         return await self._manager.send_file(self.run_id, file, caption)
