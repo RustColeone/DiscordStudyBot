@@ -434,7 +434,7 @@ class RoomEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, job, tools, correction), profile=persona.profile,
-                output_schema=turn_schema(characters), schema_name="room_turn",
+                persona=persona.name, output_schema=turn_schema(characters), schema_name="room_turn",
                 images=combine_images(recent_images(self._history(session), session.trigger.received_at,
                                                     self._image_window(session)), images(state)),
                 effort="medium" if job["observations"] or job["after"] else "low", max_tokens=self.max_tokens))

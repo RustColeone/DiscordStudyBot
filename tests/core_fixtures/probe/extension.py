@@ -84,6 +84,11 @@ class ProbeEngine(Engine):
                 await session.models.generate(ModelRequest([{"role": "user", "content": "hi"}]))
             await session.reply("models done")
             return RunYield.DONE
+        if command == "speak":  # `speak [persona]`: one model call for (and a reply as) that persona, if named
+            name = rest.strip() or None
+            result = await session.models.generate(ModelRequest([{"role": "user", "content": "hi"}], persona=name))
+            await session.reply(result.text, persona=name)
+            return RunYield.DONE
         if command == "activity":
             await session.reply(json.dumps([[a.status, a.doing, a.request, a.sender_id] for a in session.activity()]))
             return RunYield.DONE
@@ -107,8 +112,14 @@ class ProbeEngine(Engine):
         return RunYield.DONE
 
 
+class ProbeManyEngine(ProbeEngine):
+    """The probe with several personas (`speak <persona>` speaks as one of them)."""
+
+    spec = EngineSpec("probe_many", "test engine for several personas", "many")
+
+
 def setup(context):
-    return Contributions(engines=[ProbeEngine()])
+    return Contributions(engines=[ProbeEngine(), ProbeManyEngine()])
 
 
 EXTENSION = Extension("probe", setup, contracts="1")

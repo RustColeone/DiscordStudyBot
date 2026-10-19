@@ -136,7 +136,7 @@ class Manager:
         self.grants = tank.store("core:grants")
         self.approved_once = tank.store("core:approved_once")
         self.model_choices = ModelChoices(self)  # $model: a chosen model per persona and conversation
-        self._answered: dict[str, dict[str, tuple[str, str]]] = {}  # run → profile → (provider, model) last used
+        self._answered: dict[str, dict[str, tuple[str, str]]] = {}  # run → persona → (provider, model) last used
         self.permissions = Permissions()  # set by the app once every module is loaded
         self.secrets = Secrets()
         self.owners = owners
@@ -581,16 +581,25 @@ class Manager:
         if record.usage.get("model_calls", 0) >= budget.model_calls:
             raise ModelError("budget_exceeded", "This run used its model-call budget")
         self._add_usage(run_id, model_calls=1)
-        persona = next((name for name in record.personas
-                        if name in self.personas and self.personas[name].profile == profile), None)
+        persona = self._model_persona(record, request, profile)
         result = await self.providers.generate(request, profile,
                                                first=self.model_choices.first(record.address, persona))
-        self._answered.setdefault(run_id, {})[profile] = (result.provider, result.model)
+        if persona:
+            self._answered.setdefault(run_id, {})[persona] = (result.provider, result.model)
         self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens)
         self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
                           duration_s=result.duration_s, input_tokens=result.input_tokens,
                           output_tokens=result.output_tokens)
         return result
+
+    def _model_persona(self, record: RunRecord, request: ModelRequest, profile: str) -> str | None:
+        """Whose call this is: the persona the request names, else the run's only persona with this profile.
+        Two sharing it and none named: nobody's, so no one's $model choice is applied by guesswork."""
+        names = [name for name in record.personas if name in self.personas]
+        if request.persona in names:
+            return request.persona
+        sharing = [name for name in names if self.personas[name].profile == profile]
+        return sharing[0] if len(sharing) == 1 else None
 
     # ---- tools ------------------------------------------------------------------------------------
     def caller_access(self, record: RunRecord) -> str:
@@ -989,11 +998,12 @@ class Manager:
         text = self.secrets.scrub(text)
         source = "command" if record.engine == COMMAND_ENGINE else "run"
         data = dict(data or {})
-        # A persona's message says which model wrote it (her profile's last call in this run).
-        persona = next((self.personas[name] for name in record.personas
-                        if name in self.personas and self.personas[name].display_name == speaker), None) \
-            if speaker else None
-        answered = self._answered.get(run_id, {}).get(persona.profile) if persona else None
+        # A persona's message says which model wrote it (her last call in this run). Without a speaker it is
+        # the run's only persona's, if it has one persona.
+        names = [name for name in record.personas if name in self.personas]
+        persona = next((name for name in names if self.personas[name].display_name == speaker), None) if speaker \
+            else (names[0] if len(names) == 1 else None)
+        answered = self._answered.get(run_id, {}).get(persona) if persona else None
         if answered:
             data.update(provider=answered[0], model=answered[1])
         delivery = await self._run_output(record, Reply(trigger.address, "text", text=text,

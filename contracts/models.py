@@ -21,6 +21,8 @@ class ModelRequest:
     With `output_schema`, the result's `data` is the parsed, schema-validated JSON object.
     `images` (local JPEG, PNG, GIF or WebP files, at most 6) are shown with the last user message.
     Candidates that cannot see images are tried last and are told images were attached instead.
+    `persona` names the session persona the call is for, so her `$model` choice applies and her message
+    can say which model wrote it; without it, the core uses the run's only persona with this profile.
     """
 
     messages: Sequence[Mapping[str, str]]
@@ -31,6 +33,7 @@ class ModelRequest:
     max_tokens: int = 1500
     timeout_s: float = 35.0
     images: Sequence[FileRef] = ()
+    persona: str | None = None  # added in 1.3; new fields go last
 
 
 @dataclass(frozen=True)
