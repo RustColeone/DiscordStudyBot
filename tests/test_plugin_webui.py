@@ -93,7 +93,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         await self.start()
         ws, state = await self.socket()
         self.assertEqual((state["user"]["name"], state["default"]), ("Leo", "classroom"))
-        self.assertEqual(state["classmates"], ["Luna", "Gemini", "Claude", "DeepSeek"])
+        self.assertEqual(state["classmates"], ["Luna", "Gemini", "Claude", "DeepSeek", "Grok"])
         self.assertIn("help", [command["name"] for command in state["commands"]])
         await self.say(ws, "echo hello class")
         answer, seen = await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text")
@@ -294,7 +294,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
                 pass
         contributions = extension.setup(Context())
         self.assertEqual(contributions.assignments["webui:*"]["engine"], "room")
-        self.assertEqual(contributions.assignments["webui:*"]["personas"], ["luna", "gemini", "claude", "deepseek"])
+        self.assertEqual(contributions.assignments["webui:*"]["personas"],
+                         ["luna", "gemini", "claude", "deepseek", "grok"])
         self.assertFalse(contributions.admission["webui:*"]["require_mention_in_groups"])
 
 

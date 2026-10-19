@@ -551,7 +551,9 @@ commands of their own for this.
 
 [`extensions/room`](../../extensions/room/engine.py) is the shared room: several personas own one
 request together on a work board. It also contributes the
-four default characters `luna`, `gemini`, `claude` and `deepseek` (profiles of the same names).
+five default characters `luna`, `gemini`, `claude`, `deepseek` and `grok`, with a model profile of the
+same name for each (her own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back
+to Luna's) and Grok's provider. The room's `config.yml` overrides them, and core.yml overrides both.
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
   "大家", "everyone" and similar, otherwise one persona in rotation per conversation.

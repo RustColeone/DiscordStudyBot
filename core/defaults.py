@@ -26,17 +26,6 @@ DEFAULT_CHAIN = [
     {"provider": "gemini", "model": "gemini-3.8-flash"},
     {"provider": "claude", "model": "claude-haiku-5-5"},
 ]
-CHARACTER_MODELS = {
-    "deepseek": [{"provider": "deepseek", "model": "deepseek-flash"}],
-    "luna": [{"provider": "openai", "model": "gpt-6-luna"}],
-    "gemini": [{"provider": "gemini", "model": "gemini-3.8-flash"}, {"provider": "gemini", "model": "gemini-3.6-flash"}],
-    "claude": [{"provider": "claude", "model": "claude-haiku-5-5"}],
-}
-
-
-def character_chain(name: str) -> list[dict]:
-    own = CHARACTER_MODELS[name]
-    return [dict(item) for item in own] + [dict(item) for item in DEFAULT_CHAIN if item not in own]
 
 
 def default_config() -> dict:
@@ -58,10 +47,9 @@ def default_config() -> dict:
             "openrouter": {"kind": "openai_compatible", "base_url": "https://openrouter.ai/api/v1",
                            "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object", "vision": False},
         },
-        # Candidates without an API key are skipped, so any one configured provider works.
-        "profiles": {"default": DEFAULT_CHAIN,
-                     # The room's characters each prefer their own model, then fall back to the others.
-                     **{name: character_chain(name) for name in ("deepseek", "luna", "gemini", "claude")}},
+        # Candidates without an API key are skipped, so any one configured provider works. Modules ship their
+        # own profiles (the room: one per character).
+        "profiles": {"default": DEFAULT_CHAIN},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
         "assignments": {
             "*": {"engine": "assistant", "personas": ["assistant"]},

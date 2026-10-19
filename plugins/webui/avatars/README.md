@@ -8,6 +8,7 @@ Drop one picture per classmate here, named after them (lowercase, letters and di
 | `gemini.png` | Gemini |
 | `claude.png` | Claude |
 | `deepseek.png` | DeepSeek |
+| `grok.png` | Grok |
 | `you.png` | You (your own bubbles) |
 | `bot.png` | Messages without a speaker (notices, command results) |
 

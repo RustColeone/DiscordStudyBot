@@ -474,9 +474,7 @@ class DefaultConfigurationTests(unittest.TestCase):
         self.assertTrue({"discord", "assistant", "terminal", "cli"} <= set(built_in))
         self.assertEqual(modules[:len(built_in)], [path for path in modules if config.builtin(path)])
         self.assertTrue({"wechat", "whale_chan"} <= {path.name for path in modules if not config.builtin(path)})
-        self.assertEqual(config.profiles["gemini"][:2], [{"provider": "gemini", "model": "gemini-3.8-flash"},
-                                                         {"provider": "gemini", "model": "gemini-3.6-flash"}])
-        self.assertEqual(len(config.profiles["luna"]), 4)
+        self.assertEqual(list(config.profiles), ["default"])  # the room ships its characters' own
         self.assertEqual(config.builtin_permissions["*"]["rules"]["reminders.create"], "auto")
         self.assertEqual(config.builtin_permissions["*"]["rules"]["discord.music"], "auto")
         self.assertEqual(config.builtin_permissions["routine:*"], {"use": ["basic.*"]})

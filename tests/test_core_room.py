@@ -49,7 +49,8 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
     async def core(self, script, overrides=None):
         extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room")]
         config = {"extensions": extensions,
-                  "profiles": {name: [{"provider": "fake", "model": name}] for name in NAMES},
+                  # Every character's profile, Grok's too (the room's own falls back to a real provider).
+                  "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},
                   "assignments": {"*": {"engine": "room", "personas": list(NAMES)}}}
         config.update(overrides or {})
         core = await start_core(self.tmp, config, FakeAdapter(handler=script))
@@ -187,6 +188,23 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([n.key for n in core.tank.notes("luna", "chat:room", "alice")], ["music.favorite"])
         self.assertIn("Loves Andy Hui", script.prompts["Luna"][1][0]["content"])
         self.assertNotIn("Loves Andy Hui", script.prompts["Gemini"][0][0]["content"])
+
+    async def test_the_room_ships_its_characters_profiles_and_configuration_overrides_them(self):
+        providers = {name: {"kind": "openai_compatible", "api_key_env": f"UNSET_{name.upper()}"}
+                     for name in ("deepseek", "openai", "gemini", "claude")}
+        mine = [{"provider": "fake", "model": "mine"}]
+        core = await self.core(Script(), {"providers": providers, "profiles": {"gemini": mine},
+                                          "extension_config": {"room": {"profiles": {"claude": mine}}}})
+        profiles = core.providers._profiles
+        self.assertEqual(profiles["luna"], [{"provider": "openai", "model": "gpt-6-luna"},
+                                            {"provider": "deepseek", "model": "deepseek-flash"},
+                                            {"provider": "gemini", "model": "gemini-3.8-flash"},
+                                            {"provider": "claude", "model": "claude-haiku-5-5"}])
+        self.assertEqual(profiles["grok"], [{"provider": "grok", "model": "grok-4-fast"},
+                                            {"provider": "openai", "model": "gpt-6-luna"}])
+        self.assertEqual(profiles["claude"], mine)  # the room's own config.yml over its code
+        self.assertEqual(profiles["gemini"], mine)  # core.yml over the room
+        self.assertIn("GROK_API_KEY", core.providers.key_variables())
 
 
 if __name__ == "__main__":

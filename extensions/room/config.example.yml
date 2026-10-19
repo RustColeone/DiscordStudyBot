@@ -3,3 +3,21 @@ max_steps: 24
 history_limit: 16
 max_tokens: 1500
 aliases: {claude: [Haiku]}      # other names people call a persona by
+
+# The characters' models. The room ships these (extension.py); set one here only to change it, and
+# core.yml `providers:` / `profiles:` override this file. Each profile is tried in order; candidates whose
+# key is missing are skipped. Grok's key goes in .env as GROK_API_KEY (`python -m core setup` asks for it).
+# providers:
+#   grok: {kind: openai_compatible, base_url: "https://api.x.ai/v1", api_key_env: GROK_API_KEY,
+#          schema_mode: native, effort_param: true}
+# profiles:
+#   luna:     [{provider: openai, model: gpt-6-luna}, {provider: deepseek, model: deepseek-flash},
+#              {provider: gemini, model: gemini-3.8-flash}, {provider: claude, model: claude-haiku-5-5}]
+#   gemini:   [{provider: gemini, model: gemini-3.8-flash}, {provider: gemini, model: gemini-3.6-flash},
+#              {provider: deepseek, model: deepseek-flash}, {provider: openai, model: gpt-6-luna},
+#              {provider: claude, model: claude-haiku-5-5}]
+#   claude:   [{provider: claude, model: claude-haiku-5-5}, {provider: deepseek, model: deepseek-flash},
+#              {provider: openai, model: gpt-6-luna}, {provider: gemini, model: gemini-3.8-flash}]
+#   deepseek: [{provider: deepseek, model: deepseek-flash}, {provider: openai, model: gpt-6-luna},
+#              {provider: gemini, model: gemini-3.8-flash}, {provider: claude, model: claude-haiku-5-5}]
+#   grok:     [{provider: grok, model: grok-4-fast}, {provider: openai, model: gpt-6-luna}]

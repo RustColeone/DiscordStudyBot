@@ -32,7 +32,7 @@ that touches a platform, decides what to say or does work is a module.
    even with nothing else connected.
 4. DM the bot on Discord, or mention it (or reply to it) in a server. The Discord application's owner is
    the bot's creator there; approvals arrive in their DM with Approve and Deny buttons.
-   No Discord? Open `http://<this computer>:4156` from any device at home: the web UI, where the four
+   No Discord? Open `http://<this computer>:4156` from any device at home: the web UI, where the five
    classmates answer in their own bubbles (see [plugins/README.md](plugins/README.md#the-web-ui)).
 
 Later changes: run the setup again, or type `$setup` to the bot as its creator (modules and their
@@ -48,7 +48,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 
 | | |
 |---|---|
-| Chat | The assistant engine (one persona), or the **room**: Luna, Gemini, Claude and DeepSeek sharing one work board, handing each other jobs, in parallel where independent |
+| Chat | The assistant engine (one persona), or the **room**: Luna, Gemini, Claude, DeepSeek and Grok sharing one work board, handing each other jobs, in parallel where independent |
 | Memory | Personas keep short notes about each person per conversation; `$memory` shows, forgets or clears yours |
 | Images | Attached and recent images are shown to the models; `$draw <prompt>` (Gemini or OpenAI) |
 | Web | `$search`, `$read <url>`, image search, Google Maps, `$wolfram` |
@@ -60,7 +60,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (looking works in your private chats without asking; saving, opening and copying wait for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
-| Web UI | A chat page on your local network (`:4156`), no Discord needed: the four classmates in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
+| Web UI | A chat page on your local network (`:4156`), no Discord needed: the five classmates in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 
 Reads and prepares run; writes and critical actions (sending elsewhere, changing settings, the shell)

@@ -13,7 +13,7 @@
 # Modules: every folder with an extension.py loads, the built-in ones in extensions/ first, then the
 # external ones in plugins/. Turn one off by folder (extensions/terminal) or by name (terminal), and
 # add module folders that live elsewhere (they count as external). Built-in modules:
-#   discord, assistant, basic, cli (stdin chat, for local testing), room (luna, gemini, claude, deepseek),
+#   discord, assistant, basic, cli (stdin chat, for local testing), room (luna, gemini, claude, deepseek, grok),
 #   media ($video, $clip; yt-dlp + ffmpeg), images ($draw), system ($status), reminders ($remind),
 #   web ($search, $read, image search, maps, $wolfram with WOLFRAM_APPID), terminal (creator-only shell:
 #   $t <line>, a terminal channel, or the assistant with your approval; docs/core/EXTENSIONS.md),
@@ -72,9 +72,9 @@
 #     engine: assistant
 #     persona: assistant
 #     enabled: false          # record messages, never answer
-#   "discord:234567890123456789":   # the shared room: four characters on one work board
+#   "discord:234567890123456789":   # the shared room: five characters on one work board
 #     engine: room
-#     personas: [luna, gemini, claude, deepseek]   # this order is also the rotation order
+#     personas: [luna, gemini, claude, deepseek, grok]   # this order is also the rotation order
 #     budget: {model_calls: 40, tool_calls: 24, seconds: 900}
 
 # Permissions: what a conversation may use (use), what runs there without asking per tier (tiers:

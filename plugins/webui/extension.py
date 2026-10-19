@@ -3,11 +3,11 @@
 Open http://<this computer>:4156 from any device at home. Whoever opens it is the bot's creator, so it
 answers only the local network, refuses other websites and DNS-rebinding names, and can ask for a
 passphrase once per browser (`passphrase`, or WEBUI_PASSPHRASE in .env). Conversations default to the
-shared room: Luna, Gemini, Claude and DeepSeek working together, each in their own bubble with their own
-picture (`avatars/<name>.png`). Markdown and LaTeX are shown as such; files go both ways.
+shared room: Luna, Gemini, Claude, DeepSeek and Grok working together, each in their own bubble with
+their own picture (`avatars/<name>.png`). Markdown and LaTeX are shown as such; files go both ways.
 
 It contributes the `webui` interface and defaults for its own conversations (`webui:*` uses the room
-engine with the four classmates); core.yml settings win over these.
+engine with the five classmates); core.yml settings win over these.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from contracts import Contributions, Extension, Setting
 
 from .interface import WebUI
 
-CLASSMATES = ["luna", "gemini", "claude", "deepseek"]
+CLASSMATES = ["luna", "gemini", "claude", "deepseek", "grok"]
 
 
 def setup(context) -> Contributions:
@@ -36,7 +36,7 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("webui", setup, contracts="1", version="1",
-                      description="A chat page on the local network: the four classmates, no Discord needed",
+                      description="A chat page on the local network: the five classmates, no Discord needed",
                       settings=(
     Setting("port", "Port the page is served on", "number", 4156),
     Setting("user_name", "Your name in the chat", "text"),

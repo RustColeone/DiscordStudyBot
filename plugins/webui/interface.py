@@ -107,7 +107,8 @@ class WebUI(Interface):
         self.user_id = str(config.get("user_id", "creator"))
         self.user_name = str(config.get("user_name") or getpass.getuser() or "You")
         self.title = str(config.get("title", "Study Room"))
-        self.classmates = [str(item) for item in config.get("classmates") or ["Luna", "Gemini", "Claude", "DeepSeek"]]
+        self.classmates = [str(item) for item in config.get("classmates")
+                           or ["Luna", "Gemini", "Claude", "DeepSeek", "Grok"]]
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
         self.networks = [ipaddress.ip_network(str(item), strict=False) for item in config.get("networks") or []]
         upload_mb = float(config.get("max_upload_mb", 50))

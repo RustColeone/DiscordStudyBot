@@ -65,8 +65,8 @@ core.yml, for example `"discord:123": {engine: chat, personas: [whale_chan]}`.
 Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
 printed at startup) from a laptop or phone at home:
 
-* each chat is a conversation of the shared room by default: Luna, Gemini, Claude and DeepSeek, each in
-  their own bubble with their own picture (drop `luna.png` and so on into
+* each chat is a conversation of the shared room by default: Luna, Gemini, Claude, DeepSeek and Grok,
+  each in their own bubble with their own picture (drop `luna.png` and so on into
   [`webui/avatars/`](webui/avatars/README.md); until then, coloured initials);
 * the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
   click someone, or type `@`, to ask them directly (`@Luna …` gets Luna's answer alone);
