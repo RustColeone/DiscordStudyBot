@@ -635,7 +635,11 @@ same name for each (her own model, then the others'; Grok's is xAI's, with `GROK
 to Luna's chain) and Grok's provider. The room's `config.yml` overrides them, and core.yml overrides both.
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
-  "大家", "everyone" and similar, otherwise one persona in rotation per conversation.
+  "大家", "everyone" and similar, otherwise one persona in rotation per conversation. With `chime_in`,
+  the others may also add something or `pass` (stay silent).
+* Long conversations: the last `history_limit` messages word for word, older ones in the conversation's
+  rolling summary (rewritten by one `compact_profile` call once `compact_every` have scrolled out), and
+  `core.search_history` for their exact words.
 * Each turn returns `{status, message, work_note, actions, jobs, diary}`. The message is spoken
   (`speaker` set) before tools run; `work_note` is a short public explanation sent with label
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
@@ -650,9 +654,11 @@ to Luna's chain) and Grok's provider. The room's `config.yml` overrides them, an
 * Guards: an action that is not a read is never repeated in a run once it succeeded, a failed action is
   retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
-* Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (16), `max_tokens`
-  (1500), `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`,
-  `max_steps`, `history_limit`, `history_image_minutes`, `diary: false`.
+* Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (30), `chime_in`
+  (false), `compact` (true), `compact_every` (20), `compact_profile` (`default`), `max_tokens` (1500),
+  `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`, `max_steps`,
+  `history_limit`, `chime_in`, `compact`, `compact_every`, `compact_profile`, `history_image_minutes`,
+  `diary: false`, and the core's `diary_scope`. Discord and the web UI differ only in these options.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
 ### The included Discord interface

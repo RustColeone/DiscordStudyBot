@@ -22,7 +22,9 @@ contract, read [`extensions/assistant`](../assistant) first; it is shorter.
 | Persona | `grok` | Display name `Grok`, profile `grok` |
 | Provider | `grok` | `openai_compatible` at `https://api.x.ai/v1`, key in `GROK_API_KEY`, `schema_mode: native`, `effort_param: true`; `$model` offers models released since 2026-06-01, excluding IDs matching `imagine` |
 | Setting | `max_steps` | `number`, default 24: "Most work-board steps per request" |
-| Setting | `history_limit` | `number`, default 16: "Earlier messages the room reads" |
+| Setting | `history_limit` | `number`, default 30: "Earlier messages every character reads word for word" |
+| Setting | `chime_in` | `boolean`, default false: "A group message naming no one: whose turn it is answers, the others may join in" |
+| Setting | `compact` | `boolean`, default true: "Fold messages older than history_limit into the chat's rolling summary" |
 | Setting | `grok_api_key` | `secret`, env `GROK_API_KEY`: "xAI API key for Grok (without it, Luna's model answers for her)" |
 
 The model profiles, each tried in order (a candidate whose provider has no key is skipped):
@@ -56,7 +58,11 @@ The module loads by default. Its settings live in `extensions/room/config.yml` (
 
 ```yaml
 max_steps: 24
-history_limit: 16
+history_limit: 30
+chime_in: false
+compact: true
+compact_every: 20
+compact_profile: default
 max_tokens: 1500
 aliases: {claude: [Haiku]}      # other names people call a persona by
 # providers: {...}              # optional: change Grok's provider or add one
@@ -66,7 +72,11 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `max_steps` | 24 | Model turns the whole room may take per run, across all characters. Clamped to 4..50. It also caps the number of jobs on the board. |
-| `history_limit` | 16 | Earlier conversation messages each character reads. |
+| `history_limit` | 30 | Earlier conversation messages each character reads word for word (at most 150). Older ones are in the rolling summary, and `core.search_history` finds their exact words. |
+| `chime_in` | false | A message naming no one goes to whoever's turn it is, and the other characters may each add something or pass. Off: only the one in turn answers. |
+| `compact` | true | Keep the conversation's rolling summary of the messages older than `history_limit`. |
+| `compact_every` | 20 | How many messages must have scrolled out of the window before the summary is rewritten (one model call). |
+| `compact_profile` | `default` | The model profile that writes the summary. |
 | `max_tokens` | 1500 | `max_tokens` of each model turn. |
 | `aliases` | `{claude: [Haiku]}` | Extra names per persona that count as addressing her. |
 | `providers` | none | Merged key by key over the module's `grok` provider (or adds a new one). |
@@ -96,8 +106,21 @@ assignments:
 
 Assignment `options` the room reads: `instructions` (added to every character's system prompt),
 `owner_instructions` (added only when an owner sent the request), `max_steps`, `history_limit`,
-`history_image_minutes` (default 30) and `diary: false`. It does not read the assistant's
-`history_scope` or `quote`.
+`chime_in`, `compact`, `compact_every`, `compact_profile`, `history_image_minutes` (default 30) and
+`diary: false`. The core reads `diary_scope` (a name: the characters' notes about a person are shared by
+every conversation whose assignment uses the same name; see
+[Diaries](../../docs/core/EXTENSIONS.md#diaries)). The room does not read the assistant's `history_scope`
+or `quote`.
+
+Discord channels and the web UI use this same engine; only these options differ. For example, a quiet
+Discord study channel and a lively web chat:
+
+```yaml
+assignments:
+  "discord:234567890123456789": {engine: room, personas: [luna, claude], options: {history_limit: 20}}
+  "webui:*": {engine: room, personas: [luna, gemini, claude, deepseek, grok],
+              options: {history_limit: 40, chime_in: true, diary_scope: webui}}
+```
 
 To turn it off for one conversation, assign that conversation another engine or set `enabled: false`.
 To turn the module off entirely, add it to `modules: {exclude: [room]}` in `core.yml`; then the five
@@ -110,7 +133,11 @@ naming them.
   (case-insensitive, as a whole word, ignoring text in quotes or code blocks). "大家", "你们", "各位",
   "everyone", "everybody", "you all", "you guys", "all of you" and "the team" address everybody, unless
   a Chinese phrase says they need not ("你们不用...", "不用...大家"). An unaddressed message goes to one
-  character in rotation per conversation.
+  character in rotation per conversation. With `chime_in` on, the others may also add something short or
+  stay silent (`pass`); the one in turn always answers, so nobody is left without a reply.
+* **Long conversations.** Each character reads the last `history_limit` messages word for word. Older
+  ones are folded into the conversation's rolling summary, which every character reads, and she can
+  look up their exact words with `core.search_history`. `$memory summary` shows the summary.
 * **Replies.** Each character's message appears under her display name. In group conversations it
   quotes the request. The message is sent before her tools run, so people see what she is about to do.
 * **Work notes.** A character may add a short public reason for a step (at most 480 characters). It
@@ -143,11 +170,14 @@ naming them.
 
 The run's state is a board of jobs. A job is
 `{id, character, instruction, after, status, observations, pending, steps, question}`. Its status is
-`pending`, `running`, `waiting_approval`, `needs_input`, `complete` or `blocked`.
+`pending`, `running`, `waiting_approval`, `needs_input`, `complete` or `blocked`. A chime-in job also
+has `optional: true`.
 
-1. **Open** (`run`, `_open`). On the first call the engine records the trigger's text as the `goal`,
-   keeps its images and adds one `opening-N` job per character who should answer (`participants`, or
-   the rotation counter `room_rotation:<address>` kept in `session.memory` of the first persona).
+1. **Open** (`run`, `_compact`, `_open`). On the first call the engine first updates the rolling
+   summary if enough messages have scrolled out of the window (see below), then records the trigger's
+   text as the `goal`, keeps its images and adds one `opening-N` job per character who should answer
+   (`participants`, or the next in rotation: the counter `rotation` in `session.store(conversation=True)`).
+   With `chime_in`, the others get optional jobs with the `CHIME` instruction.
 2. **Absorb events** (`_absorb_events`). Events past `event_cursor` are applied: an `input` (other than
    the trigger itself) answers waiting jobs or opens `reply-N` jobs; a `tool_result` or
    `approval_denied` is matched to the job whose first pending action has that `call_id`, recorded as an
@@ -183,14 +213,15 @@ ModelRequest(messages, profile=persona.profile, persona=persona.name,
 and whose model to name on the reply. The schema (`turn_schema`) is strict JSON:
 
 ```json
-{"status": "continue|complete|needs_input|blocked", "message": "...", "work_note": "...",
+{"status": "continue|complete|needs_input|blocked|pass", "message": "...", "work_note": "...",
  "actions": [{"tool": "name", "arguments": {}}],
  "jobs": [{"id": "verify", "character": "claude", "instruction": "...", "after": ["opening-1"]}],
  "diary": [{"key": "study.subject", "kind": "fact|episode|reflection", "note": "...", "importance": 3}]}
 ```
 
 `status`, `message`, `actions` and `jobs` are required; `character` is an enum of the session's
-personas. `_check` then rejects a turn with an empty message, a `work_note` over 480 characters,
+personas. `pass` (stay silent) is accepted only on an optional job, with no actions or jobs; it
+completes the job without a reply. `_check` then rejects a turn with an empty message, a `work_note` over 480 characters,
 `continue` without actions or jobs, actions or jobs with any other status, unknown tools, `complete`
 right after her own failed action, a board that would exceed `max_steps` jobs, duplicate or overlong job
 IDs, unknown characters, empty or overlong (over 2000 characters) instructions, and missing or cyclic
@@ -202,8 +233,9 @@ The messages for a turn (`_messages`):
 
 * **System**: the persona prompt, her display name and the current time, `options.instructions`,
   `owner_instructions` when an owner is speaking, the room rules (`INSTRUCTION`, with the roster and the
-  tool catalog: name, description, parameters, risk), and her diary.
-* **History** (`_history`): up to `history_limit` messages from before the request. Her own earlier
+  tool catalog: name, description, parameters, risk), her diary, and the conversation's rolling summary
+  if there is one.
+* **History** (`_history`): the last `history_limit` messages from before the request. Her own earlier
   replies are `assistant` messages; everyone else's (people and other characters) are `user` lines with
   time, speaker, the quoted text and attachments. `$commands` and the replies that answered them are
   left out: `$model` lists and `$help` text are for the person who typed them, not the room's topic.
@@ -214,6 +246,17 @@ The messages for a turn (`_messages`):
 Images: those attached to the run's messages, those returned by successful tools, and those people
 sent within `history_image_minutes` before the request are combined (latest 6) and shown to every
 character on every turn.
+
+### The rolling summary
+
+`_compact` runs once per run, before the first turn. It takes the conversation from before the request
+(the last 200 messages, `$commands` and their answers left out), keeps the ones older than the window,
+and counts those newer than the summary's `upto`. When there are at least `compact_every`, one call to
+`compact_profile` (`COMPACT` prompt, `effort="low"`, 900 tokens) rewrites the summary to include them, and
+`session.history.summarize(text, upto=<the newest one's time>)` stores it (the core keeps one per
+conversation, at most 8000 characters, secrets scrubbed). A model failure keeps the old summary; the run
+goes on either way. Messages that scroll out more than 200 behind at once are not summarized, but
+`core.search_history` still finds them.
 
 ### Speaking and acting
 
@@ -258,9 +301,12 @@ are shown only when an owner sent the request. Diary notes are private to each c
   `observations`, `steps`, `call_seq`, `job_seq`, `event_cursor`, `opened`, `images` (up to 6 file
   references) and, briefly, `deliver`. Runs are kept indefinitely; the run's workspace files are deleted
   7 days after it ends ([Retention](../../docs/core/EXTENSIONS.md#retention)).
-* **Persona memory**: one counter per conversation, `room_rotation:<address>`, in the first persona's
-  `session.memory` store.
-* **Diaries**: each character's notes about the person who sent the request, in that conversation only.
+* **Conversation store**: the rotation counter, `rotation`, in `session.store(conversation=True)` (the
+  module's store for this conversation).
+* **Rolling summary**: the core's per-conversation summary (`session.history.summarize`); an admin can
+  remove it with `$memory clear summary`.
+* **Diaries**: each character's notes about the person who sent the request, in that conversation only,
+  or in every conversation of the same `diary_scope`.
   Only notes of importance 3 or more are written; the core enforces the rest (at most 200 notes per
   persona and person; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). Turn off with
   `diary: false`.
@@ -272,7 +318,10 @@ fake model per character. It checks rotation and naming (including the `Haiku` a
 starts one job per character in parallel and each reply names its own model; tools, work notes and
 `after` dependencies on one board; a write that waits for approval across a restart and runs once; two
 approvals resuming the run only when both are done; `$commands` and their answers left out of history;
-a question answered by the next message; one correction for invalid turns; a retryable failure retried
+chime-in (the one in turn answers, the others may pass, and a `pass` from the one in turn is
+corrected); the rotation kept per conversation across restarts; old messages folded into the summary
+every character reads, only once `compact_every` have scrolled out; a question answered by the next
+message; one correction for invalid turns; a retryable failure retried
 once only and unknown characters refused; images shown to every character; separate diaries; and the
 profile precedence (code, then `config.yml`, then `core.yml`).
 
@@ -282,22 +331,22 @@ venv/bin/python -m unittest tests.test_core_room
 
 ## Building something similar
 
-* **Declare persona mode `many`** ([`engine.py:156`](engine.py)) and pass `persona=` on every model
-  call ([`engine.py:447`](engine.py)), or `$model` choices and model labels will be wrong.
-* **Initialise state once and replay events by index** ([`engine.py:166`](engine.py),
-  [`engine.py:239`](engine.py)). Skip the trigger's own `input` event if you already took it from
+* **Declare persona mode `many`** ([`engine.py:165`](engine.py)) and pass `persona=` on every model
+  call ([`engine.py:474`](engine.py)), or `$model` choices and model labels will be wrong.
+* **Initialise state once and replay events by index** ([`engine.py:183`](engine.py),
+  [`engine.py:261`](engine.py)). Skip the trigger's own `input` event if you already took it from
   `session.trigger`.
-* **Save, then speak** ([`engine.py:362`](engine.py)); **give the whole batch its `call_id`s, keep it in
-  the job, save, then call** ([`engine.py:375`](engine.py)), so a restart replays the same calls.
+* **Save, then speak** ([`engine.py:387`](engine.py)); **give the whole batch its `call_id`s, keep it in
+  the job, save, then call** ([`engine.py:400`](engine.py)), so a restart replays the same calls.
 * **Keep the unfinished part of a batch** when a call needs approval, and match the later
-  `tool_result` by `call_key` ([`engine.py:391`](engine.py), [`engine.py:250`](engine.py)).
+  `tool_result` by `call_key` ([`engine.py:416`](engine.py), [`engine.py:273`](engine.py)).
 * **Concurrency**: one task per job and an event to wake the scheduler; cancel and gather the tasks in
-  `finally` ([`engine.py:267`](engine.py)). Catch `CancelledError` separately so cancellation is not
-  reported as a failure ([`engine.py:348`](engine.py)).
+  `finally` ([`engine.py:289`](engine.py)). Catch `CancelledError` separately so cancellation is not
+  reported as a failure ([`engine.py:373`](engine.py)).
 * **Validate beyond the schema** and send the problem back as a correction
-  ([`engine.py:458`](engine.py)), with a bounded number of retries.
+  ([`engine.py:489`](engine.py)), with a bounded number of retries.
 * **Ship models with the module**: providers and profiles in `Contributions`, with the module's
-  `config.yml` merged over them ([`extension.py:13`](extension.py), [`extension.py:36`](extension.py)).
+  `config.yml` merged over them ([`extension.py:13`](extension.py), [`extension.py:40`](extension.py)).
 * Pitfalls: a run returns only when no job can start, so a waiting job does not stop others; budgets
   count every character's calls, so give the assignment a larger `budget`; the room recognises a
   character's own history by display name, so two personas with the same display name would share it.

@@ -30,9 +30,12 @@ PROFILES["grok"] = [{"provider": "grok", "model": "grok-4-fast"}, *PROFILES["lun
 def setup(context) -> Contributions:
     config = context.config
     engine = RoomEngine(max_steps=max(4, min(int(config.get("max_steps", 24)), 50)),
-                        history_limit=int(config.get("history_limit", 16)),
+                        history_limit=int(config.get("history_limit", 30)),
                         max_tokens=int(config.get("max_tokens", 1500)),
-                        aliases=config.get("aliases") or {"claude": ["Haiku"]})
+                        aliases=config.get("aliases") or {"claude": ["Haiku"]},
+                        chime_in=bool(config.get("chime_in", False)), compact=bool(config.get("compact", True)),
+                        compact_every=max(1, int(config.get("compact_every", 20))),
+                        compact_profile=str(config.get("compact_profile") or "default"))
     providers = {name: dict(settings) for name, settings in PROVIDERS.items()}
     for name, settings in (config.get("providers") or {}).items():
         providers[name] = {**providers.get(name, {}), **dict(settings)}
@@ -43,7 +46,10 @@ def setup(context) -> Contributions:
 EXTENSION = Extension("room", setup, contracts="1", version="1",
                       description="Shared room: several personas work one request together", settings=(
     Setting("max_steps", "Most work-board steps per request", "number", 24),
-    Setting("history_limit", "Earlier messages the room reads", "number", 16),
+    Setting("history_limit", "Earlier messages every character reads word for word", "number", 30),
+    Setting("chime_in", "A group message naming no one: whose turn it is answers, the others may join in", "boolean",
+            False),
+    Setting("compact", "Fold messages older than history_limit into the chat's rolling summary", "boolean", True),
     Setting("grok_api_key", "xAI API key for Grok (without it, Luna's model answers for her)", "secret",
             env="GROK_API_KEY"),
 ))

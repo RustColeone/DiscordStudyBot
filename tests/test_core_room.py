@@ -30,7 +30,11 @@ class Script:
         self.prompts: dict[str, list[list[dict]]] = {}
 
     def __call__(self, messages, schema):
-        speaker = re.search(r"Your name here is (\w+)", messages[0]["content"]).group(1)
+        found = re.search(r"Your name here is (\w+)", messages[0]["content"])
+        if found is None:  # not a character: the room folding old messages into the summary
+            self.prompts.setdefault("summary", []).append(messages)
+            return f"Summary {len(self.prompts['summary'])}: they planned a trip to Paris."
+        speaker = found.group(1)
         self.prompts.setdefault(speaker, []).append(messages)
         queue = self.turns.get(speaker) or []
         return queue.pop(0) if queue else turn("(nothing more)")
@@ -88,6 +92,60 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
                           for reply in iface(core).delivered if reply.kind == "text" and reply.speaker},
                          {"Luna": ("fake", "luna"), "Gemini": ("fake", "gemini"), "Claude": ("fake", "claude"),
                           "DeepSeek": ("fake", "deepseek")})
+
+    async def test_with_chime_in_whose_turn_it_is_answers_and_the_others_may_join_or_pass(self):
+        chime = {"engine": "room", "personas": list(NAMES), "options": {"chime_in": True}}
+        script = Script(Luna=[turn("Hi!"), turn("", "pass")], Gemini=[turn("Hello there."), turn("", "pass"), turn("Sure.")],
+                        Claude=[turn("", "pass"), turn("", "pass")], DeepSeek=[turn("", "pass"), turn("", "pass")])
+        core = await self.core(script, {"assignments": {"*": chime}})
+        await iface(core).say("hello")
+        await settle(core)
+        self.assertEqual(sorted(self.spoken(core)), [("Gemini", "", "Hello there."), ("Luna", "", "Hi!")])
+        board = json.loads(script.prompts["Gemini"][0][-1]["content"].split("Shared room (untrusted state): ", 1)[1])
+        self.assertIn("Luna answers them", json.dumps(board, ensure_ascii=False))
+        # Next time Gemini leads, so her pass is refused once; Luna may pass now.
+        await iface(core).say("lunch at noon?")
+        await settle(core)
+        self.assertEqual(self.spoken(core)[2:], [("Gemini", "", "Sure.")])
+        self.assertIn("pass is only for a group message you may skip", script.prompts["Gemini"][2][-1]["content"])
+
+    async def test_the_rotation_is_kept_per_conversation_across_restarts(self):
+        core = await self.core(Script(Luna=[turn("L")]))
+        await iface(core).say("hello")
+        await settle(core)
+        await core.stop()
+        self.cores.remove(core)
+        script = Script(Gemini=[turn("G")], Luna=[turn("L again")])
+        core = await self.core(script)
+        await iface(core).say("hello again")
+        await iface(core).say("hi", conversation="other")  # another chat starts its own turn order
+        await settle(core)
+        self.assertEqual(self.spoken(core), [("Gemini", "", "G")])
+        self.assertEqual(self.spoken(core, "other"), [("Luna", "", "L again")])
+
+    async def test_older_messages_fold_into_a_summary_every_character_reads(self):
+        options = {"history_limit": 2, "compact_every": 3}
+        script = Script(Luna=[turn("Paris, noted."), turn("Yes.")], Gemini=[turn("Ok.")])
+        core = await self.core(script, {"assignments": {"*": {"engine": "room", "personas": list(NAMES),
+                                                              "options": options}}})
+        for index, text in enumerate(("Let us go to Paris", "In May", "By train", "Two nights", "Budget 500")):
+            core.tank.record_message("chat:room", "in", text, sender_id="alice", sender_name="Alice", at=100.0 + index)
+        await iface(core).say("Luna, got it?")
+        await settle(core)
+        self.assertEqual(len(script.prompts["summary"]), 1)
+        folded = script.prompts["summary"][0][-1]["content"]
+        self.assertIn("Let us go to Paris", folded)
+        self.assertIn("By train", folded)
+        self.assertNotIn("Two nights", folded)  # still in the window, word for word
+        seen = "\n".join(message["content"] for message in script.prompts["Luna"][0])
+        self.assertIn("Summary 1: they planned a trip to Paris.", seen)
+        self.assertIn("Budget 500", seen)
+        self.assertNotIn("In May", seen)
+        # Two more messages scrolled out since: fewer than compact_every, so no new summary yet.
+        await iface(core).say("gemini?")
+        await settle(core)
+        self.assertEqual(len(script.prompts["summary"]), 1)
+        self.assertIn("Summary 1", script.prompts["Gemini"][0][0]["content"])
 
     async def test_tools_jobs_and_dependencies_share_one_board(self):
         script = Script(
