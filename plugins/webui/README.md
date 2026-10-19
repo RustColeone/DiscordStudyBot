@@ -131,7 +131,11 @@ The page never answers anything itself; everything a person types goes through `
 * `address` is `webui:<chat>`; chat IDs must match `^[a-z0-9][a-z0-9-]{0,47}$` (the default chat is
   `classroom`, new ones are `chat-<base36 time>`, direct messages `dm-<base36 time>`).
 * A message to a chat whose own assignment is still being set (below) waits for it first (at most 25 s),
-  so it is never answered by the whole class.
+  so it is never answered by the whole class. If the setup fails (the chat is deleted first) or is still
+  unfinished, the message is not submitted: `ack` with `ok: false`, reason `chat_not_ready`. A message to
+  a chat that does not exist (deleted, perhaps on another device, or removed after a failed setup) is
+  refused the same way with `unknown_chat`: sending never creates a chat, which would bring it back with
+  the whole class.
 * `sender` is `Sender(user_id, user_name)`; `text` is cut to `max_text_chars`; up to 10 previously
   uploaded files become `FileRef`s; `kind` is `text`, else `image` if all files are pictures, else `file`.
 * Only after `submit` is accepted is the message stored and broadcast, so the transcript holds what the

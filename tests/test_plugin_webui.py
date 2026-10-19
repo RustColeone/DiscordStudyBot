@@ -402,6 +402,33 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.web.store.conversation("chat-pair"))
         await ws.close()
 
+    async def test_a_message_queued_behind_a_failed_setup_is_not_sent_to_the_whole_class(self):
+        spoke = await self.start_room()
+        ws, _ = await self.socket()
+
+        async def failing(conversation, personas):
+            await asyncio.sleep(0.2)  # the message arrives while this runs
+            return "simulated failure"
+        self.web._assign = failing
+        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        # The same page's message is handled after the failed setup (the chat is gone by then); another
+        # page's arrives while it is still running.
+        other, _ = await self.socket()
+        await asyncio.sleep(0.05)
+        await self.say(other, "only for Luna", conversation="dm-luna", id="meanwhile")
+        await self.say(ws, "only for Luna", conversation="dm-luna", id="queued")
+        ack, _ = await self.until(other, lambda e: e["type"] == "ack")
+        self.assertEqual((ack["ok"], ack["reason"]), (False, "chat_not_ready"))
+        ack, seen = await self.until(ws, lambda e: e["type"] == "ack")
+        self.assertEqual((ack["ok"], ack["reason"]), (False, "unknown_chat"))
+        self.assertIn("simulated failure", next(e for e in seen if e["type"] == "error")["text"])
+        await settle(self.core)
+        self.assertEqual(spoke, [])
+        self.assertIsNone(self.web.store.conversation("dm-luna"))  # not re-created with the whole class
+        self.assertFalse(self.core.tank.recent_messages("webui:dm-luna", 5))
+        await other.close()
+        await ws.close()
+
     async def test_the_room_is_the_default_for_its_conversations(self):
         from core.loader import import_extension
         extension, _ = import_extension(PLUGIN)

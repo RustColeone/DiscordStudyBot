@@ -695,7 +695,10 @@
     } else if (event.type === "error") {
       toast(event.text);
     } else if (event.type === "ack" && !event.ok) {
-      toast(event.reason === "disabled" ? "This chat is switched off." : `Not sent (${event.reason}).`);
+      toast(event.reason === "disabled" ? "This chat is switched off."
+        : event.reason === "chat_not_ready" || event.reason === "unknown_chat"
+          ? "That chat isn't there (it couldn't be set up, or was deleted), so this wasn't sent."
+          : `Not sent (${event.reason}).`);
     }
   }
 

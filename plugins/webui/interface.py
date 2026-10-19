@@ -447,16 +447,20 @@ class WebUI(Interface):
             return
         self.store.ensure(conversation, title, personas)
         await self._broadcast({"type": "conversations", "items": self.store.conversations()})
+        # Messages sent to it meanwhile learn the outcome only once a failed chat is gone again: they must
+        # never reach the chat as it is before its assignment (the whole class).
         setup = asyncio.get_running_loop().create_future()
         self._setups[conversation] = setup
+        ready = False
         try:
             problem = await self._assign(conversation, personas)
+            if problem:
+                await self._delete(conversation)
+                await ws.send_json({"type": "error", "text": f"Couldn't start that chat: {problem}"})
+            ready = not problem
         finally:
             self._setups.pop(conversation, None)
-            setup.set_result(None)
-        if problem:
-            await self._delete(conversation)
-            await ws.send_json({"type": "error", "text": f"Couldn't start that chat: {problem}"})
+            setup.set_result(ready)
 
     async def _assign(self, conversation: str, personas: list[str]) -> str:
         """Give one chat these personas, keeping everything else of the assignment it has now. Returns what went
@@ -513,7 +517,14 @@ class WebUI(Interface):
         setup = self._setups.get(conversation)
         if setup is not None:  # its own assignment first, or the message would go to the whole class
             await asyncio.wait({setup}, timeout=QUIET_TIMEOUT_S + 5)
-        record = self.store.conversation(conversation) or self.store.ensure(conversation, "New chat")
+            if not setup.done() or not setup.result():
+                await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "chat_not_ready"})
+                return
+        record = self.store.conversation(conversation)
+        if record is None:  # deleted (here, on another device, or after its setup failed): never re-created by a
+            # message, which would bring it back with the whole class instead of the classmates it was for
+            await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "unknown_chat"})
+            return
         if record["title"] == "New chat" and text.strip() and not text.startswith("$"):
             self.store.rename(conversation, text.strip().splitlines()[0][:48])
         refs = tuple(FileRef(item["path"], item["name"], item["mime"], item["size"]) for item in files)
