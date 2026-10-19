@@ -34,6 +34,7 @@ from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
 
 COMMAND_ENGINE = "$command"
+SHARED_DIARY = ":scope:"  # the key prefix of diaries several conversations share (diary_scope)
 BUILTIN_COMMANDS = (
     Command("help", "List commands, or explain one", (Option("command", "A command name"),),
             examples=("", "remind")),
@@ -258,16 +259,18 @@ class Manager:
 
     @staticmethod
     def diary_scope(address: str, options: Mapping[str, Any]) -> str:
-        """Where diary notes live: the conversation, or `scope:<name>` shared by every conversation whose
-        assignment sets `diary_scope: <name>` (the same character remembering a person across them)."""
+        """Where diary notes live: the conversation, or `:scope:<name>` shared by every conversation whose
+        assignment sets `diary_scope: <name>` (the same character remembering a person across them). A shared
+        key starts with `:`, which no address can (an interface name is never empty), so no conversation's
+        own notes can mix with a scope's."""
         name = str(options.get("diary_scope") or "").strip()
-        return f"scope:{name}" if name else address
+        return SHARED_DIARY + name if name else address
 
     @staticmethod
     def diary_subject(address: str, scope: str, sender_id: str) -> str:
         """Who a diary note is about. In its own conversation a sender ID is enough; a scope shared across
         conversations may span interfaces, where sender IDs collide, so there it is `<interface>:<sender>`."""
-        if not sender_id or scope == address:
+        if not sender_id or not scope.startswith(SHARED_DIARY):
             return sender_id
         return f"{Address.parse(address).interface}:{sender_id}"
 

@@ -124,7 +124,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         adapter = core.providers._adapters["fake"]
         self.assertIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])  # the group shares it
         self.assertNotIn("Likes spicy noodles", adapter.calls[2]["messages"][0]["content"])  # elsewhere does not
-        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "chat:alice")], ["food.favorite"])
+        self.assertEqual([n.key for n in core.tank.notes("p", ":scope:mine", "chat:alice")], ["food.favorite"])
         await iface(core).say("$memory", conversation="group")  # the DM's note, read from the group chat
         await settle(core)
         self.assertIn("Likes spicy noodles", iface(core).texts("group")[-1])
@@ -145,10 +145,28 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         adapter = core.providers._adapters["fake"]
         self.assertNotIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])
-        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "chat:alice")], ["food.favorite"])
+        self.assertEqual([n.key for n in core.tank.notes("p", ":scope:mine", "chat:alice")], ["food.favorite"])
         await iface(core, "owner").say("$memory clear p", conversation="dm")
         await settle(core)
-        self.assertEqual(len(core.tank.notes("p", "scope:mine", "chat:alice")), 1)  # not hers to clear
+        self.assertEqual(len(core.tank.notes("p", ":scope:mine", "chat:alice")), 1)  # not hers to clear
+
+    async def test_no_conversation_can_spell_a_shared_scopes_key(self):
+        # An interface named `scope` with a conversation `mine` is the address scope:mine.
+        core = await self.core({"extension_config": {"fake": {"interfaces": {"scope": {}}}},
+                                "assignments": {"*": {"engine": "assistant", "personas": ["p"]},
+                                                "chat:dm": {"engine": "assistant", "personas": ["p"],
+                                                            "options": {"diary_scope": "mine"}}}},
+                               [turn("Noted!", diary=[{"key": "food.favorite", "kind": "fact",
+                                                       "note": "Likes spicy noodles", "importance": 4}]),
+                                turn("Hi.")])
+        await iface(core, "scope").say("I love 担担面, the spicy one", conversation="mine")
+        await settle(core)
+        await iface(core).say("hello", conversation="dm")
+        await settle(core)
+        adapter = core.providers._adapters["fake"]
+        self.assertNotIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])
+        self.assertEqual([n.key for n in core.tank.notes("p", "scope:mine", "alice")], ["food.favorite"])
+        self.assertEqual(core.tank.notes("p", ":scope:mine", "chat:alice"), [])
 
 
 if __name__ == "__main__":
