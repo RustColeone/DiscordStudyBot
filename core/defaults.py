@@ -20,6 +20,11 @@ DEFAULT_PROMPT = ("You are a helpful, friendly assistant in a Discord server. An
 BASIC_FEATURES = ["reminders.create", "reminders.cancel", "discord.music", "discord.music_control",
                   "discord.queue_music", "discord.clock_start", "discord.clock_stop", "core.add_routine",
                   "core.delete_routine", "core.pause_routine", "core.resume_routine"]
+# What $model offers to choose from: language models released since mid-2026 (models_since uses the release
+# dates OpenAI, xAI and Anthropic give; Gemini gives none, so its list is narrowed by name only).
+MODELS_SINCE = "2026-06-01"
+NOT_LANGUAGE = ["image", "realtime", "live", "transcribe", "audio", "tts", "whisper", "embedding", "moderation",
+                "search"]
 DEFAULT_CHAIN = [
     {"provider": "deepseek", "model": "deepseek-flash"},
     {"provider": "openai", "model": "gpt-6-luna"},
@@ -40,10 +45,14 @@ def default_config() -> dict:
             "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com",
                          "api_key_env": "DEEPSEEK_API_KEY", "schema_mode": "json_object", "effort_param": True},
             "openai": {"kind": "openai_compatible", "api_key_env": "OPENAI_API_KEY", "schema_mode": "native",
-                       "token_param": "max_completion_tokens", "effort_param": True},
+                       "token_param": "max_completion_tokens", "effort_param": True,
+                       "models_since": MODELS_SINCE, "models_exclude": NOT_LANGUAGE},
             # Legacy spacing between Gemini requests avoids its per-minute rate limits.
-            "gemini": {"kind": "gemini", "api_key_env": "GEMINI_API_KEY", "min_interval_s": 1.1},
-            "claude": {"kind": "anthropic", "api_key_env": "CLAUDE_API_KEY", "adaptive_thinking": True},
+            "gemini": {"kind": "gemini", "api_key_env": "GEMINI_API_KEY", "min_interval_s": 1.1,
+                       "models_exclude": [*NOT_LANGUAGE, "lyria", "robotics", "computer-use", "deep-research",
+                                          "antigravity", "nano-banana"]},
+            "claude": {"kind": "anthropic", "api_key_env": "CLAUDE_API_KEY", "adaptive_thinking": True,
+                       "models_since": MODELS_SINCE},
             "openrouter": {"kind": "openai_compatible", "base_url": "https://openrouter.ai/api/v1",
                            "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object", "vision": False},
         },

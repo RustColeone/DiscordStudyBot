@@ -154,7 +154,8 @@ EXTENSION = Extension("acme", setup, contracts="1", settings=(
 
 * Kinds register first, then providers, then profiles, so each may use the ones before; core.yml's
   providers may use a module's kind too. A kind that already exists (built-in or another module's) refuses
-  to load. An adapter may also define `async list_models() -> list[str]`.
+  to load. An adapter may also define `async list_models()`, returning IDs or (ID, release date) pairs;
+  `$model` shows them, narrowed by the provider's `models_since`, `models_exclude` and `models_allow` (regular expressions).
 * **Keys, the proper way:** name the variable in `api_key_env`, keep the key in `.env`, and declare it
   as a `secret` setting so `python -m core setup` asks for it. Keys kept this way are scrubbed from what
   models see. The built-in kinds also accept `api_key` written in a provider's settings (for example in
@@ -371,7 +372,7 @@ Return a `Delivery`:
 
 | `reply.kind` | Render |
 | --- | --- |
-| `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). |
+| `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). A persona's message has `reply.data["provider"]` and `reply.data["model"]`, the model that wrote it; a `$command`'s answer has its result's data as JSON in `reply.data["result"]` (`$model` lists each persona's model and the providers' models there). Showing them is optional. |
 | `file` | Send `reply.file.path` (named `reply.file.name`), caption `reply.text`. The core already checked `display.files` and `max_upload_mb`. |
 | `progress` | A transient status line, one per run (`reply.run_id`): edit it in place where you can, and clear it when the run answers. It carries a `Cancel` action (`$cancel <run>`), which stops the run's work (an engine's turn or a `$command`'s capability). You get it only if your `display.progress` is true or you are the control route. |
 | `notice` | Phrase `reply.code` in your platform's style (table below). |

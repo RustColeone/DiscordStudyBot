@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Mapping
 
-from contracts import Address, Capability, Reply, Risk, ToolResult
+from contracts import Address, Capability, Command, Option, Reply, Risk, ToolResult
 from core.gateway.routines import describe
+from core.manager.model_choice import model_arguments_tier
 from core.manager.routines import Caller
 
 if TYPE_CHECKING:
@@ -112,6 +113,9 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                                  else f"Routine {routine['id']} paused.")
         return run
 
+    async def model(arguments, context) -> ToolResult:
+        return await manager.model_choices.command(context.address, str(arguments.get("text") or ""))
+
     rule_schema = {"type": ["object", "null"], "description": "enabled, allow_senders, require_mention_in_groups; null deletes"}
     capabilities = [
         Capability("core.send_message", "Send a text message to another conversation (interface:conversation).",
@@ -167,6 +171,16 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                    "to another (target), or remove it (target=null). The target must be admitted.",
                    guarded(set_forward), {"address": {"type": "string"}, "target": {"type": ["string", "null"]}},
                    ("address",), Risk.CRITICAL, owner_only=True, never_auto=True),
+        # Typed by people only (internal: never offered to models, so no model picks its own model).
+        Capability("core.model", "Show which model each persona answers with here and which models the providers "
+                   "offer, or choose one for a persona in this conversation.",
+                   guarded(model), {"text": {"type": "string", "description": "empty, a provider, "
+                                             "'<persona> <provider>/<model>' or '<persona> reset'"}},
+                   risk=Risk.READ, escalate=model_arguments_tier, internal=True, access="admin", timeout_s=60,
+                   command=Command("model", "Show or choose the model each persona answers with here",
+                                   (Option("text", "a provider, or <persona> <provider>/<model> (or reset)"),),
+                                   examples=("grok grok/grok-4.3", "grok reset", "openai"), access="admin"),
+                   command_argument="text"),
         Capability("core.cancel_runs", "Cancel all open runs in a conversation (interface:conversation).",
                    guarded(cancel_runs), {"address": {"type": "string"}}, ("address",), Risk.WRITE, owner_only=True),
     ]

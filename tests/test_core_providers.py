@@ -52,6 +52,21 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             Providers({}, {"default": [{"provider": "ghost", "model": "m"}]})
 
+    async def test_listed_models_are_narrowed_by_the_providers_settings(self):
+        import datetime as dt
+
+        class Lister(FakeAdapter):
+            async def list_models(self):
+                return [("gpt-6", dt.datetime(2026, 9, 14, tzinfo=dt.timezone.utc)), ("gpt-4o", dt.date(2024, 5, 13)),
+                        ("gpt-image-3", dt.date(2026, 9, 4)), ("undated-model", None), "plain-id"]
+
+        settings = {"models_since": dt.date(2026, 6, 1), "models_exclude": ["image"]}  # as YAML reads them
+        providers = Providers({"x": settings, "y": {**settings, "models_since": "2026-06-01", "models_allow": ["^gpt"]}},
+                              {"default": [{"provider": "x", "model": "gpt-6"}]},
+                              adapters={"x": Lister(), "y": Lister()})
+        self.assertEqual(await providers.list_models("x"), ["gpt-6", "plain-id", "undated-model"])
+        self.assertEqual(await providers.list_models("y"), ["gpt-6"])
+
     def test_the_key_comes_from_its_env_variable_else_from_the_settings(self):
         from core.providers.adapters import NotConfigured, api_key
         settings = {"api_key_env": "CORE_TEST_KEY", "api_key": "written-in-config"}
@@ -65,6 +80,10 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
             providers = Providers({"x": {"kind": "openai_compatible", **settings}},
                                   {"default": [{"provider": "x", "model": "m"}]})
             self.assertEqual(providers.configured(), ["x"])
+        with patch.dict(os.environ, {"CORE_TEST_KEY": "disabled"}):  # switched off: not offered, not counted
+            providers = Providers({"x": {"kind": "openai_compatible", "api_key_env": "CORE_TEST_KEY"}},
+                                  {"default": [{"provider": "x", "model": "m"}]})
+            self.assertEqual((providers.configured(), providers.available()), ([], []))
 
 
 class FakeOpenAIClient:

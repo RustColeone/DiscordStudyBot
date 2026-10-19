@@ -45,12 +45,13 @@ class Contributions:
     engines: Sequence[Engine] = ()
     capabilities: Sequence[Capability] = ()
     personas: Sequence[Persona] = ()
-    adapters: Mapping[str, AdapterFactory] = field(default_factory=dict)
-    providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     profiles: Mapping[str, Sequence[Mapping[str, Any]]] = field(default_factory=dict)
     assignments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     admission: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     permissions: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    # Added later, so they go last: plugins may pass the fields above positionally.
+    providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    adapters: Mapping[str, AdapterFactory] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

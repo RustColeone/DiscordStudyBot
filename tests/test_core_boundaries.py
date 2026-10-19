@@ -35,6 +35,13 @@ class BoundaryTests(unittest.TestCase):
                 self.assertTrue(level or module == "contracts" or module in sys.stdlib_module_names,
                                 f"{path.name} imports {module}")
 
+    def test_contributions_keep_their_argument_order_new_fields_go_last(self):
+        from dataclasses import fields
+        from contracts import Contributions
+        self.assertEqual([item.name for item in fields(Contributions)][:8],
+                         ["interfaces", "engines", "capabilities", "personas", "profiles", "assignments", "admission",
+                          "permissions"])
+
     def test_core_never_imports_extensions(self):
         for path in (ROOT / "core").rglob("*.py"):
             for module, level in imports(path):

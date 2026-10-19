@@ -127,8 +127,10 @@ assignments.
 * **`$commands`.** `$approve <id> [always]`, `$deny`, `$runs`, `$cancel`, `$tools`, `$help`, `$call` (owner
   runs any capability with JSON arguments), `$permissions` (creator: what applies here, the saved grants,
   revoking one), `$memory` (anyone reads, forgets or clears what personas keep about them in this
-  conversation; deliberately not a capability, so models cannot delete notes), plus capabilities that
-  declare a `command`.
+  conversation; deliberately not a capability, so models cannot delete notes), `$model` (admins: which
+  model each persona answers with here and what the providers offer, asked live; a choice per persona and
+  conversation is tried before her profile, which stays the fallback; never offered to models), plus
+  capabilities that declare a `command`.
 
 ## Permissions
 

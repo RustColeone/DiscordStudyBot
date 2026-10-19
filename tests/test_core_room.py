@@ -82,6 +82,11 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(sorted(text for _, _, text in self.spoken(core)), ["C", "D", "G", "L"])
         self.assertEqual(core.tank.runs(("done",))[0].status, "done")
+        # Each message says which model wrote it: her own, though the four answered at once.
+        self.assertEqual({reply.speaker: (reply.data["provider"], reply.data["model"]) for reply in iface(core).delivered
+                          if reply.kind == "text" and reply.speaker},
+                         {"Luna": ("fake", "luna"), "Gemini": ("fake", "gemini"), "Claude": ("fake", "claude"),
+                          "DeepSeek": ("fake", "deepseek")})
 
     async def test_tools_jobs_and_dependencies_share_one_board(self):
         script = Script(

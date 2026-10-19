@@ -491,6 +491,8 @@ class PluginTests(CoreCase):
                                 "providers": {"desk": {"kind": "echo", "prefix": "desk/"}},
                                 "profiles": {"desk": [{"provider": "desk", "model": "m"}]}})
         hello = [{"role": "user", "content": "hi"}]
+        # Neither names a key, so both count as usable before their first request (no false startup warning).
+        self.assertEqual(core.providers.configured(), ["desk", "fake", "lab"])
         self.assertEqual((await core.providers.generate(ModelRequest(hello, profile="sage"))).text, "lab/big: hi")
         self.assertEqual((await core.providers.generate(ModelRequest(hello, profile="desk"))).text, "desk/m: hi")
 

@@ -100,7 +100,8 @@ class ModelAdapter(Protocol):
     `messages` use roles `system`, `user` and `assistant`. With `schema`, ask the API for JSON matching it
     (natively if it can, otherwise in the prompt). `images` go with the last user message. Raise
     NotConfigured when the provider cannot be used; any other exception moves on to the next candidate.
-    An adapter may also define `async list_models() -> list[str]`, the models its provider offers."""
+    An adapter may also define `async list_models()`, the models its provider offers: IDs, or (ID, release
+    date or datetime) pairs so a provider's `models_since` setting can apply."""
 
     async def complete(self, model: str, messages: Sequence[Mapping[str, str]], schema: Mapping[str, Any] | None,
                        schema_name: str, effort: Effort, max_tokens: int, timeout_s: float,

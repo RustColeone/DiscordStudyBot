@@ -39,10 +39,14 @@
 # control: "discord:dm:123456789012345678"
 
 # Provider settings merge over the defaults, e.g. a provider whose models cannot see images
-# (tried last when a request has images) or a minimum gap between requests:
+# (tried last when a request has images), a minimum gap between requests, or what `$model` offers:
+# models released since a date, minus IDs matching an exclude pattern, and (with an allow list) only IDs
+# matching one of it; patterns are regular expressions, case-insensitive, so plain words work. A list
+# here replaces the built-in one. Only the models offered can be chosen.
 # providers:
 #   openrouter: {vision: false}
-#   gemini: {min_interval_s: 1.1}
+#   gemini: {min_interval_s: 1.1, models_allow: ['^gemini-3\.8-flash$']}
+#   claude: {models_exclude: [fable, opus]}
 
 # Model profiles: ordered candidates; candidates without an API key are skipped.
 # A candidate may override `vision`, `effort` or `max_tokens`.

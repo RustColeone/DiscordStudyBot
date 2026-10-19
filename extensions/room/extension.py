@@ -11,7 +11,9 @@ from .personas import PERSONAS
 # others' providers are built into the core). The room's config.yml `providers:` and `profiles:` override
 # these, and core.yml overrides both.
 PROVIDERS = {"grok": {"kind": "openai_compatible", "base_url": "https://api.x.ai/v1", "api_key_env": "GROK_API_KEY",
-                      "schema_mode": "native", "effort_param": True}}
+                      "schema_mode": "native", "effort_param": True,
+                      # $model offers her recent language models (not grok-imagine's pictures and videos).
+                      "models_since": "2026-06-01", "models_exclude": ["imagine"]}}
 OWN_MODELS = {
     "deepseek": [{"provider": "deepseek", "model": "deepseek-flash"}],
     "luna": [{"provider": "openai", "model": "gpt-6-luna"}],

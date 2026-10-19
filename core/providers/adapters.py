@@ -3,6 +3,7 @@ text. Modules may add kinds of their own (contracts.ModelAdapter, Contributions.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                ".webp": "image/webp"}
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_IMAGES = 6
+LIST_TIMEOUT_S = 15.0  # asking a provider which models it offers
 
 
 def load_images(files) -> list[Image]:
@@ -110,6 +112,13 @@ class OpenAICompatible:
                              getattr(usage, "completion_tokens", 0) or 0, reason == "length", mode)
 
 
+    async def list_models(self) -> list[tuple[str, dt.datetime | None]]:
+        """(ID, release time): OpenAI-compatible APIs give `created` as a Unix time (some give none)."""
+        return [(model.id, dt.datetime.fromtimestamp(model.created, dt.timezone.utc)
+                 if isinstance(getattr(model, "created", None), (int, float)) else None)
+                async for model in self.client().models.list(timeout=LIST_TIMEOUT_S)]
+
+
 class Gemini:
     def __init__(self, settings: Mapping[str, Any], client: Any = None):
         self.settings = dict(settings)
@@ -146,6 +155,15 @@ class Gemini:
         return AdapterResult(response.text or "", getattr(usage, "prompt_token_count", 0) or 0,
                              getattr(usage, "candidates_token_count", 0) or 0, reason == "MAX_TOKENS",
                              "native" if schema else "")
+
+
+    async def list_models(self) -> list[str]:
+        """Models that can generate text (not embeddings or image-only ones), without the `models/` prefix."""
+        from google.genai import types
+        pager = await self.client().aio.models.list(config=types.ListModelsConfig(
+            http_options=types.HttpOptions(timeout=int(LIST_TIMEOUT_S * 1000))))
+        return [model.name.removeprefix("models/") async for model in pager
+                if "generateContent" in (model.supported_actions or ())]
 
 
 UNSUPPORTED_BY_CLAUDE = {"maxItems", "uniqueItems", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
@@ -217,6 +235,11 @@ class Anthropic:
         return AdapterResult(text, getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0,
                              str(getattr(response, "stop_reason", "")) == "max_tokens",
                              "native" if native else "instruction" if schema else "")
+
+
+    async def list_models(self) -> list[tuple[str, dt.datetime | None]]:
+        return [(model.id, getattr(model, "created_at", None))
+                async for model in self.client().models.list(timeout=LIST_TIMEOUT_S)]
 
 
 ADAPTERS = {"openai_compatible": OpenAICompatible, "gemini": Gemini, "anthropic": Anthropic}

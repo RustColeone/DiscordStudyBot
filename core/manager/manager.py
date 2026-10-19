@@ -25,6 +25,7 @@ from contracts import (Action, Address, Capability, Command, Delivery, Display, 
                        ToolResult)
 from core.audit import Audit
 from core.manager.handles import SessionHandle, ToolContextHandle
+from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
 from core.manager.secrets import Secrets
@@ -134,6 +135,8 @@ class Manager:
         # which a grant requires before it is offered.
         self.grants = tank.store("core:grants")
         self.approved_once = tank.store("core:approved_once")
+        self.model_choices = ModelChoices(self)  # $model: a chosen model per persona and conversation
+        self._answered: dict[str, dict[str, tuple[str, str]]] = {}  # run → profile → (provider, model) last used
         self.permissions = Permissions()  # set by the app once every module is loaded
         self.secrets = Secrets()
         self.owners = owners
@@ -463,6 +466,7 @@ class Manager:
                 outcome = await self._watch(run_id, engine.run(session), started, remaining)
             except asyncio.CancelledError:
                 self._add_usage(run_id, seconds=self._active_seconds(run_id, started))
+                self._answered.pop(run_id, None)
                 raise
             except asyncio.TimeoutError:
                 failure = ("budget_exceeded", "The run's time budget is used up")
@@ -472,6 +476,7 @@ class Manager:
                 failure = ("engine_error", f"{type(error).__name__}: {error}"[:500])
         self._add_usage(run_id, seconds=self._active_seconds(run_id, started))
         self._delivery_seconds.pop(run_id, None)
+        self._answered.pop(run_id, None)
         address = record.address
         async with self._locks[address]:
             record = self.tank.run(run_id)
@@ -576,7 +581,11 @@ class Manager:
         if record.usage.get("model_calls", 0) >= budget.model_calls:
             raise ModelError("budget_exceeded", "This run used its model-call budget")
         self._add_usage(run_id, model_calls=1)
-        result = await self.providers.generate(request, profile)
+        persona = next((name for name in record.personas
+                        if name in self.personas and self.personas[name].profile == profile), None)
+        result = await self.providers.generate(request, profile,
+                                               first=self.model_choices.first(record.address, persona))
+        self._answered.setdefault(run_id, {})[profile] = (result.provider, result.model)
         self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens)
         self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
                           duration_s=result.duration_s, input_tokens=result.input_tokens,
@@ -972,17 +981,25 @@ class Manager:
                                                      + time.monotonic() - started)
 
     async def reply(self, run_id: str, text: str, quote: str | None = None, speaker: str = "",
-                    label: str = "") -> Delivery:
+                    label: str = "", data: Mapping[str, str] | None = None) -> Delivery:
         record = self.tank.run(run_id)
         trigger = request_from_dict(record.trigger)
         if not text.strip():
             return Delivery(False, detail="empty")
         text = self.secrets.scrub(text)
         source = "command" if record.engine == COMMAND_ENGINE else "run"
+        data = dict(data or {})
+        # A persona's message says which model wrote it (her profile's last call in this run).
+        persona = next((self.personas[name] for name in record.personas
+                        if name in self.personas and self.personas[name].display_name == speaker), None) \
+            if speaker else None
+        answered = self._answered.get(run_id, {}).get(persona.profile) if persona else None
+        if answered:
+            data.update(provider=answered[0], model=answered[1])
         delivery = await self._run_output(record, Reply(trigger.address, "text", text=text,
                                                         quote=quote if trigger.display.quotes else None,
                                                         in_reply_to=trigger.id, run_id=run_id, source=source,
-                                                        speaker=speaker, label=label))
+                                                        speaker=speaker, label=label, data=data))
         if delivery.ok:
             self.tank.record_message(record.address, "out", text, message_id=delivery.message_id, run_id=run_id,
                                      reply_to=trigger.id, sender_name=speaker,
@@ -1067,7 +1084,9 @@ class Manager:
 
     async def _deliver_result(self, record: RunRecord, result: ToolResult) -> None:
         if result.summary.strip():
-            await self.reply(record.id, result.summary)
+            # The result's data goes along (JSON in data["result"]) for interfaces that show more than text.
+            await self.reply(record.id, result.summary,
+                             data={"result": json.dumps(result.data, ensure_ascii=False)} if result.data else None)
         if result.status == "success":
             for file in result.files:
                 await self.send_file(record.id, file)
