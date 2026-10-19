@@ -451,6 +451,36 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([result["status"] for result in self.reported(core, approval)], ["success"])
         self.assertIn("file ready", iface(core).texts("room", "progress"))
 
+    async def test_overlapping_deliveries_are_left_out_of_the_runs_time_until_the_last_ends(self):
+        core = await self.core({"extension_config": {"fake": {"interfaces": {"chat": {"progress": True}}}}})
+        chat = iface(core)
+        await chat.say("hold")  # the engine keeps running (its clock held) until RELEASE
+        await asyncio.sleep(0.02)
+        run = core.tank.runs(("running",))[0]
+        chat.delay = 0.05
+        quick = asyncio.create_task(core.manager.progress(run.id, "quick"))
+        await asyncio.sleep(0.01)
+        chat.delay = 0.4
+        slow = asyncio.create_task(core.manager.progress(run.id, "slow"))  # still going when the quick one ends
+        await asyncio.gather(quick, slow)
+        clock = core.manager._clocks[run.id]
+        self.assertLess(core.manager._active_seconds(run.id, clock[1]), 0.15)  # about 0.42 s, nearly all delivering
+        chat.delay = 0.0
+        extension_module(core, "probe").RELEASE.set()
+        await settle(core)
+
+    async def test_an_approved_action_of_a_waiting_run_shows_its_progress(self):
+        core = await self.core({"permissions": {"*": {"rules": {"tools.make_file": "ask"}}},
+                                "extension_config": {"fake": {"interfaces": {"chat": {"progress": True}}}}})
+        await iface(core).say('tool tools.make_file {"name": "notes.txt"}')
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        await iface(core, "owner").say(f"$approve {approval['id']}", conversation="dm", sender="boss")
+        await settle(core)
+        progress = [reply for reply in iface(core).delivered if reply.kind == "progress" and reply.text == "file ready"]
+        self.assertEqual(len(progress), 1)
+        self.assertEqual(progress[0].actions[0].command, f"$cancel {approval['run_id']}")  # with its Cancel button
+
     async def test_stopping_the_core_during_an_approved_action_leaves_it_to_the_next_start(self):
         core, tools, approval = await self.approve_slow()
         core = await self.restart(core)  # a stop, not a cancel: the action is cut off, not reported cancelled

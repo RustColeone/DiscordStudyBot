@@ -158,7 +158,7 @@ class Manager:
         self.gateway: GatewayLink | None = None
         self._stopping = False
         self._delivery_seconds: dict[str, float] = defaultdict(float)
-        self._delivering: dict[str, float] = {}
+        self._delivering: dict[str, list] = {}  # run → [sends in flight, since the first of them began]
         # Runs currently waiting on a capability or a delivery. They do not hold their lane:
         # new messages start new runs instead of queuing behind long work (a video conversion).
         self._working: dict[str, list[tuple[str, float]]] = {}
@@ -579,7 +579,7 @@ class Manager:
         # Waiting for a platform to deliver (for example a ten-minute upload) is not the run's work time.
         now = time.monotonic()
         delivering = self._delivering.get(run_id)
-        ongoing = now - delivering if delivering is not None else 0.0
+        ongoing = now - delivering[1] if delivering is not None else 0.0
         return max(0.0, now - started - self._delivery_seconds.get(run_id, 0.0) - ongoing)
 
     def _clock_hold(self, run_id: str) -> None:
@@ -1080,7 +1080,8 @@ class Manager:
         """Why a run's own output must not be sent now (re-checked right before every delivery)."""
         if record.engine == COMMAND_ENGINE:
             return None
-        if record.status != "running":
+        # A waiting run speaks only through an approved action being carried out for it (its progress).
+        if record.status != "running" and not (record.status == "waiting_approval" and record.id in self._carrying):
             return "run_closed"
         assignment = self.assignment_for(Address.parse(record.address))
         if assignment is None or not assignment.enabled:
@@ -1107,20 +1108,21 @@ class Manager:
         if reason is not None:
             self.audit.record("delivery_refused", run=record.id, reason=reason)
             return Delivery(False, detail=reason)
-        started = time.monotonic()
-        nested = record.id in self._delivering
-        if not nested:
-            self._delivering[record.id] = started
+        # Delivery time is left out of the run's active time: from the first send in flight until the last ends
+        # (overlapping sends count once).
+        delivering = self._delivering.setdefault(record.id, [0, time.monotonic()])
+        delivering[0] += 1
         try:
             if reply.kind == "file":
                 with self._work(record.id, "delivering a file"):
                     return await self._deliver(reply)
             return await self._deliver(reply)
         finally:
-            if not nested:
-                self._delivering.pop(record.id, None)
-                if record.id in self._clocks:  # left out of the run's active time
-                    self._delivery_seconds[record.id] += time.monotonic() - started
+            delivering[0] -= 1
+            if delivering[0] == 0:
+                del self._delivering[record.id]
+                if record.id in self._clocks:
+                    self._delivery_seconds[record.id] += time.monotonic() - delivering[1]
 
     async def reply(self, run_id: str, text: str, quote: str | None = None, speaker: str = "",
                     label: str = "", data: Mapping[str, str] | None = None,
