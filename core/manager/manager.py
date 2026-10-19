@@ -16,7 +16,7 @@ import time
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Literal, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 import jsonschema
 
@@ -289,10 +289,12 @@ class Manager:
         # Decisions the stop cut off are reported first, for running runs too (a room keeps running while one job
         # waits for its approval): without awaiting, as the gateway already takes `$approve`, and before any run
         # starts, so each finds its outcomes. Then the running runs go on, then the waiting ones are resumed.
-        running = [record for record in self.tank.runs(("running",), limit=1000) if record.engine != COMMAND_ENGINE]
+        running = self.tank.runs(("running",), limit=1000)
         waiting = self.tank.runs(("waiting_approval",), limit=1000)
-        outcomes = {record.id: self._record_decisions(record) for record in [*running, *waiting]}
-        for record in self.tank.runs(("running",), limit=1000):
+        for record in [*running, *waiting]:
+            if record.engine != COMMAND_ENGINE or record.status == "waiting_approval":
+                self._record_decisions(record)
+        for record in running:
             if record.engine == COMMAND_ENGINE:
                 self.tank.update_run(record.id, status="failed", error="interrupted")
                 continue
@@ -300,37 +302,43 @@ class Manager:
             self.audit.record("run_resumed", run=record.id, engine=record.engine)
             self._launch(record.id, resumed=True)
         for record in waiting:  # after the running ones, so a run this resumes is not launched twice
-            if outcomes[record.id] is not False:
-                if not self.tank.approvals("pending", record.id):
-                    self.audit.record("run_resumed", run=record.id, engine=record.engine, after="decision")
-                await self._resume_after_decision(record.id, outcomes[record.id])
+            if self.tank.approvals("pending", record.id):
+                continue  # still waiting for the owner; deciding the last approval resumes it
+            if await self._resume_after_decision(record.id, self._latest_outcome(record.id)):
+                self.audit.record("run_resumed", run=record.id, engine=record.engine, after="decision")
 
-    def _record_decisions(self, record: RunRecord) -> ToolResult | None | Literal[False]:
-        """A waiting run whose approvals the core stopped while deciding (approval marked, action run, result
-        reported, run resumed): report each decision that was not, never running an action here. One that
-        finished reports its stored result, one that started is uncertain (not repeated), one that had not
-        started was not run (the run may ask again). Returns the outcome to resume with (the latest decision's
-        result; None after a denial), or False when there is nothing to do (it only waits for the owner)."""
+    def _record_decisions(self, record: RunRecord) -> None:
+        """Report each decision about this run's approvals that the stop cut off (approval marked, action run,
+        result reported), whether the run waited for it or went on with other room jobs meanwhile. No action runs
+        here: one that finished after its approval reports its stored result, one that started is uncertain (not
+        repeated), one that had not started was not run (the run may ask again)."""
         decided = [*self.tank.approvals("approved", record.id), *self.tank.approvals("denied", record.id)]
-        if not decided and self.tank.approvals("pending", record.id):
-            return False
+        if not decided:
+            return
         events = self.tank.events(record.id, ("tool_result", "approval_denied"))
+        reported = {event.data.get("approval_id") for event in events}
+        # Reports written before they named their approval: matched by call and time instead.
+        unnamed = [event for event in events if "approval_id" not in event.data]
         for approval in sorted(decided, key=lambda item: item["created_at"]):
-            # Reported by an event for its call made after it was asked (a run may ask again with the same call).
-            if any(event.data.get("call_key") == approval["call_key"] and event.at >= approval["created_at"]
-                   for event in events):
+            lock = self._approval_locks.get(approval["id"])
+            if (approval["id"] in reported or (lock is not None and lock.locked())  # being decided right now
+                    or any(event.data.get("call_key") == approval["call_key"] and event.at >= approval["created_at"]
+                           for event in unnamed)):
                 continue
             arguments = self.secrets.scrub_value(approval["arguments"])
             self.tank.redact_approval(approval["id"], arguments)
-            call = {"call_key": approval["call_key"], "name": approval["name"], "arguments": arguments}
+            call = {"call_key": approval["call_key"], "name": approval["name"], "approval_id": approval["id"],
+                    "arguments": arguments}
             self.audit.record("decision_recovered", run=record.id, approval=approval["id"], status=approval["status"])
             if approval["status"] == "denied":
                 self.tank.append_event(record.id, "approval_denied", call)
                 continue
             prior = self.tank.action(record.id, approval["call_key"])
-            if prior is not None and prior["status"] == "done":
+            # A finished action counts only if it finished after this approval (not an earlier attempt's).
+            if prior is not None and prior["status"] == "done" and (prior["finished_at"] or 0) > (
+                    approval["decided_at"] or 0):
                 result = ToolResult.from_dict(prior["result"])
-            elif prior is not None:
+            elif prior is not None and prior["status"] == "started":
                 result = ToolResult.fail("An earlier attempt of this action was interrupted by a restart and may have "
                                          "taken effect; it was not repeated.", "uncertain_previous_attempt")
                 self.tank.finish_action(record.id, approval["call_key"], result.to_dict())
@@ -338,10 +346,13 @@ class Manager:
                 result = ToolResult.fail("It was approved, but the restart came before it ran; it was not run. Ask "
                                          "again if it is still wanted.", "approval_interrupted")
             self.tank.append_event(record.id, "tool_result", {**call, "result": result.to_dict()})
-        latest = self.tank.events(record.id, ("tool_result", "approval_denied"))
-        if not latest or latest[-1].kind == "approval_denied":
+
+    def _latest_outcome(self, run_id: str) -> ToolResult | None:
+        """The latest decision's outcome, as a resume after deciding it would carry (None after a denial)."""
+        events = self.tank.events(run_id, ("tool_result", "approval_denied"))
+        if not events or events[-1].kind == "approval_denied":
             return None
-        return ToolResult.from_dict(latest[-1].data["result"])
+        return ToolResult.from_dict(events[-1].data["result"])
 
     def _clean_workspaces(self, keep_days: float = 7.0) -> None:
         root = self.data_dir / "workspaces"
@@ -923,7 +934,7 @@ class Manager:
             arguments = approval["arguments"]
             # Once decided, only the scrubbed form is kept (a confirmed command may have carried a secret).
             self.tank.redact_approval(approval_id, self.secrets.scrub_value(arguments))
-            call = {"call_key": approval["call_key"], "name": approval["name"],
+            call = {"call_key": approval["call_key"], "name": approval["name"], "approval_id": approval_id,
                     "arguments": self.secrets.scrub_value(arguments)}
             if approve:
                 note = self._remember_approval(record, approval["name"], arguments, decided_by, always)
@@ -965,20 +976,23 @@ class Manager:
         return (f" Saved: {name}({subject}) runs without asking in {record.address} for {GRANT_DAYS} days "
                 f"(grant {self.grant_id(key)}; `$permissions revoke {self.grant_id(key)}` removes it).")
 
-    async def _resume_after_decision(self, run_id: str, result: ToolResult | None) -> None:
+    async def _resume_after_decision(self, run_id: str, result: ToolResult | None) -> bool:
+        """Resume a run whose last pending approval was decided (a command run closes with its result). False
+        when it was not waiting for that, or still waits for another."""
         record = self.tank.run(run_id)
         async with self._locks[record.address]:
             record = self.tank.run(run_id)
             if record.status != "waiting_approval" or self.tank.approvals("pending", run_id):
-                return
+                return False
             if record.engine == COMMAND_ENGINE:
                 self.tank.update_run(run_id, status="done")
             else:
                 self.tank.update_run(run_id, status="running")
                 self._launch(run_id, resumed=False)
-                return
+                return True
         if result is not None:
             await self._deliver_result(record, result)
+        return True
 
     # ---- outbound ---------------------------------------------------------------------------------
     async def _deliver(self, reply: Reply) -> Delivery:

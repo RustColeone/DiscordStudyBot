@@ -411,12 +411,41 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         first = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
         core.tank.decide_approval(first["id"], "approved", "owner:dm")
         core.tank.append_event(first["run_id"], "tool_result", {"call_key": first["call_key"], "name": first["name"],
-                                                                "arguments": first["arguments"],
+                                                                "approval_id": first["id"], "arguments": first["arguments"],
                                                                 "result": {"status": "failed", "summary": "earlier"}})
-        await asyncio.sleep(0.01)
         core.tank.create_approval("again", first["run_id"], first["call_key"], first["name"], first["arguments"],
                                   first["address"])
         return core, first
+
+    def outcomes(self, core, run_id):
+        return [(event.data.get("approval_id"), event.data["result"]["summary"])
+                for event in core.tank.events(run_id, ("tool_result",))]
+
+    async def test_a_report_from_before_reports_named_their_approval_still_counts(self):
+        core = await self.core()
+        await iface(core).say('tool tools.write_value {"key": "k", "value": "v"}')
+        await settle(core)
+        approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
+        core.tank.decide_approval(approval["id"], "approved", "owner:dm")
+        core.tank.append_event(approval["run_id"], "tool_result", {"call_key": approval["call_key"], "result": {
+            "status": "success", "summary": "wrote k"}})  # as decide() reported before it named the approval
+        core.manager._record_decisions(core.tank.run(approval["run_id"]))
+        self.assertEqual(self.outcomes(core, approval["run_id"]), [(None, "wrote k")])  # not reported twice
+
+    async def test_a_decision_still_being_carried_out_is_left_to_it(self):
+        core, first = await self.asked_twice()
+        core.tank.decide_approval("again", "approved", "owner:dm")
+        async with core.manager._approval_locks["again"]:  # decide() holds it while the action runs
+            core.manager._record_decisions(core.tank.run(first["run_id"]))
+        self.assertEqual(self.outcomes(core, first["run_id"]), [(first["id"], "earlier")])
+
+    async def test_an_earlier_attempts_finished_action_is_not_taken_for_this_approvals(self):
+        core, first = await self.asked_twice()
+        core.tank.start_action(first["run_id"], first["call_key"], first["name"], first["arguments"], "write")
+        core.tank.finish_action(first["run_id"], first["call_key"], {"status": "success", "summary": "old result"})
+        core.tank.decide_approval("again", "approved", "owner:dm")  # then the stop came before it started
+        core.manager._record_decisions(core.tank.run(first["run_id"]))
+        self.assertIn("restart came before it ran", self.outcomes(core, first["run_id"])[-1][1])
 
     async def test_a_call_asked_again_is_recovered_on_its_own(self):
         core, first = await self.asked_twice()

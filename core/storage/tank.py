@@ -228,7 +228,7 @@ class Tank:
         if row is None:
             return None
         return {"name": row["name"], "arguments": loads(row["arguments"]), "risk": row["risk"],
-                "status": row["status"], "result": loads(row["result"])}
+                "status": row["status"], "result": loads(row["result"]), "finished_at": row["finished_at"]}
 
     def start_action(self, run_id: str, call_key: str, name: str, arguments: dict, risk: str) -> None:
         self.db.execute(
@@ -254,7 +254,7 @@ class Tank:
     def _approval(self, row) -> dict:
         return {"id": row["id"], "run_id": row["run_id"], "call_key": row["call_key"], "name": row["name"],
                 "arguments": loads(row["arguments"]), "address": row["address"], "status": row["status"],
-                "created_at": row["created_at"], "decided_by": row["decided_by"]}
+                "created_at": row["created_at"], "decided_at": row["decided_at"], "decided_by": row["decided_by"]}
 
     def approval(self, approval_id: str) -> dict | None:
         row = self.db.one("SELECT * FROM approvals WHERE id=?", (approval_id,))
