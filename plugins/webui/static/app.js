@@ -211,7 +211,11 @@
     line.type = "button";
     line.title = [answered && `Answered last: ${answered}`, row && `Set here: ${row.model || "none"}${row.chosen ? " (chosen)" : " (her own)"}`]
       .filter(Boolean).join("\n") + "\nChoose her model in this chat";
-    line.onclick = (event) => { event.stopPropagation(); showModelMenu(name, line); };
+    line.onclick = (event) => {  // a toggle: the same line closes her menu again
+      event.stopPropagation();
+      if (state.modelMenuFor === name && !$("#model-menu").hidden) hideModelMenu();
+      else showModelMenu(name, line);
+    };
     return line;
   }
   function showModelMenu(name, anchor) {

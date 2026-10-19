@@ -208,6 +208,10 @@ def setup(context) -> Contributions:
     keep_dir = Path(str(context.config.get("keep_dir") or "clips")).expanduser()
     if not keep_dir.is_absolute():
         keep_dir = context.data_dir / keep_dir
+    cookies = str(context.config.get("cookies_file") or "").strip()
+    if cookies and not Path(cookies).expanduser().is_absolute():
+        cookies = str(context.data_dir / cookies)
+    video.cookies_file = str(Path(cookies).expanduser()) if cookies else ""
     return Contributions(capabilities=[Capability(
         "media.download_video",
         "Download a video from a link (YouTube, Bilibili and most sites) and deliver it as a file. The full video is "
@@ -233,4 +237,6 @@ def setup(context) -> Contributions:
 EXTENSION = Extension("media", setup, contracts="1", version="1",
                       description="Video downloads and clips fitted to upload limits", settings=(
     Setting("keep_dir", "Where --keep-file copies go (relative to the module's data folder)", "path", "clips"),
+    Setting("cookies_file", "yt-dlp cookies file for sites that need a login (relative to the module's data folder)",
+            "path", ""),
 ))

@@ -65,8 +65,11 @@ def setup(context) -> Contributions:
         # A drop-in every install has: stay out of the way until WeChat is configured.
         context.log("not_configured")
         return Contributions()
+    # Defaults core.yml overrides: no chat is answered until core.yml opens it (`admission`, chat by chat), and
+    # the chats it opens get the assistant as 本鲸 (this module's persona).
     return Contributions(interfaces=[WeChatInterface(settings_from(context.config, context.data_dir))],
-                         personas=[PERSONA])
+                         personas=[PERSONA], admission={"wechat:*": {"enabled": False}},
+                         assignments={"wechat:*": {"engine": "assistant", "personas": [PERSONA.name]}})
 
 
 EXTENSION = Extension("wechat", setup, contracts="1", version="1",

@@ -21,10 +21,10 @@ OWN_MODELS = {
     "claude": [{"provider": "claude", "model": "claude-haiku-5-5"}],
 }
 # Each character prefers her own model, then falls back to the others'; candidates without a key are skipped.
-# Grok falls back to Luna's model only.
+# Grok falls back to Luna's model first, then to the others' like everyone (so one key is always enough).
 FALLBACK = [models[0] for models in OWN_MODELS.values()]
 PROFILES = {name: [*own, *(item for item in FALLBACK if item not in own)] for name, own in OWN_MODELS.items()}
-PROFILES["grok"] = [{"provider": "grok", "model": "grok-4-fast"}, *OWN_MODELS["luna"]]
+PROFILES["grok"] = [{"provider": "grok", "model": "grok-4-fast"}, *PROFILES["luna"]]
 
 
 def setup(context) -> Contributions:

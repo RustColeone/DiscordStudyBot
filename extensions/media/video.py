@@ -108,10 +108,15 @@ def select_copy_formats(formats: list[dict], duration: float, budget_mb: float, 
             "audio_codec": audio.get("acodec"), "estimated_size_mb": round(size / 1024 / 1024, 2)}
 
 
+# yt-dlp's cookies file, for sites that need a login: the module's `cookies_file` setting (set by setup), else
+# MEDIA_COOKIES_FILE (the older way; .env is meant for secrets, and a path is not one).
+cookies_file = ""
+
+
 def _ydl_options(extra: dict | None = None) -> dict:
     options = {"quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
                "socket_timeout": 15, "retries": 1, "extractor_retries": 1}
-    cookies = os.getenv("MEDIA_COOKIES_FILE", "").strip()
+    cookies = str(cookies_file or os.getenv("MEDIA_COOKIES_FILE", "")).strip()
     if cookies and Path(cookies).is_file():
         options["cookiefile"] = cookies
     options.update(extra or {})

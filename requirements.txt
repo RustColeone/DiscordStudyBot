@@ -23,3 +23,4 @@ psutil>=5.9.5             # system: $status
 matplotlib>=3.10.0        # discord: rendering $$math$$
 pylatexenc>=2.11          # discord: inline math as Unicode
 cryptography>=41.0.0      # wechat: database and image decryption
+aiohttp>=3.9.0            # webui: the page's server (discord.py also needs it)

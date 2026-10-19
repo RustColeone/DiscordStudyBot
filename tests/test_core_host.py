@@ -70,6 +70,9 @@ class CapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.capabilities["host.get_file"].subject_kind,
                           self.capabilities["host.save_files"].subject_kind), ("path", "path"))
         self.assertEqual({c.access for c in self.capabilities.values()}, {"creator"})
+        save = self.capabilities["host.save_files"]  # `$savefile Pictures` passes the folder on
+        self.assertEqual((save.command.render({"folder": "Pictures"}), save.command_argument),
+                         ("$savefile Pictures", "folder"))
 
     async def test_screenshots_are_sent_and_shrunk_to_fit(self):
         result = await self.call("host.screenshot")

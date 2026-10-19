@@ -172,7 +172,7 @@ class RoomEngine(Engine):
             self._open(session, state, session.trigger.text, "opening")
         for job in state["jobs"].values():
             if job["status"] == "running":
-                job["status"] = "pending"  # interrupted by a restart; its tool calls replay by call_id
+                job["status"] = "pending"  # cut off by a restart: its unfinished batch replays by call_id
         self._absorb_events(session, state)
         await session.save(state)
         self._take_inbox(session, state)
@@ -378,9 +378,12 @@ class RoomEngine(Engine):
         for index, action in enumerate(actions):
             if "call_id" not in action:
                 state["call_seq"] += 1
-                action = {**action, "call_id": f"c{state['call_seq']}"}
-                actions[index] = action
-            await session.save(state)
+                actions[index] = {**action, "call_id": f"c{state['call_seq']}"}
+        # The rest of the batch stays in the job until each result is observed: after a restart the same calls
+        # replay by call_id, so the core reports a finished one's result and never repeats one cut off mid-way.
+        job["pending"] = list(actions)
+        await session.save(state)
+        for index, action in enumerate(actions):
             result = self._repeated(state, action, risks.get(action["tool"], "read"))
             if result is None:
                 await session.progress(f"{persona.display_name} · {action['tool']}")
@@ -390,12 +393,15 @@ class RoomEngine(Engine):
                 job["status"] = "waiting_approval"
                 await session.save(state)
                 return False
+            job["pending"] = actions[index + 1:]
             self._observe(state, job, action, result)
             await session.save(state)
             if result.status == "success":
                 for file in result.files:
                     await session.send_file(file)
             else:
+                job["pending"] = []
+                await session.save(state)
                 break  # a failed prerequisite invalidates the rest of this batch
         return True
 

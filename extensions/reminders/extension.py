@@ -83,8 +83,10 @@ async def cancel(arguments, context) -> ToolResult:
     item = next((item for item in context.scheduled() if item["id"] == arguments["id"]), None)
     if item is None:
         return ToolResult.fail(f"No pending reminder {arguments['id']} here.", "not_found")
-    if item["sender_id"] != context.sender.id and context.origin != "routine":
-        return ToolResult.fail("Only the person who set a reminder can cancel it.", "not_permitted")
+    # The setter, or an admin. A routine acts as the person who set it up (and an owner's trusted one as the
+    # creator), so it gets no more than they would.
+    if item["sender_id"] != context.sender.id and context.access not in ("admin", "creator"):
+        return ToolResult.fail("Only the person who set a reminder (or an admin) can cancel it.", "not_permitted")
     await context.unschedule(item["id"])
     return ToolResult.ok(f"Reminder {item['id']} cancelled.")
 

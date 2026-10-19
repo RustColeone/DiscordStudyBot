@@ -84,8 +84,8 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sorted(text for _, _, text in self.spoken(core)), ["C", "D", "G", "L"])
         self.assertEqual(core.tank.runs(("done",))[0].status, "done")
         # Each message says which model wrote it: her own, though the four answered at once.
-        self.assertEqual({reply.speaker: (reply.data["provider"], reply.data["model"]) for reply in iface(core).delivered
-                          if reply.kind == "text" and reply.speaker},
+        self.assertEqual({reply.speaker: (reply.data["provider"], reply.data["model"])
+                          for reply in iface(core).delivered if reply.kind == "text" and reply.speaker},
                          {"Luna": ("fake", "luna"), "Gemini": ("fake", "gemini"), "Claude": ("fake", "claude"),
                           "DeepSeek": ("fake", "deepseek")})
 
@@ -162,6 +162,23 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("We meet at noon.", seen)
         self.assertNotIn("$help", seen)
         self.assertNotIn("$memory", seen)  # from the help text that answered it
+
+    async def test_an_action_cut_off_by_a_restart_replays_by_its_call_and_never_runs_twice(self):
+        core = await self.core(Script(Luna=[turn("Converting.", "continue", [("tools.slow", {})])]))
+        tools = extension_module(core, "tools")
+        tools.SLOW_RELEASE = asyncio.Event()
+        await iface(core).say("Luna, convert it")
+        await asyncio.sleep(0.2)  # tools.slow is running when the core stops
+        await core.stop()
+        self.cores.remove(core)
+        tools.SLOW_RELEASE.set()
+        # After the restart she tries the same action again in her next turn.
+        script = Script(Luna=[turn("Converting again.", "continue", [("tools.slow", {})]), turn("Done.")])
+        core = await self.core(script)
+        await settle(core)
+        self.assertEqual(json.loads((self.tmp / "counter.json").read_text()), {"slow": 1})  # started once only
+        board = json.loads(script.prompts["Luna"][0][-1]["content"].split("Shared room (untrusted state): ", 1)[1])
+        self.assertEqual(board["your_results"][0]["error_code"], "uncertain_previous_attempt")
 
     async def test_question_waits_and_the_answer_resumes_the_same_job(self):
         script = Script(Luna=[turn("Which city?", "needs_input"), turn("Paris it is.")])
@@ -242,8 +259,7 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
                                             {"provider": "deepseek", "model": "deepseek-flash"},
                                             {"provider": "gemini", "model": "gemini-3.8-flash"},
                                             {"provider": "claude", "model": "claude-haiku-5-5"}])
-        self.assertEqual(profiles["grok"], [{"provider": "grok", "model": "grok-4-fast"},
-                                            {"provider": "openai", "model": "gpt-6-luna"}])
+        self.assertEqual(profiles["grok"], [{"provider": "grok", "model": "grok-4-fast"}, *profiles["luna"]])
         self.assertEqual(profiles["claude"], mine)  # the room's own config.yml over its code
         self.assertEqual(profiles["gemini"], mine)  # core.yml over the room
         self.assertIn("GROK_API_KEY", core.providers.key_variables())

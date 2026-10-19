@@ -165,6 +165,8 @@ class WeChatCase(unittest.IsolatedAsyncioTestCase):
             "extension_config": {"wechat": settings},
             "admission": {"wechat:*": {"enabled": False}, FRIEND: {"enabled": True},
                           ROOM: {"enabled": True, "max_age_s": 900}},
+            # These tests drive the transport with the probe engine (the module's default is the assistant).
+            "assignments": {"wechat:*": {"engine": "probe", "personas": ["p"]}},
             **(overrides or {})})
 
     async def start(self, overrides=None, wechat=None, adapter=None):
@@ -597,7 +599,11 @@ class DormantTests(unittest.TestCase):
             with mock.patch.dict("os.environ", {}, clear=True):
                 self.assertEqual(list(extension.setup(context).interfaces), [])
             context.config = {"database_root": ""}
-            self.assertEqual(len(extension.setup(context).interfaces), 1)
+            contributions = extension.setup(context)
+            self.assertEqual(len(contributions.interfaces), 1)
+            # Configured, it still answers no chat until core.yml opens one, and then as 本鲸.
+            self.assertEqual(contributions.admission, {"wechat:*": {"enabled": False}})
+            self.assertEqual(contributions.assignments["wechat:*"]["personas"], ["wechat"])
 
 
 class CopiedModuleTests(unittest.TestCase):

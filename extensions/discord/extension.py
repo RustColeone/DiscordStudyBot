@@ -41,7 +41,9 @@ def setup(context) -> Contributions:
     config = context.config
     names = config.get("token_env") or ["DISCORD_BOT_TOKEN", "DISCORD_TOKEN", "TOKEN"]
     names = [names] if isinstance(names, str) else list(names)
-    token = next((os.environ[name].strip().strip("\"'") for name in names if os.environ.get(name, "").strip()), "")
+    # From .env (the proper place), else `token:` written in this module's config.yml (as setup counts it).
+    token = (next((os.environ[name].strip().strip("\"'") for name in names if os.environ.get(name, "").strip()), "")
+             or str(config.get("token") or "").strip().strip("\"'"))
     return Contributions(interfaces=[DiscordInterface(token, context.data_dir,
                                                       float(config.get("attachment_max_mb", 25)), config=config)])
 

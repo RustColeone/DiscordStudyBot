@@ -320,7 +320,10 @@ class WebUI(Interface):
         conversation = request.query.get("conversation", DEFAULT_CONVERSATION)
         if not CONVERSATION_ID.fullmatch(conversation):
             raise web.HTTPBadRequest()
-        after = int(request.query.get("after") or 0)
+        try:
+            after = int(request.query.get("after") or 0)
+        except ValueError:
+            raise web.HTTPBadRequest() from None
         return web.json_response({"messages": self.store.messages(conversation, after)})
 
     # ---- the live connection --------------------------------------------------------------------------

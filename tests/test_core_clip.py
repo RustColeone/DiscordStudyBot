@@ -182,5 +182,24 @@ class ClipTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(FakeYoutubeDL.requested, [])
 
 
+
+class CookiesTests(unittest.TestCase):
+    def test_the_cookies_file_comes_from_the_modules_config_else_the_environment(self):
+        import os
+        from core.loader import import_extension
+        extension, module = import_extension(ROOT / "extensions" / "media")
+        video = sys.modules[module.__name__.rsplit(".", 1)[0] + ".video"]
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"MEDIA_COOKIES_FILE": ""}):
+            data = Path(tmp)
+            (data / "cookies.txt").write_text("# Netscape HTTP Cookie File\n")
+            context = SimpleNamespace(config={"cookies_file": "cookies.txt"}, data_dir=data, log=lambda *a, **k: None)
+            extension.setup(context)  # relative: inside the module's data folder
+            self.assertEqual(video._ydl_options()["cookiefile"], str(data / "cookies.txt"))
+            extension.setup(SimpleNamespace(config={}, data_dir=data, log=context.log))
+            self.assertNotIn("cookiefile", video._ydl_options())
+            with patch.dict(os.environ, {"MEDIA_COOKIES_FILE": str(data / "cookies.txt")}):  # the older way
+                self.assertEqual(video._ydl_options()["cookiefile"], str(data / "cookies.txt"))
+
+
 if __name__ == "__main__":
     unittest.main()

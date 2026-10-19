@@ -106,6 +106,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         async with self.http.get(f"{self.base}/api/history?conversation=classroom") as response:
             history = (await response.json())["messages"]
         self.assertEqual([item["kind"] for item in history], ["user", "text"])
+        async with self.http.get(f"{self.base}/api/history?conversation=classroom&after=x") as response:
+            self.assertEqual(response.status, 400)
         await ws.close()
 
     async def test_the_model_menu_asks_and_chooses_quietly_outside_the_chat(self):

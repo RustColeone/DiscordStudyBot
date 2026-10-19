@@ -57,6 +57,21 @@ class ReminderTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("in_minutes", self.chat.texts("d")[0])
         self.assertEqual(self.core.gateway.scheduled_for(self.chat.delivered[0].address), [])
 
+    async def test_a_routine_cannot_cancel_someone_elses_reminder_but_an_admin_can(self):
+        await self.chat.say("$remind 2h call mom")
+        await settle(self.core)
+        reminder = self.core.gateway.scheduled_for(self.chat.delivered[0].address)[0]["id"]
+        await self.chat.say(f"$routine every 30m $unremind {reminder}", sender="mallory", name="Mallory")
+        await settle(self.core)
+        await self.core.gateway.tick(time.time() + 31 * 60)  # Mallory's routine fires as Mallory
+        await settle(self.core)
+        self.assertEqual(len(self.core.gateway.scheduled_for(self.chat.delivered[0].address)), 1)
+        self.assertIn("Only the person who set", self.chat.texts("room")[-1])
+        self.core.manager.admins.set("chat:bob", {"added_by": "chat:boss"})
+        await self.chat.say(f"$unremind {reminder}", sender="bob", name="Bob")
+        await settle(self.core)
+        self.assertEqual(self.core.gateway.scheduled_for(self.chat.delivered[0].address), [])
+
     def test_spec_parsing(self):
         module = extension_module(self.core, "reminders")
         now = dt.datetime(2026, 10, 16, 20, 0).astimezone().timestamp()

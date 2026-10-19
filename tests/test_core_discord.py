@@ -459,6 +459,11 @@ class TokenTests(unittest.TestCase):
                                       ({"DISCORD_BOT_TOKEN": "", "TOKEN": "old"}, "old")):
             with patch.dict(os.environ, {"DISCORD_TOKEN": "", **environment}):
                 self.assertEqual(extension.setup(context).interfaces[0].token, expected)
+        written = SimpleNamespace(config={"token": "from-config"}, data_dir=context.data_dir, log=context.log)
+        with patch.dict(os.environ, {"DISCORD_BOT_TOKEN": "", "DISCORD_TOKEN": "", "TOKEN": ""}):
+            self.assertEqual(extension.setup(written).interfaces[0].token, "from-config")  # no .env key: config.yml's
+        with patch.dict(os.environ, {"DISCORD_BOT_TOKEN": "from-env"}):
+            self.assertEqual(extension.setup(written).interfaces[0].token, "from-env")  # .env wins
 
 
 class DefaultConfigurationTests(unittest.TestCase):
