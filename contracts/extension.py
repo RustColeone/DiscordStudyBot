@@ -27,9 +27,10 @@ class ExtensionContext(Protocol):
 @dataclass(frozen=True)
 class Contributions:
     """What an extension adds. Besides interfaces, engines, capabilities and personas, an extension
-    may suggest defaults so it works when dropped in: model `profiles` (name → ordered candidates, as
-    in core.yml), and `assignments` and `admission` rules for its own interfaces' addresses
-    (`<interface>:*` or `<interface>:<conversation>`). core.yml and runtime edits always win.
+    may suggest defaults so it works when dropped in: model `providers` (name → settings, as in core.yml;
+    configured settings win key by key) and `profiles` (name → ordered candidates, as in core.yml), and
+    `assignments` and `admission` rules for its own interfaces' addresses (`<interface>:*` or
+    `<interface>:<conversation>`). core.yml and runtime edits always win.
 
     `permissions` suggests permission defaults in the core.yml `permissions:` form
     (`{pattern: {use, tiers, rules}}`): `use` and `tiers` only for its own interfaces' addresses, `rules`
@@ -40,6 +41,7 @@ class Contributions:
     engines: Sequence[Engine] = ()
     capabilities: Sequence[Capability] = ()
     personas: Sequence[Persona] = ()
+    providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     profiles: Mapping[str, Sequence[Mapping[str, Any]]] = field(default_factory=dict)
     assignments: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     admission: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)

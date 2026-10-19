@@ -450,3 +450,30 @@ class PluginTests(CoreCase):
         (folder / "extension.py").write_text(DROP_IN.replace('name + ":*": {"engine"', '"chat:*": {"engine"'))
         with self.assertRaisesRegex(ConfigError, "only cover its own interfaces"):
             await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
+
+    async def test_contributed_providers_serve_its_profiles_and_core_yml_settings_win(self):
+        import os
+        from unittest import mock
+        folder = self.plugin("interface: sage_bot\n")
+        (folder / "extension.py").write_text(DROP_IN.replace(
+            'profiles={"sage": [{"provider": "fake", "model": "big"}]},',
+            'providers={"lab": {"kind": "openai_compatible", "api_key_env": "LAB_ACCESS", "vision": True}},\n'
+            '                         profiles={"sage": [{"provider": "lab", "model": "big"}]},'))
+        with mock.patch.dict(os.environ, {"LAB_ACCESS": "lab-secret-value-1234"}):
+            core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]},
+                                    "providers": {"lab": {"vision": False}}})
+            self.assertEqual(core.providers.configured(), ["fake", "lab"])
+        self.assertIn("sage", core.providers.profiles())
+        self.assertFalse(core.providers._sees({"provider": "lab"}))  # core.yml's setting wins over the module's
+        self.assertIn("LAB_ACCESS", core.manager.secrets.values)  # its key is kept from models like any other
+
+    async def test_configured_profile_can_override_one_using_a_contributed_provider(self):
+        folder = self.plugin("interface: sage_bot\n")
+        (folder / "extension.py").write_text(DROP_IN.replace(
+            'profiles={"sage": [{"provider": "fake", "model": "big"}]},',
+            'providers={"lab": {"kind": "openai_compatible", "api_key_env": "LAB_ACCESS"}},\n'
+            '                         profiles={"sage": [{"provider": "lab", "model": "big"}]},'))
+        candidates = [{"provider": "lab", "model": "configured-model"}]
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]},
+                                "profiles": {"sage": candidates}})
+        self.assertEqual(core.providers._profiles["sage"], candidates)

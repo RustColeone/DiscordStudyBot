@@ -185,9 +185,11 @@ Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, sec
   `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Putting a secret directly in the folder's `config.yml`
   (`token: …`) is supported for people who would rather not edit the environment; then
   `chmod 600 config.yml`, and never share or copy the folder together with its `config.yml`.
-* **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `profiles`
-  (name → ordered candidates, as in core.yml) and `assignments` / `admission` for the extension's own
-  interfaces only (`<interface>:*` or `<interface>:<conversation>`; anything else refuses to load), and
+* **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `providers`
+  (name → settings, as in core.yml; settings core.yml gives the same provider win key by key), model
+  `profiles` (name → ordered candidates, as in core.yml; they may use the module's own providers), and
+  `assignments` / `admission` for the extension's own interfaces only (`<interface>:*` or
+  `<interface>:<conversation>`; anything else refuses to load), and
   `permissions` (`use` and `tiers` for its own interfaces, `rules` for its own capabilities; whale_chan
   makes every write ask in her conversations). The module's own `config.yml` may set `permissions:` under
   the same limits. core.yml and runtime edits always win.

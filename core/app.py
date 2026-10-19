@@ -42,7 +42,7 @@ class Core:
         self.audit = Audit(config.data_dir / "audit.log", echo=config.audit_echo)
         self.tank = Tank(config.data_dir / "tank.db")
         self.bottle = Bottle(config.data_dir / "gateway.db")
-        self.providers = Providers(config.providers, config.profiles, adapters=self._provider_adapters,
+        self.providers = Providers(config.providers, {}, adapters=self._provider_adapters,
                                    record=self.audit.record)
         self.manager = Manager(self.tank, self.providers, personas=config.personas, assignments=config.assignments,
                                owners=config.owners, control=config.control, data_dir=config.data_dir,
@@ -74,6 +74,9 @@ class Core:
                               interfaces=[i.name for i in loaded.contributions.interfaces],
                               engines=[e.spec.name for e in loaded.contributions.engines],
                               capabilities=[c.name for c in loaded.contributions.capabilities])
+        # Configured profiles may use providers contributed by any loaded module.
+        for profile, candidates in config.profiles.items():
+            self.providers.add_profile(profile, candidates)
         self.manager.attach_gateway(self.gateway)
         self.manager.permissions = self._permissions()
         self.manager.secrets = self._secrets()
@@ -113,8 +116,7 @@ class Core:
     def _secrets(self) -> Secrets:
         names = {variable for loaded in self.extensions for setting in loaded.extension.settings
                  if setting.kind == "secret" for variable in setting.env}
-        names.update(str(settings.get("api_key_env")) for settings in self.config.providers.values()
-                     if isinstance(settings, dict) and settings.get("api_key_env"))
+        names.update(self.providers.key_variables())  # configured and contributed providers alike
         paths = [str(path / "config.yml") for path in self.config.all_modules()]
         paths += [str(self.config.data_dir / pattern) for pattern in ("*.db", "*.db-wal", "*.db-shm",
                                                                        "extensions/*/*.db*", "extensions/*/keys.json",
@@ -123,12 +125,16 @@ class Core:
                                paths=[*paths, *self.config.secret_paths])
 
     def _register_defaults(self, loaded: LoadedExtension) -> None:
-        """Profiles, assignments and admission an extension suggests; core.yml and runtime edits win."""
+        """Providers, profiles, assignments and admission an extension suggests; core.yml and runtime edits
+        win."""
         contributions, name = loaded.contributions, loaded.extension.name
         own = {interface.name for interface in contributions.interfaces}
         for pattern in [*contributions.assignments, *contributions.admission]:
             if pattern.split(":", 1)[0] not in own or ":" not in pattern:
                 raise ConfigError(f"{name}: defaults may only cover its own interfaces, not {pattern!r}")
+        # Providers first, so the extension's own profiles may use them.
+        for provider, settings in contributions.providers.items():
+            self.providers.add_provider(provider, settings)
         for profile, candidates in contributions.profiles.items():
             if profile not in self.config.profiles:
                 self.providers.add_profile(profile, candidates)

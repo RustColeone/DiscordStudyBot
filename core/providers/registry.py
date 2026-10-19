@@ -47,6 +47,14 @@ class Providers:
                 if candidate.get("provider") not in self._settings and candidate.get("provider") not in self._adapters:
                     raise ValueError(f"Profile {name!r} uses unknown provider {candidate.get('provider')!r}")
 
+    def add_provider(self, name: str, settings: Mapping[str, Any]) -> None:
+        """A provider an extension suggests; settings already configured (core.yml) win key by key."""
+        self._settings[name] = {**dict(settings), **self._settings.get(name, {})}
+
+    def key_variables(self) -> set[str]:
+        """The environment variables holding the providers' API keys."""
+        return {str(settings["api_key_env"]) for settings in self._settings.values() if settings.get("api_key_env")}
+
     def add_profile(self, name: str, candidates) -> None:
         candidates = [dict(candidate) for candidate in candidates]
         for candidate in candidates:
