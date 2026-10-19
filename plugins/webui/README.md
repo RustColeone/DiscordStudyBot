@@ -1,0 +1,288 @@
+# `webui`: the bot as a chat page on your local network
+
+An external module (in `plugins/`, tracked in git, loaded like any other module) that serves a chat page
+from the bot itself. Open `http://<this computer>:4156` from a laptop or phone at home and talk to the
+bot without Discord: each chat is a conversation of the shared room (Luna, Gemini, Claude, DeepSeek and
+Grok) by default, with Markdown and LaTeX, files both ways, live "typing" lines, approval cards with
+buttons, and a per-chat model menu. Whoever opens the page acts as the bot's creator.
+
+The user-level tour is in [plugins/README.md, "The web UI"](../README.md#the-web-ui). This README is
+the developer companion: it is the project's example of an interface plugin, so read it when you want
+to connect the core to a new platform, especially one you host yourself.
+
+## What it adds
+
+| Kind | Name | Details |
+| --- | --- | --- |
+| Interface | `webui` (renamable with the `interface` key) | `Display(markdown=True, edits=False, progress=True, quotes=False, files=True, max_upload_mb=50, max_text_chars=20000)`; the last two come from `max_upload_mb` and `max_text_chars`. No `operations`. |
+| Default assignment | `webui:*` | `{engine: room, personas: [luna, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
+| Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
+| Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the classroom becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
+
+It contributes no engines, capabilities, personas, profiles or permissions. The five personas and the
+`room` engine come from [`extensions/room`](../../extensions/room).
+
+Declared settings (editable with `python -m core setup` and `$setup`):
+
+| Key | Kind | Default | Env var |
+| --- | --- | --- | --- |
+| `port` | number | 4156 | |
+| `user_name` | text | your login name | |
+| `title` | text | `Study Room` | |
+| `passphrase` | secret | empty (no sign-in) | `WEBUI_PASSPHRASE` |
+
+## Setup
+
+It loads by default. To change anything, copy [`config.example.yml`](config.example.yml) to
+`config.yml` in this folder (git-ignored); `extension_config.webui` in core.yml overrides it.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `port` | 4156 | TCP port. `0` picks a free one (the tests do this). |
+| `host` | `0.0.0.0` | Address to listen on. `127.0.0.1` keeps it to this computer. |
+| `user_name` | login name | Your name on your own bubbles. |
+| `title` | `Study Room` | Page title and the name shown for messages without a speaker. |
+| `passphrase` | empty | Asked once per browser. Prefer `WEBUI_PASSPHRASE` in `.env`; if you put it in `config.yml`, `chmod 600 config.yml`. |
+| `networks` | private, loopback and link-local addresses | A list of CIDR networks that may connect *instead of* the default (for example to add Tailscale's `100.64.0.0/10`, list your LAN too). |
+| `hostnames` | none | Extra names this computer is reached by. IP addresses, `localhost` and names ending in `.local`, `.lan`, `.home.arpa` or `.internal` always pass. |
+| `personas` | the five classmates | Personas of the default `webui:*` assignment. |
+| `classmates` | `[Luna, Gemini, Claude, DeepSeek, Grok]` | Display names on the class list, in order. They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
+| `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget). |
+| `max_upload_mb` | 50 | Largest upload and largest file the core sends here; also sizes the server's request limit. |
+
+Keys the code reads that the example file does not list: `interface` (the interface name, default
+`webui`), `passphrase_env` (the env var to read the passphrase from, default `WEBUI_PASSPHRASE`),
+`user_id` (your sender ID, default `creator`) and `max_text_chars` (20000).
+
+Environment: `WEBUI_PASSPHRASE` (optional). Python package: `aiohttp` (in `requirements.txt`; `discord.py`
+needs it too). The browser loads KaTeX 0.16.11 from jsDelivr, pinned
+with integrity hashes; without internet access math is shown as raw TeX.
+
+Pictures for the classmates go in [`avatars/`](avatars/README.md). The page's icon art is credited in
+[`static/CREDITS.md`](static/CREDITS.md) (CC BY-NC-SA 4.0).
+
+To turn it off, in core.yml:
+
+```yaml
+modules:
+  exclude: [webui]          # or plugins/webui
+```
+
+At startup it prints the address to open, for example `[webui] Open http://192.168.1.20:4156 on this
+network (passphrase required).`
+
+## Using it
+
+See [plugins/README.md, "The web UI"](../README.md#the-web-ui) for what a person sees: the chat list,
+the class list with presence and the model menu, `@` mentions, the `$`/`/` command palette, work notes,
+files and approval cards. Messages you send are always direct and addressed to the bot
+(`is_direct=True`, `mentions_me=True`), so every chat behaves like a private conversation with the room.
+
+## How it works
+
+| File | Role |
+| --- | --- |
+| [`extension.py`](extension.py) | `EXTENSION` with its settings; `setup` reads the passphrase (config or env), builds the interface and contributes the default assignment and admission. |
+| [`interface.py`](interface.py) | `WebUI(Interface)`: an aiohttp server (pages, files, uploads, history, one websocket per open page), the security guard, page events to `Request`s, and `deliver` for every `Reply` kind. |
+| [`store.py`](store.py) | `Store`: the page's transcript in SQLite (`webui.db`): chats, messages as the JSON the page renders, and file records. |
+| [`static/index.html`](static/index.html), [`static/login.html`](static/login.html) | The chat page and the sign-in page (`{{title}}` and `{{error}}` are filled in HTML-escaped). |
+| [`static/app.js`](static/app.js) | The page: websocket client, rendering, chat list, class list and model menu, composer, palette, uploads. |
+| [`static/markdown.js`](static/markdown.js) | A small Markdown renderer that escapes the text first and adds only its own tags (links only to http/https); math is typeset by KaTeX when loaded; `@Name` becomes a chip. |
+| [`static/style.css`](static/style.css) | Layout and theme (light and dark). |
+| [`avatars/`](avatars/README.md) | Classmates' pictures, served at `/avatars/<key>`. |
+
+### HTTP routes
+
+| Route | Does |
+| --- | --- |
+| `GET /` | The chat page (`no-cache`). |
+| `GET /login`, `POST /login` | Sign-in page and form, only meaningful with a passphrase. |
+| `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
+| `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif). |
+| `GET /favicon.ico` | `static/favicon.png`. |
+| `GET /files/{file_id}` | A stored upload or delivered file (below). |
+| `GET /api/history?conversation=&after=` | A chat's stored messages: the latest 300, or those after a message ID (not a number: 400). |
+| `POST /api/upload` | Multipart upload; each part is written to `uploads/<id>/<name>` and recorded; returns `{files: [{id, name, mime, size}]}`. |
+| `GET /ws` | The websocket (heartbeat 30 s, messages up to 1 MiB). |
+
+### From page events to requests
+
+The page never answers anything itself; everything a person types goes through `port.submit`, as
+[EXTENSIONS.md, Submitting requests](../../docs/core/EXTENSIONS.md#submitting-requests) requires.
+`_send` (interface.py:421) builds the `Request`:
+
+* `id` is `web-<id>`, where the page makes `id` (a random UUID per message). If the page resends after
+  a reconnect, the core drops the duplicate and the page still gets a positive `ack`.
+* `address` is `webui:<chat>`; chat IDs must match `^[a-z0-9][a-z0-9-]{0,47}$` (the default chat is
+  `classroom`, new ones are `chat-<base36 time>`).
+* `sender` is `Sender(user_id, user_name)`; `text` is cut to `max_text_chars`; up to 10 previously
+  uploaded files become `FileRef`s; `kind` is `text`, else `image` if all files are pictures, else `file`.
+* Only after `submit` is accepted is the message stored and broadcast, so the transcript holds what the
+  core actually took. The first line of the first non-command message names a "New chat" (48 chars).
+* A pressed button sends its `Action.command` as ordinary text with `action` set to the label; the
+  transcript shows it as `You chose “Approve”`. Typed or pressed `$approve <id> [always]` / `$deny <id>`
+  also marks the matching approval card as decided (`_mark_decision`, `Store.decide`), which removes its
+  buttons on every open page.
+* `/name` in the composer becomes `$name` when `name` is a known command; the palette lists
+  `port.commands()` (sent in the `hello` state with their usage and examples).
+* Deleting a chat calls `port.cancel(webui:<chat>, ...)`, then removes its transcript and files from
+  the page. The core keeps its own history.
+
+### Quiet `$model` requests
+
+The class list shows each classmate's model in the current chat and lets you choose another. It does
+this with the core's ordinary `$model` command instead of a private API, but keeps it out of the chat:
+
+* `_quiet_command` (interface.py:387) submits `$model` (purpose `overview`) or `$model <persona>
+  <provider>/<model|reset>` (purpose `choose`) with ID `web-quiet-<uuid>`, and remembers that ID in
+  `self._quiet` (at most 100 entries; the oldest go first). `persona` and `model` are checked against
+  strict patterns first, so nothing else can be smuggled into the command text.
+* In `deliver`, a reply whose `in_reply_to` is a quiet ID goes to `_answer_quietly` (interface.py:472):
+  its progress and `waiting_approval` notices are swallowed, and the answer is broadcast as a `models`
+  event carrying `reply.data["result"]` (the command's result data, as JSON) instead of being stored
+  as a bubble. If `submit` refuses it, the page gets a `models` event with `ok: false` and the reason.
+* The page shows the overview's `personas` (`name`, `display_name`, `model`, `chosen`), `models` (per
+  provider) and `errors`; after a choice it shows the answer as a toast and asks again. If the core
+  answers `not_permitted` (`$model` is for admins), the page hides the menu.
+
+The core still records these commands like typed ones; the room leaves commands out of what its
+characters read.
+
+### Rendering each reply kind
+
+`deliver` (interface.py:486) maps the reply to a stored item and broadcasts it:
+
+| `reply.kind` | Server | Page |
+| --- | --- | --- |
+| `progress` | Not stored. Kept in memory per `run_id` (or chat) and broadcast as `progress`; sent again in every `hello`. | A typing line with the speaker's avatar ("Luna is using …"), its `Cancel` button, and "typing…" on that classmate in the class list. Lines older than 15 minutes are dropped. |
+| `text` | Stored with `speaker`, `label`, `data` (including `provider` and `model`), `actions`, `origin`. | A bubble with avatar, name, time and the model that wrote it; a `label` (work note) folds into a `<details>`. Markdown and math rendered. |
+| `file` | The file is copied out of the run workspace into `files/<id>/<name>` (workspaces are deleted later) and recorded. | Pictures inline (click to enlarge), audio and video as players, anything else as a download link. |
+| `notice` `approval_request` | Stored; indexed by `approval_id`. | A card: tier badge, summary, warnings, who asked and where, the exact arguments folded, and the action buttons, or "✓ approved" / "✕ denied" once decided. |
+| `notice` `reminder` | Stored. | A reminder card. |
+| other `notice` | Stored. | A pill: `reply.text`, else a phrase for the code (`run_failed`, `waiting_approval`, `unknown_command`, `not_permitted`, `locked`; `relayed` from its data). |
+| `event` | Stored. | A pill "📨 text", with the origin address. |
+
+Any non-progress reply with a `run_id` first clears that run's typing line (`progress_clear`). Replies
+for a chat the page does not know create it. `deliver` returns `Delivery(True, message_id=<stored
+row ID>)`, `Delivery(False, detail="missing_file")` for a missing file, or `not_started` before
+`start`.
+
+### The websocket protocol
+
+One socket per open page; every event is a JSON object with `type`. The server sends `hello` first.
+
+Page to server:
+
+| `type` | Fields | Effect |
+| --- | --- | --- |
+| `send` | `conversation`, `id`, `text`, `files` (upload IDs), `action` | Submit a request (above); answered with `ack`. |
+| `new` | `conversation`, `title` | Create a chat. |
+| `rename` | `conversation`, `title` | Rename (80 chars). |
+| `pin` | `conversation`, `pinned` | Pin or unpin. |
+| `order` | `conversations` (IDs) | Arrange the list (pinned stay first). |
+| `delete` | `conversation` | Cancel its runs, delete transcript and files. |
+| `models` | `conversation` | Quiet `$model` overview. |
+| `model` | `conversation`, `persona`, `model` (`provider/model` or `reset`) | Quiet `$model` choice. |
+
+Server to page (`_broadcast` sends to every open page, so several devices stay in step):
+
+| `type` | Fields | Meaning |
+| --- | --- | --- |
+| `hello` | `state`: `title`, `user`, `classmates`, `avatars`, `commands`, `conversations`, `progress`, `default`, `max_upload_mb` | Sent on connect. |
+| `message` | `item` | A new stored message (yours or the bot's). |
+| `update` | `item` | A stored message changed (an approval card decided). |
+| `conversations` | `items` | The chat list changed. |
+| `deleted` | `conversation`, `items` | A chat was deleted. |
+| `progress` | `conversation`, `run_id`, `text`, `actions`, `at` | A run's typing line. |
+| `progress_clear` | `conversation`, `run_id` | Remove that line. |
+| `models` | `conversation`, `purpose`, `ok`, `code`, `text`, `result` | Answer to a quiet `$model`. |
+| `ack` | `id`, `ok`, `reason` | Only to the sender: the `SubmitResult` reason (`accepted`, `command`, `duplicate`, `disabled`, ...). |
+
+The page reconnects with backoff (0.5 s doubling to 10 s), queues events while disconnected, and
+fetches `/api/history?after=<last id>` after each `hello`, so nothing is missed.
+
+### Security
+
+Whoever opens the page has creator rights, so the server treats every request as hostile until proven
+local. The `_guard` middleware (interface.py:174) runs on every route, the websocket included:
+
+1. **Peer address**: only loopback, private and link-local addresses (or exactly `networks:`); IPv4
+   mapped IPv6 is unwrapped. Otherwise 403.
+2. **Host header**: an IP address, `localhost`, a local suffix or a configured hostname. A public name
+   that resolves here is a DNS-rebinding attempt by some website. Otherwise 403.
+3. **Origin**: if present, it must equal `<scheme>://<Host>`, which stops other sites in the same
+   browser from posting or opening the websocket. Otherwise 403.
+4. **Passphrase** (if set): everything except `/login`, `/static/style.css` and `/favicon.ico` needs the
+   `webui_session` cookie; `GET /` redirects to `/login`, the rest get 401. The cookie value is an
+   HMAC-SHA256 of the passphrase under a random key in `session.key` (mode 600), compared in constant
+   time; it is HttpOnly, SameSite=Strict, 30 days. Changing the passphrase signs every browser out.
+   Wrong tries wait one second, and five within five minutes from one address lock it out for a while.
+5. **Headers** on every HTTP response: a Content-Security-Policy (`default-src 'self'`, scripts only
+   from the page and the pinned KaTeX file, `connect-src 'self'`, `frame-ancestors 'none'`,
+   `object-src 'none'`, ...), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+   `X-Frame-Options: DENY`.
+
+Content safety: files are served inline only for pictures, audio, video and PDF; anything else (an
+HTML or SVG file could run script) is sent as `application/octet-stream` with `attachment`. Stored
+file names are sanitised; static and avatar names must match strict patterns, so no path reaches outside
+those folders. Model text is never inserted as HTML: `markdown.js` escapes it first. IDs from the page
+(chat, persona, model) are validated before use.
+
+## Data it keeps
+
+Under its data directory (`<data_dir>/extensions/webui/`, by default `data/core/extensions/webui/`):
+
+| Path | Contents | Kept |
+| --- | --- | --- |
+| `webui.db` | Chats (title, position, pinned), each delivered or sent message as the JSON the page renders, and file records. | Until the chat is deleted on the page. |
+| `uploads/<id>/<name>` | Files you uploaded. | Until a chat that showed them is deleted. Uploads never sent are not removed. |
+| `files/<id>/<name>` | Copies of files the bot sent. | Until their chat is deleted. |
+| `session.key` | The random key for the sign-in cookie. | Always; delete it to sign every browser out. |
+
+Progress lines and quiet requests live only in memory. The core keeps the real conversation history
+separately, as for any interface. The browser keeps the current chat, panel widths and open panels in
+`localStorage`.
+
+## Tests
+
+[`tests/test_plugin_webui.py`](../../tests/test_plugin_webui.py) starts a real core with this plugin on
+`127.0.0.1`, port 0, and a probe engine, then drives it over HTTP and the websocket. It checks: which
+peers and Host headers pass; that a message reaches the engine as the creator and the answer arrives
+live and stays in history; the quiet model menu (overview, choose, reset, no bubbles, a malformed model
+never sent); new chats as their own conversations titled by their first line; pinning, ordering and
+deleting with files; approval cards and button presses; typing lines until a run speaks; files both
+ways and inline only for media; avatars and nothing else from the folders; refusal of other sites and
+rebound names, and the CSP; the passphrase flow and cookie flags; and the default room assignment.
+
+```bash
+venv/bin/python -m unittest tests.test_plugin_webui
+```
+
+## Building something similar
+
+* **Contribute defaults for your own interface only** (extension.py:31-35): an assignment and admission
+  for `webui:*` make the plugin work on drop-in; core.yml still wins.
+* **Report the owner and a fallback control route** in `start` (interface.py:136) when your platform
+  has a natural owner, as the CLI does at a terminal.
+* **Return promptly from `start`**: aiohttp's `AppRunner`/`TCPSite` run in the background; on a bind
+  failure call `port.set_ready(False, ...)` and raise (interface.py:147-154).
+* **Submit first, store after**: record the person's message only when `submit` accepted it, and use a
+  page-made ID so resends are deduplicated (interface.py:436-450).
+* **Copy delivered files out of the run workspace** before referring to them later (interface.py:288).
+* **Key progress by `run_id` and clear it on the run's next reply** (interface.py:498-516).
+* **Talk to the core with commands, not private hooks**: the quiet `$model` pattern (interface.py:387
+  and 472) shows how a page feature can use any `$command` and read `reply.data["result"]`.
+* **Keep `deliver` safe to call concurrently**: the store serialises with a lock, and `_broadcast`
+  gives each socket 5 seconds and drops it on failure, so one stuck browser cannot hold up delivery.
+* **Bound every in-memory map** that a client can grow (`_quiet`, login failures).
+* **Pitfalls**: a page that acts as the creator is as powerful as a remote shell, so do not drop the
+  Host/Origin checks even on a home network; never inject model or file text as HTML; never serve
+  arbitrary file types inline; validate every ID the client sends before putting it in a path, a query
+  or a `$command`.
+
+See also: [docs/core/EXTENSIONS.md, Interfaces](../../docs/core/EXTENSIONS.md#interfaces),
+[Delivering replies](../../docs/core/EXTENSIONS.md#delivering-replies),
+[docs/core/ARCHITECTURE.md](../../docs/core/ARCHITECTURE.md),
+[plugins/README.md](../README.md), [`extensions/cli`](../../extensions/cli/README.md) (the smallest
+interface), [`extensions/room`](../../extensions/room) (the engine behind the classmates),
+[`extensions/discord`](../../extensions/discord/interface.py) (a full platform).

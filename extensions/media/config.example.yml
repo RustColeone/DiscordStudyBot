@@ -1,2 +1,4 @@
 # $video / $clip settings. Copy to config.yml (git-ignored); extension_config.media in core.yml overrides it.
 keep_dir: clips                 # --keep-file copies (relative to data/core/extensions/media)
+# cookies_file: cookies.txt       # yt-dlp cookies (Netscape format) for sites that need a login; relative to
+                                  # data/core/extensions/media, or absolute (MEDIA_COOKIES_FILE in .env still works)

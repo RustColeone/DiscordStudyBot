@@ -1,0 +1,310 @@
+# `room`: the shared room, where several characters work one request together
+
+The room is an engine in which several personas share every request in a conversation. Each character
+speaks in her own voice, uses tools and hands focused jobs to the others on a shared work board. Jobs
+that do not depend on each other run in parallel. The module also ships five default characters (Luna,
+Gemini, Claude, DeepSeek and Grok), a model profile for each, and the provider for Grok's model.
+
+Use it when you want a group chat with several characters instead of one assistant. Study it if your
+engine has more than one persona (`EngineSpec(..., "many")`), runs model turns concurrently, or must
+keep a work queue across approvals, questions and restarts. For the one-persona version of the same
+contract, read [`extensions/assistant`](../assistant) first; it is shorter.
+
+## What it adds
+
+| Kind | Name | Details |
+| --- | --- | --- |
+| Engine | `room` | Persona mode `many`. "Several personas share one work board: they talk, use tools and hand each other jobs, in parallel where independent." |
+| Persona | `luna` | Display name `Luna`, profile `luna` |
+| Persona | `gemini` | Display name `Gemini`, profile `gemini` |
+| Persona | `claude` | Display name `Claude`, profile `claude` |
+| Persona | `deepseek` | Display name `DeepSeek`, profile `deepseek` |
+| Persona | `grok` | Display name `Grok`, profile `grok` |
+| Provider | `grok` | `openai_compatible` at `https://api.x.ai/v1`, key in `GROK_API_KEY`, `schema_mode: native`, `effort_param: true`; `$model` offers models released since 2026-06-01, excluding IDs matching `imagine` |
+| Setting | `max_steps` | `number`, default 24: "Most work-board steps per request" |
+| Setting | `history_limit` | `number`, default 16: "Earlier messages the room reads" |
+| Setting | `grok_api_key` | `secret`, env `GROK_API_KEY`: "xAI API key for Grok (without it, Luna's model answers for her)" |
+
+The model profiles, each tried in order (a candidate whose provider has no key is skipped):
+
+| Profile | Candidates |
+| --- | --- |
+| `luna` | `openai/gpt-6-luna`, `deepseek/deepseek-flash`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
+| `gemini` | `gemini/gemini-3.8-flash`, `gemini/gemini-3.6-flash`, `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `claude/claude-haiku-5-5` |
+| `claude` | `claude/claude-haiku-5-5`, `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `gemini/gemini-3.8-flash` |
+| `deepseek` | `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
+| `grok` | `grok/grok-4-fast`, then Luna's chain: `openai/gpt-6-luna`, `deepseek/deepseek-flash`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
+
+Each character prefers her own model and then falls back to the others' first models; Grok falls back
+to Luna's model first, then to the others', so any one key is enough for every character. The `deepseek`, `openai`, `gemini` and `claude` providers are built into the core
+([`core/defaults.py`](../../core/defaults.py)); only `grok` comes from this module.
+
+The characters' prompts are in Chinese, in [`personas.py`](personas.py). They are classmates in a school
+club: Luna, a white-haired dragon girl and calm student council president; Claude, an orange-haired
+young lady and sharp-eyed discipline committee member; DeepSeek, a blue-haired whale girl, clever and
+lazy, who calls herself 人家 or 本鲸; Gemini, a purple-haired cat girl, curious and fond of technology;
+Grok, a blonde vampire and the mischievous troublemaker. Luna and Claude are the seniors. Every prompt
+ends with the same shared rules: speak directly with no reasoning summaries or stage directions, never
+start with your own name (the core adds the speaker), answer in the person's latest language, write
+math as LaTeX (`$...$`, `$$...$$`), and keep ordinary chat to one useful thought, usually one to three
+sentences.
+
+## Setup
+
+The module loads by default. Its settings live in `extensions/room/config.yml` (git-ignored); copy
+[`config.example.yml`](config.example.yml) and keep only what you change:
+
+```yaml
+max_steps: 24
+history_limit: 16
+max_tokens: 1500
+aliases: {claude: [Haiku]}      # other names people call a persona by
+# providers: {...}              # optional: change Grok's provider or add one
+# profiles: {...}               # optional: change a character's model list
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `max_steps` | 24 | Model turns the whole room may take per run, across all characters. Clamped to 4..50. It also caps the number of jobs on the board. |
+| `history_limit` | 16 | Earlier conversation messages each character reads. |
+| `max_tokens` | 1500 | `max_tokens` of each model turn. |
+| `aliases` | `{claude: [Haiku]}` | Extra names per persona that count as addressing her. |
+| `providers` | none | Merged key by key over the module's `grok` provider (or adds a new one). |
+| `profiles` | none | Replaces whole profiles by name (`luna`, `grok`, ...). |
+
+Precedence for providers and profiles: the code in [`extension.py`](extension.py), then this
+`config.yml`, then `core.yml`. `core.yml`'s `providers:` win key by key; a profile of the same name in
+`core.yml`'s `profiles:` replaces the room's. `extension_config.room` in `core.yml` is merged over this
+file like any module setting.
+
+Environment variables (in `.env`): `GROK_API_KEY` for Grok. The other characters use the core's
+providers and their keys (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_API_KEY`).
+Through the fallbacks any one of those four keys lets every character answer, Grok included; with
+`GROK_API_KEY` too, Grok answers with her own model. `python -m core setup` can set `grok_api_key`; it writes it
+to `.env`.
+
+Assign the engine to a conversation in `core.yml`. The persona order is also the rotation order:
+
+```yaml
+assignments:
+  "discord:234567890123456789":
+    engine: room
+    personas: [luna, gemini, claude, deepseek, grok]
+    budget: {model_calls: 40, tool_calls: 24, seconds: 900}   # a busy room makes many model calls
+    options: {instructions: "Help with the physics homework."}
+```
+
+Assignment `options` the room reads: `instructions` (added to every character's system prompt),
+`owner_instructions` (added only when an owner sent the request), `max_steps`, `history_limit`,
+`history_image_minutes` (default 30) and `diary: false`. It does not read the assistant's
+`history_scope` or `quote`.
+
+To turn it off for one conversation, assign that conversation another engine or set `enabled: false`.
+To turn the module off entirely, add it to `modules: {exclude: [room]}` in `core.yml`; then the five
+personas and their profiles are gone too, and `python -m core --check` reports any assignment still
+naming them.
+
+## Using it
+
+* **Who answers.** Characters named in the message answer, by name, display name or alias
+  (case-insensitive, as a whole word, ignoring text in quotes or code blocks). "大家", "你们", "各位",
+  "everyone", "everybody", "you all", "you guys", "all of you" and "the team" address everybody, unless
+  a Chinese phrase says they need not ("你们不用...", "不用...大家"). An unaddressed message goes to one
+  character in rotation per conversation.
+* **Replies.** Each character's message appears under her display name. In group conversations it
+  quotes the request. The message is sent before her tools run, so people see what she is about to do.
+* **Work notes.** A character may add a short public reason for a step (at most 480 characters). It
+  arrives before her message, labelled `Work note` or `工作说明`.
+* **Teamwork.** A character can give teammates jobs. Their replies follow as they finish, in parallel
+  where the jobs are independent.
+* **Approvals.** A write waits for the owner's approval (where and how is the core's job: see
+  [Approvals](../../docs/core/ARCHITECTURE.md#approvals)). Other characters keep working meanwhile.
+* **Questions.** A character may ask the person one question. The next message in the lane answers it
+  and every waiting job continues. Messages sent while the room is thinking join the run: they answer
+  waiting questions, or open new jobs for the characters they address (or the next in rotation).
+* **Models.** `$model` lists each character's model in the conversation; an admin can choose one per
+  character with `$model <persona> <provider>/<model>` and undo it with `$model <persona> reset`. The
+  core records on each reply which provider and model wrote it.
+* **Diaries.** Each character keeps her own notes about each person; `$memory` shows and forgets them.
+* **Limits.** At most 5 actions and 4 new jobs per turn, 2 diary notes per turn, `max_steps` turns per
+  run. When a character cannot go on she says so with a fixed sentence, in Chinese if the latest message
+  contains Chinese characters and in English otherwise; the others continue.
+
+## How it works
+
+| File | Role |
+| --- | --- |
+| [`extension.py`](extension.py) | `EXTENSION` with its settings; `PROVIDERS` and `PROFILES`; `setup` builds `RoomEngine` and merges `config.yml`'s `providers` and `profiles` over the defaults. |
+| [`engine.py`](engine.py) | `RoomEngine`: who answers, the board, scheduling, model turns, tool calls, diaries. |
+| [`personas.py`](personas.py) | The five `Persona`s and their prompts (`SHARED` rules appended to each). |
+| [`config.example.yml`](config.example.yml) | The documented settings. |
+
+### The board
+
+The run's state is a board of jobs. A job is
+`{id, character, instruction, after, status, observations, pending, steps, question}`. Its status is
+`pending`, `running`, `waiting_approval`, `needs_input`, `complete` or `blocked`.
+
+1. **Open** (`run`, `_open`). On the first call the engine records the trigger's text as the `goal`,
+   keeps its images and adds one `opening-N` job per character who should answer (`participants`, or
+   the rotation counter `room_rotation:<address>` kept in `session.memory` of the first persona).
+2. **Absorb events** (`_absorb_events`). Events past `event_cursor` are applied: an `input` (other than
+   the trigger itself) answers waiting jobs or opens `reply-N` jobs; a `tool_result` or
+   `approval_denied` is matched to the job whose first pending action has that `call_id`, recorded as an
+   observation, and the job goes back to `pending`. A denial is recorded as a failed result with error
+   code `denied`, and the rest of that batch is dropped. Files of an approved result are queued in
+   `state["deliver"]`. Any job left `running` (the process stopped mid-turn) is reset to `pending`.
+   The `resumed` event needs no handling of its own.
+3. **Schedule** (`_schedule`). A pending job starts as an `asyncio` task when every job in its `after`
+   is `complete` and its character has no other running job. A job whose prerequisite is `blocked` is
+   blocked too. An `asyncio.Event` wakes the scheduler whenever a turn adds jobs or a task ends, so new
+   jobs start without waiting for the others.
+4. **Work** (`_work`). Each turn costs one room step. The character's turn is checked, new jobs are
+   added to the board, diary notes are written, and the message is spoken. `complete`, `needs_input` and
+   `blocked` end the job. `continue` with actions runs them and takes another turn; `continue` with only
+   jobs completes her job (delegating ends her part).
+5. **Inbox** (`_take_inbox`). When the board settles, new messages from the run's inbox are added and
+   the scheduler runs again.
+6. **Yield.** After a final `save`: any job `waiting_approval` returns `RunYield.WAIT_APPROVAL`, else
+   any `needs_input` returns `RunYield.WAIT_INPUT`, else `RunYield.DONE`.
+
+### A model turn
+
+`_turn` calls `session.models.generate` with:
+
+```python
+ModelRequest(messages, profile=persona.profile, persona=persona.name,
+             output_schema=turn_schema(characters), schema_name="room_turn",
+             images=..., effort="medium" if job["observations"] or job["after"] else "low",
+             max_tokens=self.max_tokens)
+```
+
+`persona` matters: several characters run at once, so it tells the core whose `$model` choice applies
+and whose model to name on the reply. The schema (`turn_schema`) is strict JSON:
+
+```json
+{"status": "continue|complete|needs_input|blocked", "message": "...", "work_note": "...",
+ "actions": [{"tool": "name", "arguments": {}}],
+ "jobs": [{"id": "verify", "character": "claude", "instruction": "...", "after": ["opening-1"]}],
+ "diary": [{"key": "study.subject", "kind": "fact|episode|reflection", "note": "...", "importance": 3}]}
+```
+
+`status`, `message`, `actions` and `jobs` are required; `character` is an enum of the session's
+personas. `_check` then rejects a turn with an empty message, a `work_note` over 480 characters,
+`continue` without actions or jobs, actions or jobs with any other status, unknown tools, `complete`
+right after her own failed action, a board that would exceed `max_steps` jobs, duplicate or overlong job
+IDs, unknown characters, empty or overlong (over 2000 characters) instructions, and missing or cyclic
+`after` dependencies. A rejected or unparsable turn gets one correction; a second failure blocks the job
+with the `invalid_turn` sentence. Any other error in her turn (for example no model available) blocks
+only her job (`request_failed`); the run goes on.
+
+The messages for a turn (`_messages`):
+
+* **System**: the persona prompt, her display name and the current time, `options.instructions`,
+  `owner_instructions` when an owner is speaking, the room rules (`INSTRUCTION`, with the roster and the
+  tool catalog: name, description, parameters, risk), and her diary.
+* **History** (`_history`): up to `history_limit` messages from before the request. Her own earlier
+  replies are `assistant` messages; everyone else's (people and other characters) are `user` lines with
+  time, speaker, the quoted text and attachments. `$commands` and the replies that answered them are
+  left out: `$model` lists and `$help` text are for the person who typed them, not the room's topic.
+* **Last user message**: the request (and what it quotes), then `Shared room (untrusted state): ` and a
+  JSON object with `goal`, the last 8 `answers`, `your_job`, `your_instruction`, `your_results`,
+  `pending_question`, the `board`, the last 16 `room_messages` and the last 16 `shared_results`.
+
+Images: those attached to the run's messages, those returned by successful tools, and those people
+sent within `history_image_minutes` before the request are combined (latest 6) and shown to every
+character on every turn.
+
+### Speaking and acting
+
+`_say` appends the message to `state["messages"]` and saves before calling
+`session.reply(..., persona=..., label=...)`, so a restart does not repeat it.
+
+`_act` runs a batch in order. Every action gets its `call_id` (`c1`, `c2`, ...) first, and the batch is
+saved in the job's `pending` before the first call; each observed result removes its action. So a
+restart mid-batch replays the same calls by `call_id`: the core reports a finished one's result and never
+repeats one cut off mid-way. `session.progress` shows `<character> · <tool>`. On `needs_approval` the
+rest of the batch stays in `pending` and the job waits; on a failure the rest of the batch is dropped. Files from successful results are sent
+with `session.send_file`. Results are kept as observations (`summary` cut to 3000 characters, up to 10
+`sources`).
+
+### Design decisions
+
+* **One loop, no planner.** Whoever is addressed owns the request; jobs are the only way to involve
+  others, and each assignee chooses her own tools.
+* **Speak first.** People see who is doing what before tools run; the rules allow claiming success
+  only when tool results support it.
+* **Parallel but one job per character**, so a character never talks over herself and her history
+  stays in order.
+* **The board is untrusted data.** Tool results and teammates' words are marked as data, never
+  instructions, in both the rules and the message label.
+* **Guards on top of the core's.** `_repeated` compares each action's signature (tool and arguments)
+  with earlier observations in the run: an action of risk other than `read` that already succeeded is
+  not run again (the old summary is returned), and an identical failed action is retried once only if
+  it was retryable (otherwise `repeated_failure`).
+* **Fixed failure sentences.** Unlike the assistant, the room reports a blocked job with a short fixed
+  text (`FAILURES`), because the other characters may still be working.
+
+### Safety
+
+Models may only call the tools `session.tools.list()` offers, by exact name; the core decides access
+and approval for every call. Writes are proposed, not asked about: a call returning `needs_approval`
+parks the job and the owner's `$approve` or `$deny` resumes the run. The owner's private instructions
+are shown only when an owner sent the request. Diary notes are private to each character.
+
+## Data it keeps
+
+* **Run state** (saved with `session.save`, kept with the run): `goal`, `answers`, `jobs`, `messages`,
+  `observations`, `steps`, `call_seq`, `job_seq`, `event_cursor`, `opened`, `images` (up to 6 file
+  references) and, briefly, `deliver`. Runs are kept indefinitely; the run's workspace files are deleted
+  7 days after it ends ([Retention](../../docs/core/EXTENSIONS.md#retention)).
+* **Persona memory**: one counter per conversation, `room_rotation:<address>`, in the first persona's
+  `session.memory` store.
+* **Diaries**: each character's notes about the person who sent the request, in that conversation only.
+  Only notes of importance 3 or more are written; the core enforces the rest (at most 200 notes per
+  persona and person; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). Turn off with
+  `diary: false`.
+
+## Tests
+
+[`tests/test_core_room.py`](../../tests/test_core_room.py) runs the room in a real core with a scripted
+fake model per character. It checks rotation and naming (including the `Haiku` alias); that "大家"
+starts one job per character in parallel and each reply names its own model; tools, work notes and
+`after` dependencies on one board; a write that waits for approval across a restart and runs once; two
+approvals resuming the run only when both are done; `$commands` and their answers left out of history;
+a question answered by the next message; one correction for invalid turns; a retryable failure retried
+once only and unknown characters refused; images shown to every character; separate diaries; and the
+profile precedence (code, then `config.yml`, then `core.yml`).
+
+```
+venv/bin/python -m unittest tests.test_core_room
+```
+
+## Building something similar
+
+* **Declare persona mode `many`** ([`engine.py:156`](engine.py)) and pass `persona=` on every model
+  call ([`engine.py:447`](engine.py)), or `$model` choices and model labels will be wrong.
+* **Initialise state once and replay events by index** ([`engine.py:166`](engine.py),
+  [`engine.py:239`](engine.py)). Skip the trigger's own `input` event if you already took it from
+  `session.trigger`.
+* **Save, then speak** ([`engine.py:362`](engine.py)); **give the whole batch its `call_id`s, keep it in
+  the job, save, then call** ([`engine.py:375`](engine.py)), so a restart replays the same calls.
+* **Keep the unfinished part of a batch** when a call needs approval, and match the later
+  `tool_result` by `call_key` ([`engine.py:391`](engine.py), [`engine.py:250`](engine.py)).
+* **Concurrency**: one task per job and an event to wake the scheduler; cancel and gather the tasks in
+  `finally` ([`engine.py:267`](engine.py)). Catch `CancelledError` separately so cancellation is not
+  reported as a failure ([`engine.py:348`](engine.py)).
+* **Validate beyond the schema** and send the problem back as a correction
+  ([`engine.py:458`](engine.py)), with a bounded number of retries.
+* **Ship models with the module**: providers and profiles in `Contributions`, with the module's
+  `config.yml` merged over them ([`extension.py:13`](extension.py), [`extension.py:36`](extension.py)).
+* Pitfalls: a run returns only when no job can start, so a waiting job does not stop others; budgets
+  count every character's calls, so give the assignment a larger `budget`; the room recognises a
+  character's own history by display name, so two personas with the same display name would share it.
+
+See also: [Writing modules](../../docs/core/EXTENSIONS.md) (especially
+[Engines](../../docs/core/EXTENSIONS.md#engines) and
+[The built-in `room` engine](../../docs/core/EXTENSIONS.md#the-built-in-room-engine)),
+[Core architecture](../../docs/core/ARCHITECTURE.md#durable-runs), [`extensions/assistant`](../assistant),
+[`plugins/webui`](../../plugins/webui) (a web chat that uses the room by default) and
+[`plugins/whale_chan`](../../plugins/whale_chan) (another engine with its own persona).

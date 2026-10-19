@@ -1,4 +1,4 @@
 # $search / $read settings. Copy to config.yml (git-ignored); extension_config.web in core.yml overrides it.
 grounding: true                 # Google grounding through Gemini first
 grounding_model: gemini-3.8-flash
-searxng_url: ""                 # or SEARXNG_URL in .env
+searxng_url: ""                 # a SearXNG server, e.g. http://localhost:8080 (SEARXNG_URL in .env, the older way)

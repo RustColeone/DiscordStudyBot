@@ -58,9 +58,9 @@ injection; keys are accepted only if they authenticate the account's databases):
 
 ```bash
 sudo venv/bin/python -m plugins.wechat.key_setup --pid <native-wechat-pid> \
-    --database-root ~/Documents/xwechat_files/wxid_…/db_storage --output temp/wechat_native/keys.json
+    --database-root ~/Documents/xwechat_files/wxid_…/db_storage --output data/core/extensions/wechat/keys.json
 venv/bin/python -m plugins.wechat.probe --database-root ~/Documents/xwechat_files/wxid_…/db_storage \
-    --keys temp/wechat_native/keys.json        # as the bot user: checks readiness, shows no messages
+    --keys data/core/extensions/wechat/keys.json   # as the bot user: checks readiness, shows no messages
 ```
 
 **Image key** (once; WeChat holds it in memory only while it shows images, so open two or three images
@@ -78,10 +78,12 @@ database key setup to be run again; reading pauses until then.
 ## Configuration
 
 WeChat is a drop-in plugin: it loads by itself and stays dormant (no interface, no messages) until
-`plugins/wechat/config.yml` (copy `config.example.yml`) or one of the `WECHAT_BRIDGE_*` variables in `.env` is set.
+`plugins/wechat/config.yml` (copy `config.example.yml`) is set up (the older `WECHAT_BRIDGE_*` variables in `.env`
+also count).
 
-`plugins/wechat/config.yml` (git-ignored; `extension_config.wechat` in core.yml overrides it; environment
-fallbacks `WECHAT_BRIDGE_*` in `.env`):
+`plugins/wechat/config.yml` (git-ignored; `extension_config.wechat` in core.yml overrides it). Keep these here,
+not in `.env`: `.env` is for secrets, and its values are blanked out of replies. The older `WECHAT_BRIDGE_*`
+variables still work as fallbacks.
 
 | Key | Default | |
 |---|---|---|
@@ -118,7 +120,8 @@ permissions:
     tiers: {write: always-ask}        # every write a member asks for comes to you first
 ```
 
-Reading your WeChat (`wechat_chats`, `wechat_read`, `wechat_status`) is a private read: it runs without
+Reading your WeChat (`wechat.chats`, `wechat.messages`, `wechat.status`; `$wechat_chats`, `$wechat_read`,
+`$wechat_status`) is a private read: it runs without
 asking, but only in your own private chats. Sending as you (`wechat.send`) is critical and asks.
 
 ## Owner commands

@@ -13,8 +13,10 @@ extension's settings, and `extension_config.<name>` in core.yml overrides it. Us
 a documented `config.example.yml` to copy.
 
 Secrets (bot tokens, API keys) are best kept in `.env`, with the config naming the variable (for
-example `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). If you would rather not edit the environment, an
-extension may accept the secret in its `config.yml` instead (`token: …`). In that case:
+example `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Only secrets: every value in `.env` is blanked out of
+anything the bot shows, so ordinary settings (paths, URLs, IDs) go in the `config.yml`. If you would
+rather not edit the environment, an extension may accept the secret in its `config.yml` instead
+(`token: …`). In that case:
 
 * `chmod 600 config.yml`, so only the bot's user can read it;
 * never share, zip or copy the folder together with its `config.yml`;
@@ -56,8 +58,8 @@ To run it:
    effort or the personality.
 4. Restart the bot. DM her, or mention her in a server.
 
-Without a token only the `chat` engine and `whale_chan` persona load; assign them anywhere in
-core.yml, for example `"discord:123": {engine: chat, personas: [whale_chan]}`.
+Without a token only the `chat` engine, the `whale_chan` persona and her model profile load; assign them
+anywhere in core.yml, for example `"discord:123": {engine: chat, personas: [whale_chan]}`.
 
 ## The web UI
 
@@ -70,9 +72,9 @@ printed at startup) from a laptop or phone at home:
   [`webui/avatars/`](webui/avatars/README.md); until then, coloured initials);
 * the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
   click someone, or type `@`, to ask them directly (`@Luna …` gets Luna's answer alone);
-* under each classmate, the model she answers with in this chat; click it to choose another of the models
-  the providers offer, or her own again (this is `$model`, for admins, asked in the background and kept
-  per chat); each of her messages shows the model that wrote it;
+* under each classmate, the model she answers with in this chat; click it (again to close) to choose
+  another of the models the providers offer, or her own again (this is `$model`, for admins, asked in the
+  background and kept per chat); each of her messages shows the model that wrote it;
 * work notes fold away; Markdown, code and LaTeX are rendered in the page (KaTeX); files and pictures go
   both ways (drop, paste or 📎);
 * approvals arrive as cards with their tier and buttons; type `$` (or `/`) for the command palette;
@@ -81,7 +83,7 @@ printed at startup) from a laptop or phone at home:
 
 Whoever opens the page is the bot's creator, like the console. So it answers only the local network
 (private and link-local addresses, or `networks:`), refuses other websites in your browser and
-DNS-rebinding hostnames, and serves only pictures and media inline. Set `WEBUI_PASSPHRASE` in `.env`
+DNS-rebinding hostnames, and serves only pictures, media and PDFs inline. Set `WEBUI_PASSPHRASE` in `.env`
 (or `passphrase:` in its `config.yml`) to have each browser sign in once. Settings: see
 [`webui/config.example.yml`](webui/config.example.yml) (port, your name, title, who answers).
 

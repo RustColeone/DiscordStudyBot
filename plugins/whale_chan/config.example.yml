@@ -32,7 +32,8 @@ models:
 # Slash commands besides /new (names from the core's catalog; [] for none).
 # slash_commands: [help, memory, remind, reminders, routine, draw, search, read, video]
 
-# Math rendering ($$…$$ as images): math, math_width_px, math_dpi, math_font_size_pt, math_max_images.
+# Math rendering ($$…$$ as images): math, math_width_px, math_dpi, math_font_size_pt, math_min_height_px,
+# math_max_images.
 # math: true
 
 # Extra assignment settings for this bot's conversations (core.yml assignments still win):

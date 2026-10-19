@@ -10,6 +10,25 @@ code is the [`contracts`](../../contracts) package, which is the complete public
 describes everything the core does with it; you should not need to read core code.
 [ARCHITECTURE.md](ARCHITECTURE.md) explains the internals for core maintainers.
 
+## Learning from the included modules
+
+Every module folder has a README: what the module adds, how to set it up, how it is built, its tests,
+and what to copy from it. Read this guide for the rules, then the module closest to what you want to
+build:
+
+| Module | Kind | Read it for |
+| --- | --- | --- |
+| [`basic`](../../extensions/basic/README.md), [`system`](../../extensions/system/README.md), [`reminders`](../../extensions/reminders/README.md) | Capabilities | The smallest capabilities: declaring one, risk tiers, a `$command`, a store, scheduling |
+| [`images`](../../extensions/images/README.md), [`web`](../../extensions/web/README.md), [`media`](../../extensions/media/README.md) | Capabilities | Outside services with keys, fallbacks, files and sources in results, long work with progress |
+| [`host`](../../extensions/host/README.md), [`terminal`](../../extensions/terminal/README.md) | Capabilities (terminal also an engine) | Sensitive actions: owner-only, private data, secret paths, approvals and confirmations |
+| [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
+| [`room`](../../extensions/room/README.md) | Engine, personas, providers | Several personas on one work board, parallel jobs, shipping your own model profiles |
+| [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
+| [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
+| [`webui`](../../plugins/webui/README.md) | Interface (plugin) | An interface you can drop in: a web page, its protocol and its security |
+| [`whale_chan`](../../plugins/whale_chan/README.md) | Interface, engine, persona (plugin) | A complete plugin: its own bot, engine, persona and model profile |
+| [`wechat`](../../plugins/wechat/README.md) | Interface (plugin) | A plugin that stays dormant until configured, with a desktop transport |
+
 ## Ground rules
 
 * Import `contracts`, the standard library, third-party packages and your own directory. Import
@@ -29,7 +48,7 @@ describes everything the core does with it; you should not need to read core cod
 | --- | --- |
 | Address | `interface:conversation`, e.g. `wechat:room@chatroom`. The conversation part is yours to define and may contain `:`. |
 | Owner | A sender listed under `owners` in `core.yml` for that interface, e.g. `owners: {discord: ["1234"]}`. Owners decide approvals, run owner-only capabilities, their `$commands` bypass admission and count as their approval. |
-| Control route | `control: discord:dm-1234` in `core.yml`. The default private place for approval requests (those an owner did not start in their own direct chat), failure details, events without a route, routine replies without a route, and hidden progress. |
+| Control route | `control: discord:dm:1234` in `core.yml`. The default private place for approval requests (those an owner did not start in their own direct chat), failure details, events without a route, routine replies without a route, and hidden progress. |
 | Route | Gateway data `pattern → {target, kinds}`: replies (of the listed `kinds`, or all) for conversations matching `pattern` go to `target` instead. `kinds` may include `event` to send interface events somewhere other than the control route. Edited with `core.set_route`. |
 | Admission rule | Gateway data deciding which person messages become requests (below). Edited with `core.set_rule`. |
 | Assignment | Manager data deciding which engine and personas handle a conversation, and their budget (below). Edited with `core.set_assignment`. |
@@ -222,6 +241,10 @@ Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, sec
   to `.env` under the first `env` name (read it with `os.getenv`), is typed hidden, and is never shown
   or accepted in a chat. `ask=True` puts it in the first-run questions; `check` tries a new value (the
   Discord module logs in with a token and returns the bot's name). Declare what people actually change.
+* **Only secrets go in `.env`:** the core treats every value there as a secret and blanks it out of
+  anything shown, wherever it appears (a model name kept there would vanish from replies). Ordinary
+  settings (paths, URLs, IDs, names) belong in your `config.yml`; read them from `context.config`, not
+  `os.getenv`.
 * **Secrets:** prefer `.env` and name the variable in the config (for example
   `token_env: DISCORD_BOT_TOKEN_WHALE_CHAN`). Putting a secret directly in the folder's `config.yml`
   (`token: …`) is supported for people who would rather not edit the environment; then
@@ -394,6 +417,8 @@ conversation carry `data["origin_address"]`.
 | `relayed` | An owner reply to an event was sent on. | `address`, `ok`, `detail` |
 | `unknown_command` | Unknown `$command`. | `command` |
 | `not_permitted` | The command is not available here. | |
+| `locked` | The bot is in maintenance (`$admin lock`): a person who is not an admin wrote; told once per conversation. | |
+| `reminder` | A reminder (`Context.schedule`) is due; `text` is the reminder. | `scheduled_id`, `sender_id`, `sender_name`, `at` |
 
 ### Declaring commands
 
@@ -594,7 +619,7 @@ commands of their own for this.
 request together on a work board. It also contributes the
 five default characters `luna`, `gemini`, `claude`, `deepseek` and `grok`, with a model profile of the
 same name for each (her own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back
-to Luna's) and Grok's provider. The room's `config.yml` overrides them, and core.yml overrides both.
+to Luna's chain) and Grok's provider. The room's `config.yml` overrides them, and core.yml overrides both.
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
   "大家", "everyone" and similar, otherwise one persona in rotation per conversation.
@@ -603,12 +628,13 @@ to Luna's) and Grok's provider. The room's `config.yml` overrides them, and core
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
 * Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
-  left out), the board, recent room messages, shared tool results, the images attached to the run's
-  messages, and only her own diary.
+  left out), the board, recent room messages, shared tool results, images (attached to the run's messages,
+  sent in the conversation within `history_image_minutes`, 30, before the request, or returned by tools),
+  and only her own diary.
 * Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
   person's answer. Both keep the board in the run, so they survive restarts. New messages during a
   run answer waiting questions or open new jobs.
-* Guards: a successful write is never repeated in a run, a failed action is
+* Guards: an action that is not a read is never repeated in a run once it succeeded, a failed action is
   retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
 * Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (16), `max_tokens`
@@ -690,7 +716,7 @@ its Cancel button interrupts the program), then the last screenful once nothing 
 by the same person meanwhile go straight to the shell. The shell uses plain pipes: ordinary commands,
 scripts and line-based REPLs work; full-screen programs (vim, top) and password prompts (sudo) do not.
 A line is never sent twice: if the bot restarts mid-run, it says so instead. Shells end after
-`idle_minutes` without input and when the bot stops. A routine you type (`$routine every 1h $t df -h`)
+`idle_minutes` without input (closed when a shell is next started) and when the bot stops. A routine you type (`$routine every 1h $t df -h`)
 runs `$t` on a schedule; one a model set up asks for your approval each time.
 
 Settings (`extensions/terminal/config.yml`): `shell` (a command line as a list, e.g. `[cmd.exe, /Q]`; on
@@ -712,7 +738,7 @@ default). The creator's own `$command` is their approval. Nobody else sees the c
 | `host.get_file` | `$getfile <path>` | Sends a copy of a file (path absolute, or relative to home) |
 | `host.save_files` | `$savefile [folder]` + attachment | Saves the creator's own attachments, only the ones named (`names`, so the approval shows them; default all of the creator's), to `~/Downloads` by default; existing names get ` (1)`. Files others added to the run are never saved |
 | `host.read_clipboard` / `host.write_clipboard` | `$clipboard` / `$copy <text>` | The clipboard's text |
-| `host.open` | `$open <url or path>` | Opens an http(s) URL in the browser, or a file or folder with its default app |
+| `host.open` | `$open <url or path>` | Opens an http(s) or `mailto:` URL in the browser, or a file or folder with its default app |
 | `host.processes` (read) | `$processes [cpu\|memory]` | The busiest processes |
 
 Linux uses `grim` (wlroots Wayland, e.g. the Raspberry Pi), `gnome-screenshot` or `spectacle` (GNOME or KDE

@@ -80,7 +80,10 @@ bot as a web page on your local network.
 
 * [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md): how the core is built (interfaces, gateway,
   manager, engines, capabilities, storage) and its rules.
-* [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy.
+* [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy, and which
+  module to read for what.
+* Each module's own `README.md` (for example [extensions/room](extensions/room/README.md)): what it adds,
+  setup, how it is built, its tests and what to copy from it.
 * [plugins/README.md](plugins/README.md): external modules, settings and secrets.
 
 ## Staying up

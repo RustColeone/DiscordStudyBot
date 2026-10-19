@@ -1,7 +1,8 @@
 # `venv/bin/python -m core setup` writes what it needs here for you; edit by hand for the rest.
 # Optional overrides for `python -m core`. Without a core.yml the built-in defaults are used
 # (core/defaults.py): every module, any model provider whose key is
-# in .env, owner = DISCORD_OWNER_ID or else the Discord application's owner.
+# in .env, owner = the Discord application's owner. .env holds secrets only; settings go here or in a
+# module's config.yml.
 #
 # Copy to core.yml and keep only what you change. Mappings merge with the defaults key by key;
 # lists and plain values replace them. Paths are relative to this file. Secrets stay in .env.
@@ -29,7 +30,8 @@
 # extension_config:
 #   discord: {thread_channels: ["123456789012345678"]}
 
-# Owners per interface (sender IDs). Default: DISCORD_OWNER_ID, else the Discord application owner.
+# Owners per interface (sender IDs). Default: the Discord application's owner (or DISCORD_OWNER_ID, the
+# older way).
 # owners:
 #   discord: ["123456789012345678"]
 #   cli: [local]

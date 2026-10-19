@@ -21,4 +21,6 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 #              {provider: openai, model: gpt-6-luna}, {provider: gemini, model: gemini-3.8-flash}]
 #   deepseek: [{provider: deepseek, model: deepseek-flash}, {provider: openai, model: gpt-6-luna},
 #              {provider: gemini, model: gemini-3.8-flash}, {provider: claude, model: claude-haiku-5-5}]
-#   grok:     [{provider: grok, model: grok-4-fast}, {provider: openai, model: gpt-6-luna}]
+#   grok:     [{provider: grok, model: grok-4-fast}, {provider: openai, model: gpt-6-luna},
+#              {provider: deepseek, model: deepseek-flash}, {provider: gemini, model: gemini-3.8-flash},
+#              {provider: claude, model: claude-haiku-5-5}]
