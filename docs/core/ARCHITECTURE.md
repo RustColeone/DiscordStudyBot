@@ -40,7 +40,7 @@ flowchart TB
 | --- | --- | --- | --- |
 | Interfaces | Platform I/O; convert events to `Request`; render `Reply`; report `Delivery` | Platform connection; its section of the bottle | Decide replies, call capabilities, read the tank |
 | Gateway | Single entry; per-conversation order; duplicate drop; admission rules; `$command` detection; reply routing; routines; scheduled messages | `gateway.db` (interface sections, seen IDs, rules, routes, routines, scheduled messages) | Feature logic, model calls, tank access, formatting |
-| Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; decides permissions (access, approval, enforcement) on every call; durable runs and approvals | `tank.db` (history, runs, events, actions, approvals, grants, stores, persona diaries) | Feature logic, prompts, platform formatting |
+| Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; decides permissions (access, approval, enforcement) on every call; durable runs and approvals | `tank.db` (history and its summaries, runs, events, actions, approvals, grants, modules' scoped stores, persona diaries) | Feature logic, prompts, platform formatting |
 | Engines | Turn loop through `Session` handles | Their run state (saved through the session) | Import providers, storage or interfaces; bypass policy |
 | Capabilities | One action; returns `ToolResult` | Nothing durable except their extension's store | Call other capabilities or engines; talk to the user |
 | Providers | Model profiles with ordered candidates and fallback; thin SDK adapters | Credentials (from environment) | Prompts, history, storage |
@@ -127,7 +127,9 @@ assignments.
 * **`$commands`.** `$approve <id> [always]`, `$deny`, `$runs`, `$cancel`, `$tools`, `$help`, `$call` (owner
   runs any capability with JSON arguments), `$permissions` (creator: what applies here, the saved grants,
   revoking one), `$memory` (anyone reads, forgets or clears what personas keep about them in this
-  conversation; deliberately not a capability, so models cannot delete notes), `$model` (admins: which
+  conversation, or in those sharing its `diary_scope`; also reads this chat's rolling summary, which
+  admins, or the person in a direct chat, can clear; deliberately not a capability, so models cannot
+  delete notes), `$model` (admins: which
   model each persona answers with here and what the providers offer, asked live; a choice per persona and
   conversation is tried before her profile, which stays the fallback; never offered to models), plus
   capabilities that declare a `command`.

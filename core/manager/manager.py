@@ -24,7 +24,7 @@ from contracts import (Action, Address, Capability, Command, Delivery, Display, 
                        ModelRequest, ModelResult, Operation, Option, Persona, Reply, Request, Risk, RunYield, Sender,
                        ToolResult)
 from core.audit import Audit
-from core.manager.handles import SessionHandle, ToolContextHandle
+from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle
 from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
@@ -251,6 +251,17 @@ class Manager:
             raise ValueError(f"Engine {name!r} is already registered")
         self.engines[name] = engine
         self._origin["engine:" + name] = extension
+
+    def origin_of(self, key: str) -> str:
+        """The module that registered an engine (`engine:<name>`), for its stores."""
+        return self._origin.get(key, "core")
+
+    @staticmethod
+    def diary_scope(address: str, options: Mapping[str, Any]) -> str:
+        """Where diary notes live: the conversation, or `scope:<name>` shared by every conversation whose
+        assignment sets `diary_scope: <name>` (the same character remembering a person across them)."""
+        name = str(options.get("diary_scope") or "").strip()
+        return f"scope:{name}" if name else address
 
     def register_capability(self, capability: Capability, extension: str) -> None:
         if capability.name in self.capabilities:
@@ -1508,13 +1519,19 @@ class Manager:
         return "\n".join(lines)
 
     def memory_command(self, text: str, request: Request) -> str:
-        """`$memory`: what personas keep about the sender in this conversation; only theirs, only here."""
-        address, subject = str(request.address), request.sender.id
+        """`$memory`: what personas keep about the sender in this conversation (or in the conversations sharing
+        its `diary_scope`); only theirs. Also this chat's rolling summary (`summary`, `clear summary`)."""
+        conversation, subject = str(request.address), request.sender.id
+        assignment = self.assignment_for(request.address)
+        address = self.diary_scope(conversation, assignment.options if assignment else {})
+        here = "here" if address == conversation else "in the chats that share this memory"
         code = (lambda value: f"`{value}`") if request.display.markdown else str
-        usage = ("Personas keep short notes about you in this conversation.\n"
+        usage = (f"Personas keep short notes about you {here}.\n"
                  f"{code('$memory [persona] [page]')} read them\n"
                  f"{code('$memory forget <note-id>')} remove one note\n"
-                 f"{code('$memory clear [persona]')} remove all notes about you here, or one persona's")
+                 f"{code('$memory clear [persona]')} remove all notes about you {here}, or one persona's\n"
+                 f"{code('$memory summary')} read this chat's summary; {code('$memory clear summary')} remove it")
+        summaries = self.tank.store(SUMMARIES)
         counts = self.tank.note_counts(address, subject)
 
         def persona_named(name: str) -> str | None:
@@ -1527,31 +1544,44 @@ class Manager:
 
         parts = text.split()
         action = parts[0].lower() if parts else ""
+        if action == "summary" and len(parts) == 1:
+            summary = summaries.get(conversation)
+            if not summary:
+                return "No summary of this chat yet (it is written once the chat is long enough)."
+            day = dt.datetime.fromtimestamp(summary["upto"]).astimezone().strftime("%Y-%m-%d %H:%M")
+            return f"This chat's summary (up to {day}):\n{summary['text']}"
+        if action == "clear" and parts[1:] == ["summary"]:
+            # The summary is the whole chat's: an admin's to clear, or yours in a direct chat.
+            if not (request.is_direct or LEVELS[self.access_of(request)] >= LEVELS["admin"]):
+                return "Only admins can clear the summary of a shared chat."
+            summaries.delete(conversation)
+            self.audit.record("summary_clear", address=conversation)
+            return "This chat's summary was removed; it is written again as the chat goes on."
         if action == "forget":
             if len(parts) != 2 or not parts[1].lstrip("#").isdecimal() or len(parts[1]) > 18:
                 return usage
             removed = self.tank.delete_notes(address, subject, note_id=int(parts[1].lstrip("#")))
             self.audit.record("diary_forget", address=address, removed=removed)
-            return "Note removed." if removed else "No note with that ID about you here."
+            return "Note removed." if removed else f"No note with that ID about you {here}."
         if action == "clear":
             persona = persona_named(parts[1]) if len(parts) == 2 else None
             if len(parts) > 2 or (len(parts) == 2 and persona is None):
                 return usage
             removed = self.tank.delete_notes(address, subject, persona)
             self.audit.record("diary_clear", address=address, persona=persona or "*", removed=removed)
-            return f"Removed {removed} note(s) about you here" + (f" from {label(persona)}." if persona else ".")
+            return f"Removed {removed} note(s) about you {here}" + (f" from {label(persona)}." if persona else ".")
         page_text = parts[-1] if parts and parts[-1].isdecimal() else "1"
         names = parts[:-1] if parts and parts[-1].isdecimal() else parts
         if not names and len(counts) != 1:
             if not counts:
-                return "Nobody keeps notes about you in this conversation.\n" + usage
+                return f"Nobody keeps notes about you {here}.\n" + usage
             return "\n".join([*(f"{label(name)}: {count} note(s)" for name, count in counts.items()), usage])
         persona = persona_named(" ".join(names)) if names else next(iter(counts))
         if persona is None or len(page_text) > 6:
             return usage
         count = counts.get(persona, 0)
         if not count:
-            return f"{label(persona)} keeps no notes about you in this conversation."
+            return f"{label(persona)} keeps no notes about you {here}."
         pages = (count + 19) // 20
         page = int(page_text)
         if not 1 <= page <= pages:

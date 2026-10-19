@@ -501,7 +501,7 @@ for members and every conversation's items for admins. Describe the admin behavi
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
-`files` (files people attached to the run's requests; `own_files`: only those of the person who started the run, which is what anything writing them somewhere should use); `storage` (your extension's private store, shared by your capabilities, committed on
+`files` (files people attached to the run's requests; `own_files`: only those of the person who started the run, which is what anything writing them somewhere should use); `storage` (your extension's private store, shared by your capabilities, the same as `store()`; `store(conversation=, persona=, person=)` scopes it, see [Storing data](#storing-data); committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a
 directory for this run's output files); `await progress(text)`; `await schedule(at, text)`
 (a one-time `reminder` notice in the calling conversation at Unix time `at`; returns its ID; raises
@@ -540,9 +540,13 @@ class MyEngine(Engine):
 | `options` | The assignment's `options` mapping (per-conversation settings). |
 | `owner` | Whether the trigger's sender is an owner of its interface (never for routines). |
 | `access` | The trigger's sender's effective level: `member`, `admin` or `creator` (see below). |
-| `personas`, `memory(name)` | Personas of this conversation; each persona's private persistent store. |
-| `diary(name)` | That persona's notes about the trigger's sender in this conversation (see below). |
+| `personas` | Personas of this conversation. |
+| `store(conversation=, persona=, person=)` | Your module's key-value store, scoped by any combination of this conversation, one of these personas (across conversations) and the trigger's sender (across conversations); no arguments: the module's store everywhere. See [Storing data](#storing-data). |
+| `memory(name)` | Older: a persona's store shared by every module running it; prefer `store(persona=name)`. |
+| `diary(name)` | That persona's notes about the trigger's sender, in this conversation or across those sharing its `diary_scope` (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
+| `history.search(text, limit)` | This conversation's messages containing `text` (any case), newest first, at most 100: further back than `recent` reaches (200). |
+| `history.summary()`, `history.summarize(text, upto)` | The conversation's rolling summary (`HistorySummary`: `text`, `upto`, `updated_at`), shared by every engine and persona in it. An engine compacting older history writes it (at most 8000 characters, scrubbed of secrets) covering messages up to `upto`; people read and clear it with `$memory`. |
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
 | `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). |
@@ -610,7 +614,9 @@ to any conversation:
 ### Diaries
 
 `session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
-only; a DM disclosure never shows up in a server. `recall(text, limit)` returns `DiaryNote`s, those
+only by default; a DM disclosure never shows up in a server. An assignment's `diary_scope: <name>` option
+makes every conversation with that scope share them instead: the same character remembering the same person
+across them (the web UI's chats, which only their owner reads). `$memory` follows the scope. `recall(text, limit)` returns `DiaryNote`s, those
 matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
 under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses
 (`ValueError`) invalid keys or values, notes over 400 characters, notes that copy the message instead
@@ -754,6 +760,19 @@ clipboard and `xdg-open`; a bot running as a service finds the logged-in desktop
 (`extensions/host/config.yml`): `downloads_dir`, `desktop_env`. Shell work (listing folders, ending
 processes) is the terminal's.
 
+## Storing data
+
+Pick the tier by what the data is; none of them needs anything new from the core:
+
+| Data | Where | Example |
+| --- | --- | --- |
+| What was said, and what is remembered about it | The core's: `session.history` (recent, search, the rolling summary) and diaries. The core enforces their rules and people control them with `$memory` | A chat's summary; a character's notes about you |
+| Small state of your module | `session.store(...)` / `context.store(...)`: key-value, JSON values, scoped by any combination of `conversation`, `persona` and `person`; your module's name comes first, so no module reads another's | A rotation counter (`conversation=True`), a person's preferences (`person=True`), a character's own data (`persona=...`) |
+| Bulk or structured data of your module | Your own files or database in `context.data_dir`; the core never opens it | A trade log, price series, a transcript |
+
+A "person" is a sender on one interface: the same human on Discord and on the web UI is two people to
+the store.
+
 ## Core capabilities
 
 Changing policy (`set_rule`, `set_route`, `set_forward`, `set_routine`, `set_assignment`,
@@ -768,6 +787,7 @@ counts as approval.
 | `core.list_routes` / `core.set_route` | `pattern`, `route` (`{target, kinds}` or null) |
 | `core.add_routine` (write, anyone) | `schedule` (`every 1h`, `daily 08:00`, `weekdays 09:00`, `mon,wed 18:30`, `at 18:30`, `at 2026-10-17 08:00`), `text` (a message or a `$command`), `chat` (admins: another conversation) |
 | `core.list_routines` (anyone) | none: this conversation's routines; every conversation's for admins |
+| `core.search_history` (read, anyone) | `query`, `limit` (1–50): this conversation's earlier messages containing it, with time and speaker |
 | `core.pause_routine` / `core.resume_routine` / `core.delete_routine` (write, anyone) | `id`: the caller's own routine here; admins: any |
 | `core.set_routine` (owner) | a configured routine in `routine:<name>`: `name`, `text`, `every_minutes` or `daily_at`, `enabled` |
 | `core.list_assignments` / `core.set_assignment` / `core.delete_assignment` | `pattern`, `assignment` |

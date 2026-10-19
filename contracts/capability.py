@@ -116,6 +116,11 @@ class ToolContext(Protocol):
     async def unschedule(self, scheduled_id: str) -> bool:
         """Cancel a pending scheduled message of this conversation. False if there is none."""
 
+    def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False) -> Store:
+        """A key-value store of this capability's module (added in 1.5), scoped by any combination of this
+        `conversation`, one of the run's personas, and the caller (`person`); no arguments: the module's
+        store everywhere (the same as `storage`)."""
+
 
 Handler = Callable[[Mapping[str, Any], ToolContext], Awaitable[ToolResult]]
 

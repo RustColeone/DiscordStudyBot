@@ -42,9 +42,11 @@ def normalized(text: str) -> str:
 class DiaryHandle:
     """Implements contracts.Diary for one run and one of its personas."""
 
-    def __init__(self, manager: "Manager", record: "RunRecord", persona: str, trigger_text: str, subject: str):
+    def __init__(self, manager: "Manager", record: "RunRecord", persona: str, trigger_text: str, subject: str,
+                 scope: str | None = None):
         self._manager, self._run_id, self.persona = manager, record.id, persona
-        self._address, self._subject = record.address, subject
+        # The notes' scope: the conversation, or a name several conversations share (`diary_scope`).
+        self._address, self._subject = scope or record.address, subject
         self._source = normalized(trigger_text)
         self.available = bool(subject) and record.origin != "routine"
 

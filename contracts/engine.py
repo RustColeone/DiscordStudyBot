@@ -105,8 +105,30 @@ class Tools(Protocol):
         """
 
 
+@dataclass(frozen=True)
+class HistorySummary:
+    """A conversation's rolling summary: `text` covers its messages up to `upto` (epoch seconds, inclusive)."""
+
+    text: str
+    upto: float
+    updated_at: float
+
+
 class History(Protocol):
+    """The conversation's history, kept by the core (every message in and out)."""
+
     def recent(self, limit: int = 30) -> Sequence[HistoryItem]: ...
+
+    def search(self, text: str, limit: int = 20) -> Sequence[HistoryItem]:
+        """Messages of this conversation containing `text` (any case), newest first, beyond `recent`'s reach."""
+
+    def summary(self) -> HistorySummary | None:
+        """The conversation's rolling summary, if an engine wrote one."""
+
+    def summarize(self, text: str, upto: float) -> None:
+        """Replace the rolling summary: `text` (at most 8000 characters) covers messages up to `upto`.
+        Engines compact older history this way; the summary is shared by every engine and persona in the
+        conversation, and people can read and clear it with `$memory`."""
 
 
 DIARY_KINDS = ("fact", "episode", "reflection")
@@ -162,11 +184,19 @@ class Session(Protocol):
     owner: bool  # the trigger's sender is an owner of its interface (never for routines)
     access: str  # the trigger's sender's effective level: member, admin or creator
 
+    def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False) -> Store:
+        """A key-value store of this engine's module (added in 1.5), scoped by any combination of: this
+        `conversation`, one of the session's personas (across conversations), and the trigger's sender
+        (`person`, across conversations). No arguments: the module's store everywhere. Each module's stores
+        are its own; the core keeps them and never reads them."""
+
     def memory(self, persona: str) -> Store:
-        """The persona's private key-value store, shared by all its conversations."""
+        """The persona's private key-value store, shared by all its conversations (older: prefer
+        `store(persona=...)`, which is the module's own)."""
 
     def diary(self, persona: str) -> Diary:
-        """The persona's notes about the trigger's sender in this conversation."""
+        """The persona's notes about the trigger's sender: in this conversation, or in every conversation
+        sharing the assignment's `diary_scope` option."""
 
     def inbox(self) -> list[Request]:
         """Requests for this run's lane that arrived while this run was thinking. Each is returned once.

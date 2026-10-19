@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
-from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, ModelError, ModelRequest,
-                       ModelResult, Persona, Request, Sender, ToolResult)
+import time
+
+from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, HistorySummary, ModelError,
+                       ModelRequest, ModelResult, Persona, Request, Sender, ToolResult)
 from core.manager.diary import DiaryHandle
 from core.serialize import request_from_dict
 from core.storage.tank import RunRecord
@@ -37,12 +39,52 @@ class ToolsHandle:
         return await self._manager.call_tool(self._run_id, name, dict(arguments or {}), call_id)
 
 
+SUMMARY_CHARS = 8000
+
+
 class HistoryHandle:
     def __init__(self, manager: "Manager", address: Address):
         self._manager, self._address = manager, address
 
     def recent(self, limit: int = 30) -> list[HistoryItem]:
         return self._manager.tank.recent_messages(str(self._address), limit)
+
+    def search(self, text: str, limit: int = 20) -> list[HistoryItem]:
+        text = str(text or "").strip()
+        return self._manager.tank.search_messages(str(self._address), text, limit) if text else []
+
+    def summary(self) -> HistorySummary | None:
+        value = self._manager.tank.store(SUMMARIES).get(str(self._address))
+        return HistorySummary(value["text"], float(value["upto"]), float(value["at"])) if value else None
+
+    def summarize(self, text: str, upto: float) -> None:
+        text = str(text or "").strip()
+        if not text or len(text) > SUMMARY_CHARS:
+            raise ValueError(f"A summary is 1 to {SUMMARY_CHARS} characters")
+        self._manager.tank.store(SUMMARIES).set(str(self._address), {
+            "text": self._manager.secrets.scrub(text), "upto": float(upto), "at": time.time()})
+
+
+SUMMARIES = "core:summaries"  # conversation address → its rolling summary (History.summarize)
+
+
+def module_store(manager: "Manager", module: str, address: Address, sender: Sender, personas: Sequence[str], *,
+                 conversation: bool, persona: str | None, person: bool):
+    """A module's store, scoped by any combination of conversation, persona and person (contracts 1.5). The
+    module's name comes first, so no module can reach another's; with no scope it is the module's store
+    everywhere (the same as ToolContext.storage)."""
+    scope = "extension:" + module
+    if conversation:
+        scope += f"|conversation:{address}"
+    if persona is not None:
+        if persona not in personas:
+            raise ValueError(f"No persona {persona!r} in this run")
+        scope += f"|persona:{persona}"
+    if person:
+        if not sender.id:
+            raise ValueError("This run has no person (a routine without a sender)")
+        scope += f"|person:{address.interface}:{sender.id}"
+    return manager.tank.store(scope)
 
 
 class SessionHandle:
@@ -66,6 +108,13 @@ class SessionHandle:
         self.models = ModelsHandle(manager, record.id, profile)
         self.tools = ToolsHandle(manager, record.id)
         self.history = HistoryHandle(manager, self.address)
+        self._module = manager.origin_of("engine:" + record.engine)
+        self._diary_scope = manager.diary_scope(record.address, self.options)
+
+    def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False):
+        return module_store(self._manager, self._module, self.address, self.trigger.sender,
+                            [item.name for item in self.personas], conversation=conversation, persona=persona,
+                            person=person)
 
     def memory(self, persona: str) -> Any:
         if persona not in {item.name for item in self.personas}:
@@ -76,7 +125,8 @@ class SessionHandle:
         if persona not in {item.name for item in self.personas}:
             raise ValueError("A session can only open the diary of its own personas")
         record = self._manager.tank.run(self.run_id)
-        return DiaryHandle(self._manager, record, persona, self.trigger.text, self.trigger.sender.id)
+        return DiaryHandle(self._manager, record, persona, self.trigger.text, self.trigger.sender.id,
+                           scope=self._diary_scope)
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)
@@ -127,6 +177,7 @@ class ToolContextHandle:
         self.files: tuple[FileRef, ...] = tuple(files) or tuple(trigger.files)
         self.own_files: tuple[FileRef, ...] = tuple(own) or (tuple(trigger.files) if not files else ())
         self.storage = manager.tank.store("extension:" + extension)
+        self._extension, self._personas = extension, list(record.personas)
         profile = (manager.personas[record.personas[0]].profile if record.personas else "default")
         self.models = ModelsHandle(manager, record.id, profile)
         self.workspace = workspace
@@ -134,6 +185,10 @@ class ToolContextHandle:
 
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)
+
+    def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False):
+        return module_store(self._manager, self._extension, self.address, self.sender, self._personas,
+                            conversation=conversation, persona=persona, person=person)
 
     async def schedule(self, at: float, text: str) -> str:
         return self._manager.gateway.schedule(self.address, at, text, self.sender)

@@ -7,6 +7,7 @@ without the owner's approval when a model asks; sending elsewhere is critical, g
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -113,6 +114,18 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                                  else f"Routine {routine['id']} paused.")
         return run
 
+    async def search_history(arguments, context) -> ToolResult:
+        query = str(arguments["query"]).strip()
+        if not query:
+            return ToolResult.fail("What should I look for?", "invalid_arguments")
+        found = manager.tank.search_messages(str(context.address), query, int(arguments.get("limit") or 10))
+        if not found:
+            return ToolResult.ok(f"Nothing earlier in this conversation mentions {query!r}.", data={"matches": 0})
+        speaker = (lambda item: item.sender_name or ("assistant" if item.direction == "out" else item.sender_id))
+        lines = [f"[{dt.datetime.fromtimestamp(item.at).astimezone():%Y-%m-%d %H:%M}] {speaker(item)}: "
+                 f"{item.text[:400]}" for item in found]
+        return ToolResult.ok("\n".join(lines), data={"matches": len(found)})
+
     async def model(arguments, context) -> ToolResult:
         return await manager.model_choices.command(context.address, str(arguments.get("text") or ""))
 
@@ -171,6 +184,12 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                    "to another (target), or remove it (target=null). The target must be admitted.",
                    guarded(set_forward), {"address": {"type": "string"}, "target": {"type": ["string", "null"]}},
                    ("address",), Risk.CRITICAL, owner_only=True, never_auto=True),
+        # Only this conversation's own messages, which its members could scroll back to anyway.
+        Capability("core.search_history", "Find earlier messages of this conversation that contain a word or "
+                   "phrase, beyond what you can see of it (newest first, with time and speaker). Use it when the "
+                   "conversation's summary or recent messages are not enough.", guarded(search_history),
+                   {"query": {"type": "string", "description": "A word or short phrase, as it would appear"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50}}, ("query",), Risk.READ),
         # Typed by people only (internal: never offered to models, so no model picks its own model).
         Capability("core.model", "Show which model each persona answers with here and which models the providers "
                    "offer, or choose one for a persona in this conversation.",

@@ -96,12 +96,22 @@ class Tank:
     def recent_messages(self, address: str, limit: int = 30) -> list[HistoryItem]:
         rows = self.db.query("SELECT * FROM messages WHERE address=? ORDER BY seq DESC LIMIT ?",
                              (address, max(1, min(int(limit), 200))))
-        return [HistoryItem(direction=row["direction"], text=row["text"], at=row["at"],
-                            sender_name=row["sender_name"] or "", sender_id=row["sender_id"] or "",
-                            kind=row["kind"], message_id=row["message_id"], reply_to=row["reply_to"],
-                            quoted_text=row["quoted_text"] or "",
-                            files=tuple(FileRef(**item) for item in loads(row["files"], [])))
-                for row in reversed(rows)]
+        return [self._history_item(row) for row in reversed(rows)]
+
+    def search_messages(self, address: str, text: str, limit: int = 20) -> list[HistoryItem]:
+        """Messages of one conversation containing `text` (any case for Latin letters), newest first."""
+        pattern = "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = self.db.query("SELECT * FROM messages WHERE address=? AND text LIKE ? ESCAPE '\\' "
+                             "ORDER BY seq DESC LIMIT ?", (address, pattern, max(1, min(int(limit), 100))))
+        return [self._history_item(row) for row in rows]
+
+    @staticmethod
+    def _history_item(row) -> HistoryItem:
+        return HistoryItem(direction=row["direction"], text=row["text"], at=row["at"],
+                           sender_name=row["sender_name"] or "", sender_id=row["sender_id"] or "",
+                           kind=row["kind"], message_id=row["message_id"], reply_to=row["reply_to"],
+                           quoted_text=row["quoted_text"] or "",
+                           files=tuple(FileRef(**item) for item in loads(row["files"], [])))
 
     # ---- diaries ----------------------------------------------------------------------------------
     @staticmethod
