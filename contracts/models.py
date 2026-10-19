@@ -46,6 +46,9 @@ class ModelResult:
     output_tokens: int = 0
     duration_s: float = 0.0
     schema_mode: str = ""
+    # Added in 1.4 (new fields go last): why each candidate tried before this one did not answer, in order
+    # ("deepseek/deepseek-flash: blank answer (not JSON)"); empty when the first one did.
+    fallbacks: tuple[str, ...] = ()
 
 
 class ModelError(RuntimeError):

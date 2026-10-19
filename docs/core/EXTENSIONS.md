@@ -130,15 +130,21 @@ here; runtime assignments saved with them keep their `allow`/`deny` as that patt
 ```yaml
 providers:
   deepseek: {kind: openai_compatible, base_url: "https://api.deepseek.com", api_key_env: DEEPSEEK_API_KEY,
-             schema_mode: json_object, effort_param: true}
+             schema_mode: json_object, effort_param: true, inline_history: true}
 profiles:
   default: [{provider: deepseek, model: deepseek-flash}, {provider: openai, model: gpt-6-luna}]
 personas:
   whale: {display_name: 本鲸, profile: default, prompt: "…"}
 ```
 
-A profile is an ordered list of candidates; the next is tried when one fails. An extension may ship
-default personas in `Contributions.personas`; a configured persona with the same name wins.
+A profile is an ordered list of candidates; the next is tried when one fails, or when its answer cannot be
+used (blank, not the requested JSON, cut off at the token limit). A switch is never silent: the result's
+`fallbacks` say why each earlier candidate did not answer, the audit log records `provider_failed` or
+`provider_rejected` with the reason, and the persona's message carries it (`reply.data["fallback"]`).
+`inline_history: true` (on for DeepSeek) sends a JSON request's earlier turns written into one message,
+because DeepSeek's JSON mode often answers blank after an assistant turn; a blank JSON-mode answer is
+asked once more. An extension may ship default personas in `Contributions.personas`; a configured
+persona with the same name wins.
 
 ### Model providers
 
@@ -395,7 +401,7 @@ Return a `Delivery`:
 
 | `reply.kind` | Render |
 | --- | --- |
-| `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). A persona's message (or any message of a one-persona run) has `reply.data["provider"]` and `reply.data["model"]`, the model that wrote it; a `$command`'s answer has its result's data as JSON in `reply.data["result"]` (`$model` lists each persona's model and the providers' models there). Showing them is optional. |
+| `text` | `reply.text`. If `reply.quote` is set (only when `display.quotes` is true), quote that request ID. Split long text if needed. If `reply.speaker` is set (engines with several personas), name the speaker, with `reply.label` if any (Discord: `**Luna · Work note**` above the text). A persona's message (or any message of a one-persona run) has `reply.data["provider"]` and `reply.data["model"]`, the model that wrote it, and `reply.data["fallback"]` when that was not her first candidate (why each earlier one did not answer); a `$command`'s answer has its result's data as JSON in `reply.data["result"]` (`$model` lists each persona's model and the providers' models there). Showing them is optional. |
 | `file` | Send `reply.file.path` (named `reply.file.name`), caption `reply.text`. The core already checked `display.files` and `max_upload_mb`. |
 | `progress` | A transient status line, one per run (`reply.run_id`): edit it in place where you can, and clear it when the run answers. It carries a `Cancel` action (`$cancel <run>`), which stops the run's work (an engine's turn or a `$command`'s capability). You get it only if your `display.progress` is true or you are the control route. |
 | `notice` | Phrase `reply.code` in your platform's style (table below). |
@@ -539,7 +545,7 @@ class MyEngine(Engine):
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
-| `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). |
+| `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). |
 | `tools.list()`, `await tools.call(name, args, call_id)` | Capabilities allowed here, and calling them under policy. Never raises for policy; check `result.status` (`success`, `failed`, `needs_input`, `needs_approval`). |
 | `await reply(text, quote=None, persona=None, label="")`, `await send_file(file)`, `await progress(text)` | Output; returns the interface's `Delivery` (or a refusal such as `run_closed`, `conversation_disabled`, `too_large`). `persona` (one of the session's) makes the persona's display name the reply's `speaker` and the sender name in history; `label` qualifies it (for example a work note, recorded with kind `note`). |
 

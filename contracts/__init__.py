@@ -11,7 +11,7 @@ from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter
                               ModelResult, Models, NotConfigured)
 from contracts.stores import Store
 
-CONTRACTS_VERSION = "1.3"
+CONTRACTS_VERSION = "1.4"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",

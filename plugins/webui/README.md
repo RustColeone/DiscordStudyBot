@@ -155,7 +155,7 @@ characters read.
 | `reply.kind` | Server | Page |
 | --- | --- | --- |
 | `progress` | Not stored. Kept in memory per `run_id` (or chat) and broadcast as `progress`; sent again in every `hello`. | A typing line with the speaker's avatar ("Luna is using …"), its `Cancel` button, and "typing…" on that classmate in the class list. Lines older than 15 minutes are dropped. |
-| `text` | Stored with `speaker`, `label`, `data` (including `provider` and `model`), `actions`, `origin`. | A bubble with avatar, name, time and the model that wrote it; a `label` (work note) folds into a `<details>`. Markdown and math rendered. |
+| `text` | Stored with `speaker`, `label`, `data` (including `provider` and `model`), `actions`, `origin`. | A bubble with avatar, name, time and the model that wrote it (with ⚠ when a fallback answered; hover for the reason); a `label` (work note) folds into a `<details>`. Markdown and math rendered. |
 | `file` | The file is copied out of the run workspace into `files/<id>/<name>` (workspaces are deleted later) and recorded. | Pictures inline (click to enlarge), audio and video as players, anything else as a download link. |
 | `notice` `approval_request` | Stored; indexed by `approval_id`. | A card: tier badge, summary, warnings, who asked and where, the exact arguments folded, and the action buttons, or "✓ approved" / "✕ denied" once decided. |
 | `notice` `reminder` | Stored. | A reminder card. |

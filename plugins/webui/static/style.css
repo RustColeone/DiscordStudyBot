@@ -170,6 +170,7 @@ button.member:hover { background: color-mix(in srgb, var(--paper) 75%, transpare
 .label { font-weight: 600; color: var(--muted); font-size: .75rem; background: var(--panel); border-radius: 8px; padding: 1px 7px; }
 .time { font-weight: 400; color: var(--muted); font-size: .72rem; }
 .model-tag { margin-left: -4px; }
+.model-tag.is-fallback { color: #c8743a; cursor: help; }  /* a fallback answered: hover for the reason */
 .bubble { background: var(--cbg, var(--paper)); border: 1px solid var(--line); border-left: 4px solid var(--cb, var(--c));
           border-radius: 6px var(--radius) var(--radius) var(--radius); padding: 10px 14px; box-shadow: var(--shadow);
           line-height: 1.55; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }

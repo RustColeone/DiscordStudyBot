@@ -187,6 +187,7 @@ class Providers:
                                          if (candidate["provider"], candidate["model"])
                                          != (first["provider"], first["model"]))]
         failures: list[str] = []
+        skipped: list[str] = []  # why each candidate before the one that answered did not (ModelResult.fallbacks)
         invalid: ModelError | None = None
         images = await asyncio.to_thread(load_images, request.images) if request.images else []
         attempts = [(candidate, bool(images) and self._sees(candidate)) for candidate in candidates]
@@ -211,30 +212,38 @@ class Providers:
                     timeout=request.timeout_s + 5)
             except NotConfigured as error:
                 failures.append(f"{provider}: not configured ({error})")
+                skipped.append(f"{provider}/{model}: not configured ({error})")
                 continue
             except Exception as error:
                 failures.append(f"{provider}/{model}: {type(error).__name__}")
+                skipped.append(f"{provider}/{model}: {type(error).__name__}: {error}"[:240])
                 self._record("provider_failed", profile=name, provider=provider, model=model,
                              error=type(error).__name__, duration_s=round(time.monotonic() - started, 3))
                 continue
             duration = round(time.monotonic() - started, 3)
             self._record("provider_call", profile=name, provider=provider, model=model, duration_s=duration,
                          input_tokens=result.input_tokens, output_tokens=result.output_tokens)
-            data = None
+            data, rejected = None, ""
             if result.truncated:
                 invalid = ModelError("invalid_output", "The model output was truncated", result.text)
                 failures.append(f"{provider}/{model}: truncated")
-                continue
-            if request.output_schema is not None:
+                rejected = "answer cut off at the token limit"
+            elif request.output_schema is not None:
                 try:
                     data = parse_json(result.text, request.output_schema)
                 except ModelError as error:
                     invalid = error
                     failures.append(f"{provider}/{model}: invalid output")
-                    continue
+                    rejected = "blank answer (not JSON)" if not result.text.strip() else str(error)[:200]
+            if rejected:
+                # The call itself worked; its answer is not used, so say why (a fallback is never silent).
+                skipped.append(f"{provider}/{model}: {rejected}")
+                self._record("provider_rejected", profile=name, provider=provider, model=model, reason=rejected,
+                             duration_s=duration, output_tokens=result.output_tokens)
+                continue
             return ModelResult(text=result.text, data=data, provider=provider, model=model,
                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                               duration_s=duration, schema_mode=result.schema_mode)
+                               duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped))
         if invalid is not None:
             raise invalid
         kind = "not_configured" if failures and all("not configured" in item for item in failures) else "unavailable"

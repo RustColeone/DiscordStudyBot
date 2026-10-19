@@ -136,7 +136,7 @@ class Manager:
         self.grants = tank.store("core:grants")
         self.approved_once = tank.store("core:approved_once")
         self.model_choices = ModelChoices(self)  # $model: a chosen model per persona and conversation
-        self._answered: dict[str, dict[str, tuple[str, str]]] = {}  # run → persona → (provider, model) last used
+        self._answered: dict[str, dict[str, ModelResult]] = {}  # run → persona → her last model call's result
         self.permissions = Permissions()  # set by the app once every module is loaded
         self.secrets = Secrets()
         self.owners = owners
@@ -676,7 +676,7 @@ class Manager:
         result = await self.providers.generate(request, profile,
                                                first=self.model_choices.first(record.address, persona))
         if persona:
-            self._answered.setdefault(run_id, {})[persona] = (result.provider, result.model)
+            self._answered.setdefault(run_id, {})[persona] = result
         self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens)
         self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
                           duration_s=result.duration_s, input_tokens=result.input_tokens,
@@ -1141,7 +1141,9 @@ class Manager:
             persona = names[0] if len(names) == 1 and not speaker else None
         answered = self._answered.get(run_id, {}).get(persona) if persona else None
         if answered:
-            data.update(provider=answered[0], model=answered[1])
+            data.update(provider=answered.provider, model=answered.model)
+            if answered.fallbacks:  # why her first candidates did not answer (never a silent switch)
+                data["fallback"] = self.secrets.scrub("; ".join(answered.fallbacks))
         delivery = await self._run_output(record, Reply(trigger.address, "text", text=text,
                                                         quote=quote if trigger.display.quotes else None,
                                                         in_reply_to=trigger.id, run_id=run_id, source=source,

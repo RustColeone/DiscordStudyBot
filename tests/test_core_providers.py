@@ -22,6 +22,17 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
         return Providers({}, {"default": profile}, adapters=adapters,
                          record=lambda event, **fields: records.append((event, fields))), records
 
+    async def test_a_rejected_answer_falls_back_with_its_reason_never_silently(self):
+        providers, records = self.providers(FakeAdapter(["   "]), FakeAdapter(['{"answer": "ok"}']))
+        result = await providers.generate(REQUEST)
+        self.assertEqual((result.provider, result.fallbacks), ("b", ("a/m1: blank answer (not JSON)",)))
+        self.assertIn(("provider_rejected", "blank answer (not JSON)"),
+                      [(event, fields.get("reason")) for event, fields in records])
+        providers, _ = self.providers(FakeAdapter([ConnectionError("down")]), FakeAdapter(['{"answer": "ok"}']))
+        self.assertEqual((await providers.generate(REQUEST)).fallbacks, ("a/m1: ConnectionError: down",))
+        providers, _ = self.providers(FakeAdapter(['{"answer": "ok"}']))
+        self.assertEqual((await providers.generate(REQUEST)).fallbacks, ())  # the first one answered
+
     async def test_fallback_on_error_and_schema_parsing_with_fences(self):
         providers, records = self.providers(FakeAdapter([ConnectionError("down")]),
                                             FakeAdapter(['```json\n{"answer": "ok"}\n```']))
@@ -87,8 +98,8 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FakeOpenAIClient:
-    def __init__(self, fail_effort=False):
-        self.calls, self.fail_effort = [], fail_effort
+    def __init__(self, fail_effort=False, contents=()):
+        self.calls, self.fail_effort, self.contents = [], fail_effort, list(contents)  # contents: answers in turn
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def with_options(self, **options):
@@ -99,11 +110,38 @@ class FakeOpenAIClient:
         self.calls.append(params)
         if self.fail_effort and "reasoning_effort" in params:
             raise ValueError("Unrecognized request argument supplied: reasoning_effort")
-        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content="{}"))],
+        content = self.contents.pop(0) if self.contents else "{}"
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=content))],
                                usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
 
 
 class AdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_blank_json_mode_answer_is_asked_once_more(self):
+        client = FakeOpenAIClient(contents=["   ", '{"answer": "ok"}'])
+        result = await OpenAICompatible({}, client).complete("deepseek-flash", REQUEST.messages, SCHEMA, "reply",
+                                                             "low", 100, 30)
+        self.assertEqual((result.text, len(client.calls), result.output_tokens), ('{"answer": "ok"}', 2, 4))
+        twice = FakeOpenAIClient(contents=["   ", "  "])  # still blank: reported as it is (the registry moves on)
+        result = await OpenAICompatible({}, twice).complete("deepseek-flash", REQUEST.messages, SCHEMA, "reply",
+                                                            "low", 100, 30)
+        self.assertEqual((result.text.strip(), len(twice.calls)), ("", 2))
+
+    async def test_inline_history_folds_earlier_turns_for_json_requests_only(self):
+        history = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
+                   {"role": "assistant", "content": "hello"}, {"role": "user", "content": "and now?"}]
+        client = FakeOpenAIClient()
+        adapter = OpenAICompatible({"inline_history": True}, client)
+        await adapter.complete("deepseek-flash", history, SCHEMA, "reply", "low", 100, 30)
+        sent = client.calls[0]["messages"]
+        self.assertEqual([message["role"] for message in sent], ["system", "user"])
+        self.assertIn("hi\n\n(Your earlier reply:) hello\n\nand now?", sent[1]["content"])
+        await adapter.complete("deepseek-flash", history, None, "reply", "low", 100, 30)  # plain text: as it was
+        self.assertEqual([message["role"] for message in client.calls[1]["messages"]],
+                         ["system", "user", "assistant", "user"])
+        plain = FakeOpenAIClient()
+        await OpenAICompatible({}, plain).complete("gpt", history, SCHEMA, "reply", "low", 100, 30)
+        self.assertIn("assistant", [message["role"] for message in plain.calls[0]["messages"]])
+
     async def test_openai_compatible_native_schema_and_json_mode(self):
         client = FakeOpenAIClient()
         adapter = OpenAICompatible({"schema_mode": "native", "token_param": "max_completion_tokens",

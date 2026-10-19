@@ -495,9 +495,11 @@
     name.append(make("span", "", who.name));
     if (item.label) name.append(make("span", "label", item.label));
     name.append(make("span", "time", time(item.at)));
-    if (item.data?.model) {  // the model that wrote it
-      const model = make("span", "time model-tag", `· ${item.data.model}`);
-      model.title = `${item.data.provider}/${item.data.model}`;
+    if (item.data?.model) {  // the model that wrote it, and why, when it was not her first choice
+      const fell = item.data.fallback;
+      const model = make("span", "time model-tag" + (fell ? " is-fallback" : ""),
+        `· ${item.data.model}${fell ? " ⚠" : ""}`);
+      model.title = `${item.data.provider}/${item.data.model}` + (fell ? `\nFell back: ${fell}` : "");
       name.append(model);
     }
     const bubble = make("div", "bubble");

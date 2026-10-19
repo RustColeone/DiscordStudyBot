@@ -81,6 +81,15 @@ class ModelCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("• Pat: other/m2 (chosen here)", (await self.say("$model")).text)
         self.assertIn("own model here again (fake/fake-model)", (await self.say("$model p reset")).text)
 
+    async def test_a_message_answered_by_a_fallback_says_why(self):
+        await self.say("$model p other/m2")
+        self.other.handler = lambda messages, schema: ConnectionError("rate limited")
+        reply = await self.say("speak")  # Pat's call: her chosen model fails, her own answers
+        self.assertEqual((reply.data["model"], reply.data["fallback"]),
+                         ("fake-model", "other/m2: ConnectionError: rate limited"))
+        self.other.handler = lambda messages, schema: "from other"
+        self.assertNotIn("fallback", (await self.say("speak")).data)
+
     async def test_unknown_models_providers_and_personas_are_refused(self):
         self.assertIn("other/nope is not offered here", (await self.say("$model p other/nope")).text)
         self.assertIn("with a provider that has a key", (await self.say("$model p ghost/x")).text)

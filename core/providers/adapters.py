@@ -51,6 +51,18 @@ def with_schema_instruction(messages: Sequence[Mapping[str, str]], schema: Mappi
     return result
 
 
+def inline_history(messages: Sequence[Mapping[str, str]]) -> list[dict]:
+    """The conversation as one user message, earlier assistant turns written into it (`inline_history`).
+    DeepSeek's JSON mode often answers only whitespace after an assistant turn (reproduced: 1 in 3 valid as
+    turns, 3 in 3 folded), so its JSON requests are sent this way."""
+    if not any(message.get("role") == "assistant" for message in messages):
+        return [dict(message) for message in messages]
+    parts = [f"(Your earlier reply:) {message['content']}" if message["role"] == "assistant" else message["content"]
+             for message in messages if message["role"] != "system"]
+    return [*(dict(message) for message in messages if message["role"] == "system"),
+            {"role": "user", "content": "\n\n".join(parts)}]
+
+
 def api_key(settings: Mapping[str, Any]) -> str:
     """The key from the environment variable `api_key_env` names (.env: kept from models), else `api_key` written
     in the settings themselves (the owner's choice; nothing protects it)."""
@@ -79,6 +91,8 @@ class OpenAICompatible:
     async def complete(self, model: str, messages, schema, schema_name: str, effort: str,
                        max_tokens: int, timeout_s: float, images: Sequence[Image] = ()) -> AdapterResult:
         mode = self.settings.get("schema_mode", "json_object") if schema else ""
+        if schema and self.settings.get("inline_history"):
+            messages = inline_history(messages)
         params: dict[str, Any] = {"model": model, "messages": list(messages),
                                   self.settings.get("token_param", "max_tokens"): max_tokens}
         if schema and mode == "native":
@@ -105,11 +119,18 @@ class OpenAICompatible:
             self._effort_supported = False
             params.pop("reasoning_effort")
             response = await client.chat.completions.create(**params)
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        output_tokens = getattr(usage, "completion_tokens", 0) or 0
+        if mode == "json_object" and not (response.choices[0].message.content or "").strip():
+            # JSON mode sometimes answers only whitespace (DeepSeek); a blank answer is never usable, so ask once more.
+            response = await client.chat.completions.create(**params)
+            usage = getattr(response, "usage", None)
+            input_tokens += getattr(usage, "prompt_tokens", 0) or 0
+            output_tokens += getattr(usage, "completion_tokens", 0) or 0
         choice = response.choices[0]
         reason = str(getattr(choice, "finish_reason", "") or "").lower()
-        usage = getattr(response, "usage", None)
-        return AdapterResult(choice.message.content or "", getattr(usage, "prompt_tokens", 0) or 0,
-                             getattr(usage, "completion_tokens", 0) or 0, reason == "length", mode)
+        return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode)
 
 
     async def list_models(self) -> list[tuple[str, dt.datetime | None]]:
