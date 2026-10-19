@@ -20,11 +20,34 @@ class SearchUnavailable(RuntimeError):
     pass
 
 
+class Unconfigured(RuntimeError):
+    """A search backend that is not set up here (no key, no URL): skipped quietly."""
+
+
+# Search backends, tried in the order `search.backends` lists them (see config.example.yml). A name's own
+# section may set `kind`, so one kind can be listed twice (two SearXNG servers). Adding a search API is one
+# `_<kind>` method below: it returns {"answer", "results"} or raises Unconfigured.
+DEFAULT_BACKENDS = ["google", "deepseek", "searxng", "duckduckgo"]
+LABELS = {"google": "Google", "deepseek": "DeepSeek", "searxng": "SearXNG", "duckduckgo": "DuckDuckGo"}
+DEEPSEEK_SEARCH = "https://api.deepseek.com/v1/tools/search"
+
+
 class Searcher:
     def __init__(self, config):
-        self.searxng = str(config.get("searxng_url") or os.getenv("SEARXNG_URL", "")).strip().rstrip("/")
-        self.grounding_model = str(config.get("grounding_model", "gemini-3.8-flash"))
-        self.use_grounding = bool(config.get("grounding", True))
+        search = dict(config.get("search") or {})
+        google = dict(search.get("google") or {})
+        # Older settings still count: `grounding: false` leaves Google out, `grounding_model`, `searxng_url`.
+        self.grounding_model = str(google.get("model") or config.get("grounding_model") or "gemini-3.8-flash")
+        default = [name for name in DEFAULT_BACKENDS if name != "google" or bool(config.get("grounding", True))]
+        self.order = [str(name) for name in (search.get("backends") or default)]
+        legacy_url = str(config.get("searxng_url") or os.getenv("SEARXNG_URL", "")).strip()
+        self.backends = {}
+        for name in self.order:
+            settings = dict(search.get(name) or {})
+            kind = str(settings.get("kind") or name)
+            if kind == "searxng":
+                settings.setdefault("url", legacy_url)
+            self.backends[name] = (kind, settings)
         self._gemini = None
 
     def gemini(self):
@@ -57,48 +80,73 @@ class Searcher:
                         sources.append({"title": title, "url": url})
         return interaction.output_text or "", sources
 
-    def results(self, query: str, limit: int) -> list[dict]:
-        errors = []
-        if self.searxng:
-            try:
-                response = requests.get(f"{self.searxng}/search", params={"q": query, "format": "json"},
-                                        headers={"Accept": "application/json"}, timeout=(5, 15))
-                response.raise_for_status()
-                found = [{"title": item.get("title") or "Untitled result", "url": item["url"],
-                          "snippet": item.get("content") or ""}
-                         for item in response.json().get("results", []) if item.get("url")]
-                if found:
-                    return found[:limit]
-            except Exception as error:
-                errors.append(f"SearXNG: {error}")
-        try:
-            from ddgs import DDGS
-            found = [{"title": item.get("title") or "Untitled result", "url": item.get("href") or item.get("url"),
-                      "snippet": item.get("body") or item.get("snippet") or ""}
-                     for item in DDGS(timeout=10).text(query, max_results=limit)
-                     if item.get("href") or item.get("url")]
-            if found:
-                return found[:limit]
-            errors.append("DuckDuckGo returned no results")
-        except Exception as error:
-            errors.append(f"DuckDuckGo: {error}")
-        raise SearchUnavailable("; ".join(errors))
+    # ---- the backends --------------------------------------------------------------------------------
+    def _google(self, query: str, limit: int, settings: dict) -> dict:
+        """Google Search through Gemini grounding: an answer with its sources (GEMINI_API_KEY; the model is
+        `search.google.model`, also used by web.maps)."""
+        if not self.gemini():
+            raise Unconfigured("no GEMINI_API_KEY")
+        text, sources = self.grounded(query)
+        return {"answer": text.strip(), "results": sources}
+
+    def _deepseek(self, query: str, limit: int, settings: dict) -> dict:
+        """DeepSeek's Search API (DEEPSEEK_API_KEY): ranked links with summaries written for models."""
+        key = os.getenv(str(settings.get("api_key_env") or "DEEPSEEK_API_KEY"), "").strip().strip("\"'")
+        if not key:
+            raise Unconfigured("no DEEPSEEK_API_KEY")
+        response = requests.post(str(settings.get("url") or DEEPSEEK_SEARCH),
+                                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                 json={"query": query[:128], "count": max(1, min(int(settings.get("count") or limit),
+                                                                                 50))}, timeout=(5, 20))
+        response.raise_for_status()
+        found = [{"title": item.get("title") or "Untitled result", "url": item["url"],
+                  "snippet": item.get("summary") or item.get("snippet") or ""}
+                 for item in response.json().get("results", []) if item.get("url")]
+        return {"answer": "", "results": found[:limit]}
+
+    def _searxng(self, query: str, limit: int, settings: dict) -> dict:
+        """A SearXNG server with its JSON format on (`url`)."""
+        url = str(settings.get("url") or "").strip().rstrip("/")
+        if not url:
+            raise Unconfigured("no url")
+        response = requests.get(f"{url}/search", params={"q": query, "format": "json"},
+                                headers={"Accept": "application/json"}, timeout=(5, 15))
+        response.raise_for_status()
+        found = [{"title": item.get("title") or "Untitled result", "url": item["url"],
+                  "snippet": item.get("content") or ""}
+                 for item in response.json().get("results", []) if item.get("url")]
+        return {"answer": "", "results": found[:limit]}
+
+    def _duckduckgo(self, query: str, limit: int, settings: dict) -> dict:
+        """DuckDuckGo through ddgs: no key, but rate limited."""
+        from ddgs import DDGS
+        found = [{"title": item.get("title") or "Untitled result", "url": item.get("href") or item.get("url"),
+                  "snippet": item.get("body") or item.get("snippet") or ""}
+                 for item in DDGS(timeout=10).text(query, max_results=limit) if item.get("href") or item.get("url")]
+        return {"answer": "", "results": found[:limit]}
 
     def search(self, query: str, limit: int) -> dict:
-        errors = []
-        if self.use_grounding and self.gemini():
+        """The first backend that finds something, with why each one before it did not (`skipped`)."""
+        skipped, unset = [], []
+        for name in self.order:
+            kind, settings = self.backends[name]
+            label = LABELS.get(name, name)
+            run = getattr(self, f"_{kind}", None) if kind in LABELS else None
+            if run is None:
+                skipped.append(f"{label}: unknown kind {kind!r}")
+                continue
             try:
-                text, sources = self.grounded(query)
-                if text.strip():
-                    return {"backend": "google", "answer": text.strip(), "results": sources}
-                errors.append("Google grounding returned nothing")
+                found = run(query, limit, settings)
+            except Unconfigured as error:
+                unset.append(f"{label}: {error}")
+                continue
             except Exception as error:
-                errors.append(f"Google grounding: {error}")
-        try:
-            return {"backend": "links", "answer": "", "results": self.results(query, limit)}
-        except SearchUnavailable as error:
-            errors.append(str(error))
-        raise SearchUnavailable("; ".join(errors))
+                skipped.append(f"{label}: {error}"[:200])
+                continue
+            if found["answer"] or found["results"]:
+                return {"backend": name, **found, "skipped": skipped}
+            skipped.append(f"{label}: no results")
+        raise SearchUnavailable("; ".join(skipped + unset) or "no search backend is set up")
 
 
 def setup(context) -> Contributions:
@@ -114,7 +162,11 @@ def setup(context) -> Contributions:
         except SearchUnavailable as error:
             context.log("search_failed", error=str(error))
             return ToolResult.fail(f"Search is unavailable right now: {error}", "unavailable", retryable=True)
-        lines = [found["answer"]] if found["answer"] else []
+        lines = []
+        if found["skipped"]:  # a switch is never silent: say which backend answered, and why the others did not
+            label = LABELS.get(found["backend"], found["backend"])
+            lines.append(f"(Searched with {label}; {'; '.join(found['skipped'])})")
+        lines += [found["answer"]] if found["answer"] else []
         lines += [f"- {item['title']}: {item['url']}" + (f"\n  {item['snippet']}" if item.get("snippet") else "")
                   for item in found["results"]]
         return ToolResult.ok("\n".join(lines) or "No results.", sources=tuple(item["url"] for item in found["results"]),

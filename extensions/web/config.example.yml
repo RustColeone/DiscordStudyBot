@@ -1,4 +1,18 @@
 # $search / $read settings. Copy to config.yml (git-ignored); extension_config.web in core.yml overrides it.
-grounding: true                 # Google grounding through Gemini first
-grounding_model: gemini-3.8-flash
-searxng_url: ""                 # a SearXNG server, e.g. http://localhost:8080 (SEARXNG_URL in .env, the older way)
+
+# Where $search looks, in order: the first backend that finds something answers, and the reply says why
+# any before it did not (a rate limit, an error). Leave a backend out to switch it off. One without its key
+# or URL is skipped quietly.
+search:
+  backends: [google, deepseek, searxng, duckduckgo]
+  google: {model: gemini-3.8-flash}   # Google Search through Gemini grounding (GEMINI_API_KEY); also web.maps
+  deepseek: {count: 10}               # DeepSeek's Search API (DEEPSEEK_API_KEY; billed per search by DeepSeek)
+  searxng: {url: ""}                  # a SearXNG server with its JSON format on, e.g. http://localhost:8080
+  duckduckgo: {}                      # no key, but rate limited
+  # Another of a kind under a new name: list `my-searx` in backends, then
+  # my-searx: {kind: searxng, url: "http://searx.lan:8080"}
+
+# Older settings, still read when `search:` does not set them:
+# grounding: true                 # false leaves google out of the default order
+# grounding_model: gemini-3.8-flash
+# searxng_url: ""                 # (SEARXNG_URL in .env, the older way)

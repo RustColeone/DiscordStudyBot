@@ -30,26 +30,34 @@ None sets `private`, `never_auto` or `confirm`. The module has no other contribu
 overrides it):
 
 ```yaml
-grounding: true                 # Google grounding through Gemini first
-grounding_model: gemini-3.8-flash
-searxng_url: ""                 # a SearXNG server, e.g. http://localhost:8080 (SEARXNG_URL in .env, the older way)
+search:
+  backends: [google, deepseek, searxng, duckduckgo]   # tried in order; leave one out to switch it off
+  google: {model: gemini-3.8-flash}   # Google Search through Gemini grounding (GEMINI_API_KEY); also web.maps
+  deepseek: {count: 10}               # DeepSeek's Search API (DEEPSEEK_API_KEY; billed per search by DeepSeek)
+  searxng: {url: ""}                  # a SearXNG server with its JSON format on, e.g. http://localhost:8080
+  duckduckgo: {}                      # no key, but rate limited
 ```
 
-* `grounding`: try Google Search grounding through Gemini before the link backends.
-* `grounding_model`: the Gemini model used for search and maps grounding.
-* `searxng_url`: a SearXNG server (for example `http://localhost:8080`) with its JSON format enabled.
-  Empty means `SEARXNG_URL` from the environment (the older way: `.env` is meant for secrets, and its
-  values are blanked out of replies), or no SearXNG.
+* `search.backends`: the order `$search` tries them in. The first that finds something answers; a
+  backend left out is never asked. One without its key or URL is skipped quietly.
+* Each backend's own section: `google.model` (the Gemini model, used for maps too), `deepseek.count`
+  (results asked for, 1–50; `url` and `api_key_env` can point elsewhere), `searxng.url`.
+* A section may set `kind` to list one kind twice under different names, for example
+  `my-searx: {kind: searxng, url: "http://searx.lan:8080"}` with `my-searx` in `backends`.
+* Older settings still count when `search:` does not set them: `grounding: false` leaves `google` out
+  of the default order, `grounding_model`, and `searxng_url` (or `SEARXNG_URL` in `.env`, the older way:
+  `.env` is meant for secrets, and its values are blanked out of replies).
 
 `.env` variables (names only; `python -m core setup` asks for `WOLFRAM_APPID`):
 
 | Variable | Used by |
 | --- | --- |
-| `GEMINI_API_KEY` | Search grounding and `web.maps` |
+| `GEMINI_API_KEY` | The `google` search backend and `web.maps` |
+| `DEEPSEEK_API_KEY` | The `deepseek` search backend (the same key the DeepSeek models use) |
 | `WOLFRAM_APPID` | `web.wolfram` (an AppID from developer.wolframalpha.com) |
 | `SEARXNG_URL` | `web.search`, when `searxng_url` is empty (prefer `searxng_url`: it is a setting, not a secret) |
 
-Without any of them, `$search` still works through DuckDuckGo, and `$read` and image search need no key.
+Without any of them, `$search` still works through DuckDuckGo (if it is in the list), and `$read` and image search need no key.
 
 Packages (all in [`requirements.txt`](../../requirements.txt)): `requests`, `google-genai`, `ddgs`
 (DuckDuckGo search and image search), `pypdf` (PDFs), `pillow` (images).
@@ -88,7 +96,7 @@ Images: 8 candidates, 12 MB and 60 s per download, 120 s overall, scaled to at m
 
 | File | Role |
 | --- | --- |
-| [`extension.py`](extension.py) | `Searcher` (grounding, SearXNG, DuckDuckGo), the five handlers, capabilities and settings |
+| [`extension.py`](extension.py) | `Searcher` (the search backends: Google grounding, DeepSeek, SearXNG, DuckDuckGo), the five handlers, capabilities and settings |
 | [`pages.py`](pages.py) | `validated_url` (public addresses only), `fetch` with checked redirects, HTML-to-text, PDFs |
 | [`images.py`](images.py) | Image candidates from DuckDuckGo, safe download, normalizing with Pillow |
 | [`wolfram.py`](wolfram.py) | The Wolfram\|Alpha full results API and legacy `$wolfram` flags |
@@ -97,15 +105,25 @@ Images: 8 candidates, 12 MB and 60 s per download, 120 s overall, scaled to at m
 `setup` builds one `Searcher` from `context.config`; the handlers close over it. Every outside call is
 blocking (`requests`, the Gemini SDK, `ddgs`), so each handler runs it with `asyncio.to_thread`.
 
-**Search fallback** (`Searcher.search`, `extension.py:87-101`):
+**Search backends** (`Searcher.search`): each name in `search.backends` is tried in order, through a
+`_<kind>` method that returns `{"answer", "results"}` or raises `Unconfigured` (no key or URL: skipped
+quietly). The kinds:
 
-1. If `grounding` is on and `GEMINI_API_KEY` is set: Gemini's Interactions API with the `google_search`
-   tool (`interactions.create(..., tools=[{"type": "google_search"}], timeout=25.0)`). The answer text
-   and the URLs in its annotations become the result (`backend: "google"`).
-2. Otherwise, or if that fails or returns nothing: SearXNG's `/search?format=json`, if configured.
-3. Then DuckDuckGo through `ddgs`.
-4. If every backend fails, the result is `unavailable` with `retryable=True`, and the summary names
-   each backend's error ("SearXNG: refused; DuckDuckGo: ratelimited").
+| Kind | How | Result |
+| --- | --- | --- |
+| `google` | Gemini's Interactions API with the `google_search` tool (`timeout=25.0`) | An answer, and the URLs in its annotations as results |
+| `deepseek` | `POST https://api.deepseek.com/v1/tools/search` with `{query, count}` and the bearer key | Links; each result's `summary` (written for models) as the snippet |
+| `searxng` | `GET <url>/search?format=json` | Links |
+| `duckduckgo` | `ddgs` | Links |
+
+The first backend that finds something answers (`backend` in the data). The ones before it that failed
+or found nothing are listed in `skipped`, and the summary starts with them, for example
+`(Searched with DeepSeek; Google: 429 Too Many Requests)`, so a switch is never silent. If every
+backend fails, the result is `unavailable` with `retryable=True`, and the summary names each one's
+error ("SearXNG: refused; DuckDuckGo: ratelimited").
+
+**Adding a search API** is one method on `Searcher`, `_<kind>(query, limit, settings)`, plus its name in
+`LABELS`; people then list it in `search.backends` and give it a section.
 
 The Gemini client is created on first use and cached, including its absence; a key added later needs a
 restart.
@@ -137,7 +155,7 @@ Results:
 
 | Capability | `summary` | `files` | `sources` | `data` |
 | --- | --- | --- | --- | --- |
-| `web.search` | Answer, then `- title: url` lines | | Result URLs | `backend`, `answer`, `results` |
+| `web.search` | `(Searched with …; why the others did not)` if it switched, the answer, then `- title: url` lines | | Result URLs | `backend`, `answer`, `results`, `skipped` |
 | `web.read_page` | `# title`, URL, text, optional links | | The final URL | `url`, `title`, `content_type`, `links` |
 | `web.image_search` | Title and source page | The image | The source page | `title`, `source_url`, `image_url` |
 | `web.maps` | Answer, then place links | | Place URLs | `answer`, `results` |
@@ -192,20 +210,20 @@ venv/bin/python -m unittest tests.test_core_web tests.test_core_web_extras
 
 ## Building something similar
 
-* **A fallback chain that reports every failure**: try each backend, collect `"<name>: <error>"`, raise
-  one exception with all of them (`extension.py:60-101`), and turn it into
-  `ToolResult.fail(..., "unavailable", retryable=True)` at the edge (`extension.py:113-116`).
+* **A fallback chain that reports every failure**, and why it switched: try each backend, collect `"<name>: <error>"`, raise
+  one exception with all of them (`extension.py:128-148`), and turn it into
+  `ToolResult.fail(..., "unavailable", retryable=True)` at the edge (`extension.py:162-164`).
 * **Optional services that degrade.** A missing key skips a backend (search) or fails clearly with
-  `not_configured` (maps, Wolfram) instead of raising (`extension.py:160-161`, `extension.py:177-179`).
+  `not_configured` (maps, Wolfram) instead of raising (`extension.py:212-213`, `extension.py:231`).
 * **Lazy, cached clients** created on first use, so the module loads without the key or package
-  (`extension.py:30-38`).
-* **Blocking libraries in `asyncio.to_thread`** (`extension.py:113`, `extension.py:127`).
+  (`extension.py:53-61`).
+* **Blocking libraries in `asyncio.to_thread`** (`extension.py:161`, `extension.py:179`).
 * **Sources** for anything taken from the web, and a file plus its source page for images
-  (`extension.py:120-121`, `extension.py:151-154`).
+  (`extension.py:172`, `extension.py:203-205`).
 * **Fetching user-supplied URLs**: copy `validated_url` and the manual redirect loop (`pages.py:64-140`):
   validate every hop, stream with a byte limit, check `Content-Length` and the running total.
 * **Keep secrets out of messages** by replacing them before raising (`wolfram.py:45-55`), and declare
-  them as `secret` settings (`extension.py:220-221`).
+  them as `secret` settings (`extension.py:272-273`).
 * **Distinct error codes** (`unavailable`, `not_configured`, `not_understood`, `no_result`,
   `invalid_arguments`) so an engine can tell the person what to fix, and `retryable=True` only for
   transient failures.

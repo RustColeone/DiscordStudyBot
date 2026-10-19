@@ -1,5 +1,6 @@
 """Tests for the web extension: search fallbacks and the public page reader."""
 
+import os
 import socket
 import tempfile
 import unittest
@@ -48,7 +49,10 @@ class WebCase(unittest.IsolatedAsyncioTestCase):
         tmp = Path(self._tmp.name)
         extensions = [*make_config(tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "web")]
         self.core = await start_core(tmp, {"extensions": extensions,
-                                           "extension_config": {"web": {"searxng_url": "http://searx.local"}}})
+                                           "extension_config": {"web": {"searxng_url": "http://searx.local",
+                                                                        # no DeepSeek here: never a real call
+                                                                        "search": {"backends": ["google", "searxng",
+                                                                                                "duckduckgo"]}}}})
         self.module = extension_module(self.core, "web")
         self.pages = self.module.pages if hasattr(self.module, "pages") else None
         self.chat = iface(self.core)
@@ -78,7 +82,8 @@ class SearchTests(WebCase):
             await self.chat.say("$search capital of france", conversation="fallback")
             await settle(self.core)
         self.assertEqual(self.chat.texts("room")[0], "Paris is the capital.\n- Wiki: https://w.org/paris")
-        self.assertEqual(self.chat.texts("fallback")[0], "- Result: https://r.org\n  snippet")
+        self.assertEqual(self.chat.texts("fallback")[0],
+                         "(Searched with SearXNG; Google: quota)\n- Result: https://r.org\n  snippet")
 
     async def test_search_reports_every_backend_failure(self):
         class BrokenDDGS:
@@ -95,6 +100,46 @@ class SearchTests(WebCase):
         text = self.chat.texts("room")[0]
         self.assertIn("SearXNG: refused", text)
         self.assertIn("DuckDuckGo: ratelimited", text)
+
+
+class SearchBackendTests(unittest.TestCase):
+    """The order, switching backends off, DeepSeek's Search API and the older settings."""
+
+    def searcher(self, config):
+        from core.loader import import_extension
+        _, module = import_extension(ROOT / "extensions" / "web")
+        return module, module.Searcher(config)
+
+    def test_deepseek_search_answers_in_its_place_and_the_order_is_configurable(self):
+        module, searcher = self.searcher({"search": {"backends": ["deepseek", "duckduckgo"], "deepseek": {"count": 3}}})
+        answer = SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"results": [
+            {"title": "Paris", "url": "https://p.org", "snippet": "short", "summary": "Paris is the capital."}]})
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "sk-test"}), \
+                patch.object(module.requests, "post", return_value=answer) as post:
+            found = searcher.search("capital of france", 5)
+        self.assertEqual((found["backend"], found["results"][0]["snippet"], found["skipped"]),
+                         ("deepseek", "Paris is the capital.", []))
+        self.assertEqual(post.call_args.kwargs["json"], {"query": "capital of france", "count": 3})
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer sk-test")
+
+    def test_a_backend_left_out_is_never_asked_and_one_without_a_key_is_skipped_quietly(self):
+        module, searcher = self.searcher({"search": {"backends": ["deepseek", "searxng"],
+                                                     "searxng": {"url": "http://searx.local"}}})
+        searx = SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"results": [
+            {"title": "R", "url": "https://r.org"}]})
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}), patch.object(module.requests, "get", return_value=searx), \
+                patch.object(module.requests, "post") as post, patch("ddgs.DDGS") as ddgs:
+            found = searcher.search("q", 5)
+        self.assertEqual((found["backend"], found["skipped"]), ("searxng", []))  # no key: not a "switch"
+        post.assert_not_called()
+        ddgs.assert_not_called()  # left out of the list: off
+
+    def test_the_older_settings_still_count(self):
+        _, searcher = self.searcher({"grounding": False, "grounding_model": "gemini-x", "searxng_url": "http://s.local"})
+        self.assertEqual(searcher.order, ["deepseek", "searxng", "duckduckgo"])
+        self.assertEqual((searcher.backends["searxng"][1]["url"], searcher.grounding_model), ("http://s.local", "gemini-x"))
+        _, searcher = self.searcher({"search": {"backends": ["mine"], "mine": {"kind": "searxng", "url": "http://m"}}})
+        self.assertEqual(searcher.backends["mine"], ("searxng", {"kind": "searxng", "url": "http://m"}))
 
 
 class PageTests(WebCase):
