@@ -550,7 +550,9 @@ class Manager:
             if failure is not None:
                 await self._fail(record, *failure)
             elif outcome is RunYield.WAIT_APPROVAL:
-                if self.tank.approvals("pending", run_id):
+                # Waiting for the owner, or for an approved action still being carried out (its decision resumes
+                # the run when it is done).
+                if self.tank.approvals("pending", run_id) or self._deciding(run_id):
                     self.tank.update_run(run_id, status="waiting_approval")
                 elif any(event.kind in ("tool_result", "approval_denied")
                          for event in self.tank.events(run_id, after=started_events - 1)):
@@ -976,13 +978,21 @@ class Manager:
         return (f" Saved: {name}({subject}) runs without asking in {record.address} for {GRANT_DAYS} days "
                 f"(grant {self.grant_id(key)}; `$permissions revoke {self.grant_id(key)}` removes it).")
 
+    def _deciding(self, run_id: str) -> bool:
+        """An approved action of this run is being carried out right now (decide() holds its approval's lock until
+        the result is reported)."""
+        return any((lock := self._approval_locks.get(approval["id"])) is not None and lock.locked()
+                   for approval in self.tank.approvals("approved", run_id))
+
     async def _resume_after_decision(self, run_id: str, result: ToolResult | None) -> bool:
-        """Resume a run whose last pending approval was decided (a command run closes with its result). False
-        when it was not waiting for that, or still waits for another."""
+        """Resume a run whose last pending approval was decided and carried out (a command run closes with its
+        result). False when it was not waiting for that, or still waits for another: pending, or approved and
+        still running (the last decision to finish resumes it)."""
         record = self.tank.run(run_id)
         async with self._locks[record.address]:
             record = self.tank.run(run_id)
-            if record.status != "waiting_approval" or self.tank.approvals("pending", run_id):
+            if (record.status != "waiting_approval" or self.tank.approvals("pending", run_id)
+                    or self._deciding(run_id)):
                 return False
             if record.engine == COMMAND_ENGINE:
                 self.tank.update_run(run_id, status="done")

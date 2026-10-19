@@ -1,12 +1,13 @@
 """Tests for the shared room engine (extensions/room) inside a real core."""
 
+import asyncio
 import json
 import re
 import tempfile
 import unittest
 from pathlib import Path
 
-from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
+from tests.core_support import ROOT, FakeAdapter, extension_module, iface, make_config, settle, start_core
 
 NAMES = ("luna", "gemini", "claude", "deepseek")
 
@@ -125,6 +126,29 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(json.loads((self.tmp / "counter.json").read_text()), {"write_value": 1})
         board = json.loads(script.prompts["Luna"][0][-1]["content"].split("Shared room (untrusted state): ", 1)[1])
         self.assertEqual(board["your_results"][-1]["status"], "success")
+
+    async def test_two_approvals_carried_out_at_once_resume_the_run_when_both_are_done(self):
+        script = Script(Luna=[turn("Converting.", "continue", [("tools.slow", {})]), turn("Converted.")],
+                        Gemini=[turn("Saving.", "continue", [("tools.write_value", {"key": "k", "value": "v"})]),
+                                turn("Saved.")], Claude=[turn("C")], DeepSeek=[turn("D")])
+        core = await self.core(script, {"permissions": {"*": {"rules": {"tools.slow": "ask"}}}})
+        tools = extension_module(core, "tools")
+        tools.SLOW_RELEASE = asyncio.Event()
+        await iface(core).say("大家好！")
+        await settle(core)
+        asked = {notice.data["capability"]: notice.data["approval_id"]
+                 for notice in iface(core, "owner").notices("approval_request")}
+        owner = iface(core, "owner")
+        await owner.say(f"$approve {asked['tools.slow']}", conversation="dm", sender="boss")
+        await asyncio.sleep(0.05)  # the slow one is still being carried out
+        await owner.say(f"$approve {asked['tools.write_value']}", conversation="dm", sender="boss")
+        await asyncio.sleep(0.05)  # the quick one finished first
+        run = core.tank.runs(("waiting_approval", "running", "failed", "done"))[0]
+        self.assertEqual(core.tank.run(run.id).status, "waiting_approval")  # not resumed early (nor failed)
+        tools.SLOW_RELEASE.set()
+        await settle(core)
+        self.assertEqual(core.tank.run(run.id).status, "done")
+        self.assertTrue({("Luna", "", "Converted."), ("Gemini", "", "Saved.")} <= set(self.spoken(core)))
 
     async def test_question_waits_and_the_answer_resumes_the_same_job(self):
         script = Script(Luna=[turn("Which city?", "needs_input"), turn("Paris it is.")])
