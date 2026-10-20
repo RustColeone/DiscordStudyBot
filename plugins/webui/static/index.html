@@ -18,6 +18,9 @@
 </head>
 <body>
   <div class="app" id="app">
+    <!-- Inside the app: the app is fixed (a stacking context of its own), so the scrim must stack among its
+         panels (below them, above the chat), not over the whole app. -->
+    <div class="scrim" id="scrim" hidden></div>
     <aside class="sidebar" id="sidebar" aria-label="Chats">
       <div class="brand">
         <span class="brand-mark">✏️</span>
@@ -77,7 +80,6 @@
            title="Drag to resize · double-click to reset"></div>
     </aside>
   </div>
-  <div class="scrim" id="scrim" hidden></div>
   <div class="menu" id="chat-menu" role="menu" hidden></div>
   <div class="menu model-menu" id="model-menu" role="menu" hidden></div>
   <div class="viewer" id="viewer" hidden><img alt=""></div>
