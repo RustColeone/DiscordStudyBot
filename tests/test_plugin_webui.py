@@ -553,6 +553,32 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         finally:
             store.close()
 
+    async def test_a_chat_whose_setup_a_crash_cut_off_is_repaired_before_its_first_message(self):
+        spoke = await self.start_room()
+        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # the chat, but no assignment: setup never finished
+        ws, _ = await self.socket()
+        await self.say(ws, "just you and me", conversation="dm-luna")  # before the start-up sweep runs
+        await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text"
+                         and e["item"]["conversation"] == "dm-luna")
+        await settle(self.core)
+        self.assertEqual(spoke, ["Luna"])
+        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:dm-luna")
+        await ws.close()
+
+    async def test_deleting_a_chat_from_before_the_record_still_removes_its_assignment(self):
+        await self.start_room()
+        self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["luna"]})
+        self.web.store.ensure("dm-old", "Luna", ["luna"])  # made by an older version: not in `assigned`
+        ws, _ = await self.socket()
+        await ws.send_json({"type": "delete", "conversation": "dm-old"})
+        await self.until(ws, lambda e: e["type"] == "deleted")
+        for _ in range(60):
+            if self.assignment("dm-old")["pattern"] == "webui:*":
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual((self.assignment("dm-old")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        await ws.close()
+
     async def test_the_room_is_the_default_for_its_conversations(self):
         from core.loader import import_extension
         extension, _ = import_extension(PLUGIN)

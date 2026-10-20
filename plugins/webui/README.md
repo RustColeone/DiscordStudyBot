@@ -137,7 +137,8 @@ The page never answers anything itself; everything a person types goes through `
   unfinished, the message is not submitted: `ack` with `ok: false`, reason `chat_not_ready`. A message to
   a chat that does not exist (deleted, perhaps on another device, or removed after a failed setup) is
   refused the same way with `unknown_chat`: sending never creates a chat, which would bring it back with
-  the whole class.
+  the whole class. A chat with some of the classmates whose assignment the core no longer has (a crash
+  cut its setup off) gets it again first (`_repair`); if that fails, `chat_not_ready`.
 * `sender` is `Sender(user_id, user_name)`; `text` is cut to `max_text_chars`; up to 10 previously
   uploaded files become `FileRef`s; `kind` is `text`, else `image` if all files are pictures, else `file`.
 * Only after `submit` is accepted is the message stored and broadcast, so the transcript holds what the
@@ -188,7 +189,8 @@ The page uses the core's ordinary `$commands` instead of a private API, but keep
   answer arrives. A chat deleted while its setup runs is unassigned once the setup answers. 5 s after each
   start, `_tidy` makes the core match the page: it removes the assignments of recorded chats that no
   longer exist (a deletion cut off by a restart), and sets again those a chat with some of the classmates
-  lacks (a setup cut off by a restart or a crash). On stop, setups still waiting are given up at once and
+  lacks (a setup cut off by a restart or a crash). A picker chat's own assignment from before the
+  `assigned` record existed is adopted into it (`_adopt`, also when deleting), so it is removed too. On stop, setups still waiting are given up at once and
   their chats kept for `_tidy`, so stopping never waits for the core.
 
 The core still records these commands like typed ones; the room leaves commands out of what its

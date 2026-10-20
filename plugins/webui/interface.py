@@ -539,9 +539,11 @@ class WebUI(Interface):
         """Remove a chat from the page: its open work is cancelled, its transcript and files are deleted, and
         its own assignment (from the new-chat picker) is removed. (The core keeps its own history of the
         conversation, as for any other interface.)"""
-        if self.store.conversation(conversation) is None:
+        chat = self.store.conversation(conversation)
+        if chat is None:
             return
         address = Address(self.name, conversation)
+        self._adopt(chat)
         await self.port.cancel(address, "chat deleted in the web UI")
         kept = {(self.data_dir / "files").resolve(), (self.data_dir / "uploads").resolve()}
         for path in self.store.delete(conversation):
@@ -572,6 +574,33 @@ class WebUI(Interface):
             self.store.unmark_assigned(conversation)
             self.port.log("chat_unassigned")
 
+    def _adopt(self, chat: dict) -> None:
+        """Record a picker chat's own assignment that predates the `assigned` record (an older version made it):
+        only the picker gives a chat personas, so an assignment for exactly that chat is this page's."""
+        address = Address(self.name, chat["id"])
+        if chat.get("personas") and (self.port.policy(address).get("assignment") or {}).get("pattern") == str(address):
+            self.store.mark_assigned(chat["id"])
+
+    async def _repair(self, conversation: str, personas: list[str]) -> str:
+        """Give a chat its classmates again if the core's assignment no longer matches (a setup cut off by a
+        crash or restart). One at a time per chat: a send and `_tidy` may both find it. Returns what went wrong."""
+        while (setup := self._setups.get(conversation)) is not None:
+            await asyncio.wait({setup}, timeout=QUIET_TIMEOUT_S + 5)
+            if not setup.done():
+                return "still being set up"
+        now = self.port.policy(Address(self.name, conversation)).get("assignment") or {}
+        if list(now.get("personas") or []) == personas:
+            return ""
+        setup = asyncio.get_running_loop().create_future()
+        self._setups[conversation] = setup
+        try:
+            problem = await self._assign(conversation, personas)
+        finally:
+            self._setups.pop(conversation, None)
+            setup.set_result(True)
+        self.port.log("chat_reassigned", ok=not problem)
+        return problem
+
     async def _tidy(self, delay: float = 0) -> None:
         """Make the core's assignments match the page's chats again: remove those left behind by chats that are
         gone (a setup answered after its chat was deleted as failed, a deletion cut off by a restart), and set
@@ -584,10 +613,9 @@ class WebUI(Interface):
                 await self._unassign(conversation)
                 continue
             personas = picked.get(conversation)
-            now = self.port.policy(Address(self.name, conversation)).get("assignment") or {}
-            if personas and list(now.get("personas") or []) != personas:
-                problem = await self._assign(conversation, personas)
-                self.port.log("chat_reassigned", ok=not problem)
+            if personas:
+                self._adopt(self.store.conversation(conversation))
+                await self._repair(conversation, personas)
 
     async def _send(self, ws: web.WebSocketResponse, conversation: str, event: dict) -> None:
         request_id = str(event.get("id") or "")[:64] or uuid.uuid4().hex
@@ -610,6 +638,11 @@ class WebUI(Interface):
         if record is None:  # deleted (here, on another device, or after its setup failed): never re-created by a
             # message, which would bring it back with the whole class instead of the classmates it was for
             await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "unknown_chat"})
+            return
+        if record["personas"] and await self._repair(conversation, record["personas"]):
+            # Its own assignment is missing (a crash cut its setup off) and could not be set again: the message
+            # would reach the whole class instead.
+            await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "chat_not_ready"})
             return
         if record["title"] == "New chat" and text.strip() and not text.startswith("$"):
             self.store.rename(conversation, text.strip().splitlines()[0][:48])
