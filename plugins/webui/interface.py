@@ -123,6 +123,11 @@ class WebUI(Interface):
         self.roster = [{"name": name, "display": display} for name, display in zip(self.personas, self.classmates)]
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
         self.networks = [ipaddress.ip_network(str(item), strict=False) for item in config.get("networks") or []]
+        # A reverse proxy on this machine (nginx) forwards the real client and scheme; only it is believed.
+        self.proxies = [ipaddress.ip_network(str(item), strict=False)
+                        for item in config.get("trusted_proxies") or ["127.0.0.1", "::1"]]
+        # Clients beyond the local network, through that proxy only, and only with a passphrase set.
+        self.remote_access = config.get("remote_access") is True
         upload_mb = float(config.get("max_upload_mb", 50))
         self.display = Display(markdown=True, edits=False, progress=True, quotes=False, files=True,
                                max_upload_mb=upload_mb, max_text_chars=int(config.get("max_text_chars", 20000)))
@@ -132,6 +137,7 @@ class WebUI(Interface):
         self._progress: dict[str, dict] = {}  # run (or conversation) → the latest progress event
         self._failures: dict[str, deque] = {}
         self._refusals: deque = deque()  # when the guard last logged a refusal (rate limit)
+        self._remote_failures: deque = deque()  # failed sign-ins from beyond the local network, all clients
         self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose, future}: the page's own commands
         self._setups: dict[str, asyncio.Future] = {}  # a new chat whose classmates are being set up
         self._background: set[asyncio.Task] = set()
@@ -199,20 +205,44 @@ class WebUI(Interface):
     # ---- guard: local network, this host, this page, passphrase --------------------------------------
     @web.middleware
     async def _guard(self, request: web.Request, handler):
-        if not local_remote(request.remote, self.networks):
-            return self._refuse(request, "network", "Only the local network may use this page.")
+        client, scheme, proxied = self._client(request)
+        if not local_remote(client, self.networks):
+            if not (proxied and self.remote_access):
+                return self._refuse(request, "network", "Only the local network may use this page.")
+            if not self.passphrase:
+                return self._refuse(request, "network", "Remote access needs a passphrase (WEBUI_PASSPHRASE).")
         if not local_host(request.headers.get("Host"), self.hostnames):
             return self._refuse(request, "host", "Open this page by the computer's address.")
         origin = request.headers.get("Origin")
-        if origin is not None and origin != f"{request.scheme}://{request.headers.get('Host')}":
+        if origin is not None and origin != f"{scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
             return self._refuse(request, "origin", "Cross-site requests are refused.")
         public = request.path in ("/login", "/static/style.css", "/favicon.ico")
         if self.passphrase and not public and not self._signed_in(request):
             if request.method == "GET" and request.path == "/":
-                raise web.HTTPSeeOther("/login")
+                raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path (/chat/login)
             return self._secured(web.Response(status=401, text="Sign in first."))
         return self._secured(await handler(request))
+
+    def _client(self, request: web.Request) -> tuple[str, str, bool]:
+        """(client address, scheme, through the proxy). From a trusted proxy (nginx on this machine) that forwards
+        them, the client and scheme it reports (it must replace, not append to, X-Forwarded-For); otherwise the
+        connection's own. Nobody else's forwarding headers are believed."""
+        remote = request.remote or ""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded and self._trusted(remote):
+            scheme = request.headers.get("X-Forwarded-Proto", "").strip().lower()
+            return forwarded.split(",")[-1].strip(), scheme if scheme in ("http", "https") else request.scheme, True
+        return remote, request.scheme, False
+
+    def _trusted(self, remote: str) -> bool:
+        try:
+            address = ipaddress.ip_address(remote.split("%", 1)[0])
+        except ValueError:
+            return False
+        if address.version == 6 and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
+        return any(address in network for network in self.proxies)
 
     def _refuse(self, request: web.Request, check: str, text: str) -> web.Response:
         """A 403 from the guard, logged (at most 20 a minute, so a hostile page cannot flood the log) with what
@@ -223,7 +253,7 @@ class WebUI(Interface):
         if len(self._refusals) < 20:
             self._refusals.append(now)
             self.port.log("refused", check=check, method=request.method, path=request.path[:100],
-                          remote=request.remote or "", host=str(request.headers.get("Host") or "")[:100],
+                          remote=self._client(request)[0][:60], host=str(request.headers.get("Host") or "")[:100],
                           origin=str(request.headers.get("Origin") or "")[:100])
         return self._secured(web.Response(status=403, text=text))
 
@@ -258,22 +288,35 @@ class WebUI(Interface):
 
     async def _login(self, request: web.Request) -> web.Response:
         if not self.passphrase:
-            raise web.HTTPSeeOther("/")
-        remote = request.remote or ""
+            raise web.HTTPSeeOther("./")
+        remote, scheme, _ = self._client(request)
+        now = time.monotonic()
+        # Per client: 5 wrong tries in 5 minutes. Beyond the local network also all clients together: 20 in 10
+        # minutes (many addresses, one passphrase), which never locks out the home network.
+        for key in [key for key, tries in self._failures.items() if not tries or now - tries[-1] > 300]:
+            self._failures.pop(key)
+        while len(self._failures) >= 1000:
+            self._failures.pop(next(iter(self._failures)))
         failures = self._failures.setdefault(remote, deque(maxlen=10))
-        while failures and time.monotonic() - failures[0] > 300:
+        while failures and now - failures[0] > 300:
             failures.popleft()
-        if len(failures) >= 5:
+        while self._remote_failures and now - self._remote_failures[0] > 600:
+            self._remote_failures.popleft()
+        outside = not local_remote(remote, self.networks)
+        if len(failures) >= 5 or (outside and len(self._remote_failures) >= 20):
             return await self._login_page(request, "Too many tries; wait a few minutes.")
         form = await request.post()
         if not hmac.compare_digest(str(form.get("passphrase", "")).encode(), self.passphrase.encode()):
-            failures.append(time.monotonic())
+            failures.append(now)
+            if outside:
+                self._remote_failures.append(now)
             await asyncio.sleep(1)
-            self.port.log("login_failed", remote=remote)
+            self.port.log("login_failed", remote=remote[:60])
             return await self._login_page(request, "That passphrase is not right.")
-        response = web.HTTPSeeOther("/")
+        response = web.HTTPSeeOther("./")  # relative: back to the page, also under a proxy's path
+        # Path "/" here; a proxy serving the page under a path narrows it (nginx: proxy_cookie_path).
         response.set_cookie(COOKIE, self._session_value(), max_age=30 * 86400, httponly=True, samesite="Strict",
-                            path="/")
+                            path="/", secure=scheme == "https")
         raise response
 
     @staticmethod

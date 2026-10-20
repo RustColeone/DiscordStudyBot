@@ -45,7 +45,9 @@ It loads by default. To change anything, copy [`config.example.yml`](config.exam
 | `title` | `Study Room` | Page title and the name shown for messages without a speaker. |
 | `passphrase` | empty | Asked once per browser. Prefer `WEBUI_PASSPHRASE` in `.env`; if you put it in `config.yml`, `chmod 600 config.yml`. |
 | `networks` | private, loopback and link-local addresses | A list of CIDR networks that may connect *instead of* the default (for example to add Tailscale's `100.64.0.0/10`, list your LAN too). |
-| `hostnames` | none | Extra names this computer is reached by. IP addresses, `localhost` and names ending in `.local`, `.lan`, `.home.arpa` or `.internal` always pass. |
+| `hostnames` | none | Extra names this computer is reached by. IP addresses, `localhost` and names ending in `.local`, `.lan`, `.home.arpa` or `.internal` always pass. A domain served through a reverse proxy goes here too. |
+| `remote_access` | false | Let clients beyond the local network in, only through a trusted proxy and only with a passphrase set (see [Behind a reverse proxy](#behind-a-reverse-proxy)). |
+| `trusted_proxies` | `[127.0.0.1, ::1]` | Addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed (nginx on this machine). |
 | `personas` | the five classmates | Personas of the default `webui:*` assignment, and who the new-chat picker offers. |
 | `classmates` | `[Luna, Gemini, Claude, DeepSeek, Grok]` | Display names of those personas, in the same order (a missing one is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
 | `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget; `options` are merged key by key over the web UI's). |
@@ -255,22 +257,38 @@ Server to page (`_broadcast` sends to every open page, so several devices stay i
 The page reconnects with backoff (0.5 s doubling to 10 s), queues events while disconnected, and
 fetches `/api/history?after=<last id>` after each `hello`, so nothing is missed.
 
+### Behind a reverse proxy
+
+The page uses relative URLs only (`static/app.js`, `api/history`, `ws`, `login`), so a proxy can serve it
+under a path. For example nginx at `https://rpi.ngantech.net/chat/` (the server-mgmt
+`discordstudybot-chat-rpi.conf` snippet): `proxy_pass http://127.0.0.1:4156/;` with `Host`,
+`X-Forwarded-For $remote_addr` (replaced, not appended), `X-Forwarded-Proto`, the WebSocket upgrade
+headers, `client_max_body_size` above `max_upload_mb`, and `proxy_cookie_path / /chat/;` so the
+sign-in cookie stays with the page. The web UI then needs that domain in `hostnames` and, for clients
+outside the home network, `remote_access: true`; it refuses them while no passphrase is set. The page
+acts as the bot's creator, so put a second lock in front (that snippet uses nginx basic auth).
+
 ### Security
 
 Whoever opens the page has creator rights, so the server treats every request as hostile until proven
 local. The `_guard` middleware (interface.py:194) runs on every route, the websocket included:
 
 1. **Peer address**: only loopback, private and link-local addresses (or exactly `networks:`); IPv4
-   mapped IPv6 is unwrapped. Otherwise 403.
+   mapped IPv6 is unwrapped. Through a trusted proxy the client is the address it forwards, and with
+   `remote_access` (and a passphrase) one beyond the network is let in. Otherwise 403.
 2. **Host header**: an IP address, `localhost`, a local suffix or a configured hostname. A public name
    that resolves here is a DNS-rebinding attempt by some website. Otherwise 403.
-3. **Origin**: if present, it must equal `<scheme>://<Host>`, which stops other sites in the same
-   browser from posting or opening the websocket. Otherwise 403.
+3. **Origin**: if present, it must equal `<scheme>://<Host>` (the forwarded scheme through a trusted
+   proxy), which stops other sites in the same browser from posting or opening the websocket.
+   Otherwise 403. Each refusal is logged (`refused`: the check, path, client, Host, Origin; at most 20 a
+   minute).
 4. **Passphrase** (if set): everything except `/login`, `/static/style.css` and `/favicon.ico` needs the
    `webui_session` cookie; `GET /` redirects to `/login`, the rest get 401. The cookie value is an
    HMAC-SHA256 of the passphrase under a random key in `session.key` (mode 600), compared in constant
    time; it is HttpOnly, SameSite=Strict, 30 days. Changing the passphrase signs every browser out.
-   Wrong tries wait one second, and five within five minutes from one address lock it out for a while.
+   Wrong tries wait one second, and five within five minutes from one address lock it out for a while;
+   from beyond the local network, 20 within ten minutes from all addresses together lock out every
+   outside address (never the home network). Over HTTPS the cookie is also Secure.
 5. **Headers** on every HTTP response: a Content-Security-Policy (`default-src 'self'`, scripts only
    from the page and the pinned KaTeX file, `connect-src 'self'`, `frame-ancestors 'none'`,
    `object-src 'none'`, ...), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (not `no-referrer`, under which browsers send `Origin: null` with the sign-in form),

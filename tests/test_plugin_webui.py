@@ -284,7 +284,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
     async def test_a_passphrase_is_asked_once_per_browser_when_set(self):
         await self.start({"passphrase": "open sesame"})
         async with self.http.get(f"{self.base}/", allow_redirects=False) as response:
-            self.assertEqual((response.status, response.headers["Location"]), (303, "/login"))
+            self.assertEqual((response.status, response.headers["Location"]), (303, "login"))  # relative
         for path in ("/api/history", "/static/app.js"):
             async with self.http.get(self.base + path) as response:
                 self.assertEqual(response.status, 401, path)
@@ -313,6 +313,53 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 200)
         ws, _ = await self.socket()
         await ws.close()
+
+    # ---- behind a reverse proxy (nginx on this machine, e.g. https://rpi.example.net/chat/) ------------
+    async def proxied(self, method, path, client="8.8.8.8", proto="https", host="rpi.example.net", **kwargs):
+        headers = {"Host": host, "X-Forwarded-For": client, "X-Forwarded-Proto": proto, **kwargs.pop("headers", {})}
+        return await self.http.request(method, self.base + path, headers=headers, allow_redirects=False, **kwargs)
+
+    async def test_through_the_proxy_outside_clients_need_remote_access_and_a_passphrase(self):
+        await self.start({"hostnames": ["rpi.example.net"]})
+        async with await self.proxied("GET", "/") as response:
+            self.assertEqual(response.status, 403)  # the real client is outside the local network
+        async with await self.proxied("GET", "/", client="10.0.0.5") as response:
+            self.assertEqual(response.status, 200)  # a home client through the proxy is still local
+        await self.core.stop()
+        self.core = None
+        await self.start({"hostnames": ["rpi.example.net"], "remote_access": True})
+        async with await self.proxied("GET", "/") as response:
+            self.assertEqual(response.status, 403)
+            self.assertIn("needs a passphrase", await response.text())
+
+    async def test_a_remote_client_signs_in_over_https_through_the_proxy(self):
+        await self.start({"hostnames": ["rpi.example.net"], "remote_access": True, "passphrase": "open sesame"})
+        async with await self.proxied("GET", "/") as response:
+            self.assertEqual((response.status, response.headers["Location"]), (303, "login"))
+        async with await self.proxied("POST", "/login", data={"passphrase": "open sesame"},
+                                      headers={"Origin": "http://rpi.example.net"}) as response:
+            self.assertEqual(response.status, 403)  # the page is https: an http origin is another site
+        async with await self.proxied("POST", "/login", data={"passphrase": "open sesame"},
+                                      headers={"Origin": "https://rpi.example.net"}) as response:
+            self.assertEqual((response.status, response.headers["Location"]), (303, "./"))
+            self.assertTrue(response.cookies["webui_session"]["secure"])
+        refused = [event for event in self.core.audit.events if event.get("detail") == "refused"]
+        self.assertEqual((refused[-1]["remote"], refused[-1]["origin"]), ("8.8.8.8", "http://rpi.example.net"))
+        async with self.http.get(f"{self.base}/") as response:  # the page itself: relative URLs only
+            page = await response.text()
+        self.assertNotIn('"/static', page)
+        self.web._remote_failures.extend([__import__("time").monotonic()] * 20)  # many addresses, many wrong tries
+        async with await self.proxied("POST", "/login", client="9.9.9.9", data={"passphrase": "open sesame"},
+                                      headers={"Origin": "https://rpi.example.net"}) as response:
+            self.assertIn("Too many tries", await response.text())
+        async with self.http.post(f"{self.base}/login", data={"passphrase": "open sesame"},
+                                  allow_redirects=False) as response:
+            self.assertEqual(response.status, 303)  # the home network is never locked out by that
+
+    async def test_forwarding_headers_count_only_from_a_trusted_proxy(self):
+        await self.start({"trusted_proxies": ["10.9.9.9"]})  # this test client is not the proxy
+        async with await self.proxied("GET", "/", host=f"127.0.0.1:{self.web.port_number}") as response:
+            self.assertEqual(response.status, 200)  # its claimed 8.8.8.8 is ignored: it is 127.0.0.1
 
     # ---- who is in a chat -----------------------------------------------------------------------------
     async def start_room(self):

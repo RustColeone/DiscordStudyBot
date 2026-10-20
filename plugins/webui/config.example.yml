@@ -13,6 +13,9 @@ port: 4156                      # open http://<this computer's address>:4156
 # networks: [10.0.0.0/24, 100.64.0.0/10]   # only these networks instead (e.g. add Tailscale)
 # hostnames: [studybot.home]               # extra names this computer is reached by (IPs, localhost
                                            # and *.local, *.lan, *.home.arpa always work)
+# Through a reverse proxy on this machine (nginx serving https://example.net/chat/), see the README:
+# remote_access: true                      # clients beyond the local network, via the proxy, with a passphrase
+# trusted_proxies: [127.0.0.1, ::1]        # whose X-Forwarded-For / X-Forwarded-Proto are believed
 
 # Who answers: by default the shared room's five classmates (the room engine). The new-chat picker offers
 # these; a chat with some of them (one: a direct message) gets its own assignment, removed with the chat.

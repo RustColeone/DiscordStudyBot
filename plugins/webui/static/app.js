@@ -57,7 +57,7 @@
     const node = paint(make("div", "avatar"), key);
     if (state.avatars.has(key)) {
       const image = make("img");
-      image.src = `/avatars/${key}`;
+      image.src = `avatars/${key}`;
       image.alt = "";
       image.onerror = () => { image.remove(); node.textContent = initial(name); };
       node.append(image);
@@ -410,7 +410,7 @@
   }
 
   function fileView(file) {
-    const url = `/files/${encodeURIComponent(file.id)}`;
+    const url = `files/${encodeURIComponent(file.id)}`;
     if (/^image\//.test(file.mime)) {
       const image = make("img", "attachment-image");
       image.src = url;
@@ -598,7 +598,7 @@
   async function loadHistory() {
     const conversation = state.current;
     try {
-      const response = await fetch(`/api/history?conversation=${encodeURIComponent(conversation)}&after=${state.lastId}`);
+      const response = await fetch(`api/history?conversation=${encodeURIComponent(conversation)}&after=${state.lastId}`);
       if (!response.ok) return;
       const { messages: items } = await response.json();
       if (conversation !== state.current) return;
@@ -630,7 +630,10 @@
 
   // ---- connection ----------------------------------------------------------------------------------
   function connect() {
-    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+    // Relative to the page, like every other URL here, so it also works under a proxy's path (…/chat/ws).
+    const url = new URL("ws", location.href);
+    url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const ws = new WebSocket(url);
     state.ws = ws;
     ws.onopen = () => { state.retry = 0; setConnection(""); };
     ws.onmessage = (message) => receive(JSON.parse(message.data));
@@ -838,7 +841,7 @@
       const form = new FormData();
       form.append("file", file, entry.name);
       try {
-        const response = await fetch("/api/upload", { method: "POST", body: form });
+        const response = await fetch("api/upload", { method: "POST", body: form });
         if (!response.ok) throw new Error(response.status === 413 ? "too large" : String(response.status));
         const { files } = await response.json();
         Object.assign(entry, files[0]);
