@@ -42,8 +42,10 @@ LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
 DECISION = re.compile(r"^\$(approve|deny)\s+([0-9a-f]{4,12})(\s+always)?\s*$", re.I)
 # The member list's model menu asks the core with `$model` in the background (see _quiet_command).
 MODEL_PURPOSES = ("overview", "choose")
+QUIET_PREFIX = "web-quiet-"  # the request IDs of the page's own commands
 DISPLAY = {"luna": "Luna", "gemini": "Gemini", "claude": "Claude", "deepseek": "DeepSeek", "grok": "Grok"}
 QUIET_TIMEOUT_S = 20
+TIDY_AFTER_START_S = 5  # the core's manager starts after its interfaces; commands wait for it
 PERSONA = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 MODEL = re.compile(r"^(reset|[A-Za-z0-9._-]{1,40}/[A-Za-z0-9._:/@+-]{1,160})$")
 COOKIE = "webui_session"
@@ -131,6 +133,8 @@ class WebUI(Interface):
         self._failures: dict[str, deque] = {}
         self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose, future}: the page's own commands
         self._setups: dict[str, asyncio.Future] = {}  # a new chat whose classmates are being set up
+        self._background: set[asyncio.Task] = set()
+        self._stopping = False
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
 
@@ -167,8 +171,21 @@ class WebUI(Interface):
         print(f"[{self.name}] Open {self.address_shown} on this network"
               + (" (passphrase required)." if self.passphrase else "."), flush=True)
         port.log("listening", address=self.address_shown, passphrase=bool(self.passphrase))
+        self._spawn(self._tidy(delay=TIDY_AFTER_START_S))
+
+    def _spawn(self, coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     async def stop(self) -> None:
+        self._stopping = True
+        for quiet in self._quiet.values():  # nothing will answer them now; a chat being set up is finished by
+            if not quiet["future"].done():  # _tidy at the next start
+                quiet["future"].set_result({"ok": False, "code": "stopping", "text": "", "result": {}})
+        for task in list(self._background):
+            task.cancel()
+        await asyncio.gather(*self._background, return_exceptions=True)
         for ws in list(self._sockets):
             await ws.close()
         if self._runner is not None:
@@ -306,6 +323,8 @@ class WebUI(Interface):
 
     async def _upload(self, request: web.Request) -> web.Response:
         reader = await request.multipart()
+        limit = int(self.display.max_upload_mb * 1024 * 1024)
+        total = 0  # streamed parts are not covered by aiohttp's client_max_size: count them here
         kept = []
         async for part in reader:
             if part.filename is None:
@@ -318,7 +337,17 @@ class WebUI(Interface):
             with target.open("wb") as handle:
                 while chunk := await part.read_chunk(1 << 16):
                     size += len(chunk)
+                    total += len(chunk)
+                    if total > limit:
+                        break
                     handle.write(chunk)
+            if total > limit:
+                shutil.rmtree(target.parent, ignore_errors=True)
+                for item in kept:  # the whole upload is refused, not half of it
+                    self.store.delete_file(item["id"])
+                    shutil.rmtree(self.data_dir / "uploads" / item["id"], ignore_errors=True)
+                return web.json_response({"error": "too_large", "max_upload_mb": self.display.max_upload_mb},
+                                         status=413)
             mime = mimetypes.guess_type(safe)[0] or part.headers.get("Content-Type") or "application/octet-stream"
             self.store.add_file(file_id, target, safe, mime, size)
             kept.append({"id": file_id, "name": safe, "mime": mime, "size": size})
@@ -332,6 +361,8 @@ class WebUI(Interface):
             after = int(request.query.get("after") or 0)
         except ValueError:
             raise web.HTTPBadRequest() from None
+        if not 0 <= after < 2 ** 63:  # a message ID: SQLite's integer range, never negative
+            raise web.HTTPBadRequest()
         return web.json_response({"messages": self.store.messages(conversation, after)})
 
     # ---- the live connection --------------------------------------------------------------------------
@@ -358,7 +389,12 @@ class WebUI(Interface):
                 except ValueError:
                     continue
                 if isinstance(event, dict):
-                    await self._handle(ws, event)
+                    try:
+                        await self._handle(ws, event)
+                    except Exception as error:  # one bad event never closes the page's connection
+                        if self._stopping or ws.closed:
+                            break
+                        self.port.log("event_failed", event=str(event.get("type"))[:20], error=type(error).__name__)
         finally:
             self._sockets.discard(ws)
         return ws
@@ -366,8 +402,10 @@ class WebUI(Interface):
     async def _handle(self, ws: web.WebSocketResponse, event: dict) -> None:
         kind = event.get("type")
         if kind == "order":
-            ids = [str(item) for item in list(event.get("conversations") or [])[:500]
-                   if CONVERSATION_ID.fullmatch(str(item))]
+            listed = event.get("conversations")
+            if not isinstance(listed, list):
+                return
+            ids = [str(item) for item in listed[:500] if CONVERSATION_ID.fullmatch(str(item))]
             self.store.order(ids)
             await self._broadcast({"type": "conversations", "items": self.store.conversations()})
             return
@@ -400,9 +438,12 @@ class WebUI(Interface):
         """A `$command` the page sends for itself: it is not shown in the chat, and its answer comes back as
         data instead of a bubble (the returned future: {ok, code, text, result}). The core still sees and records
         it like a typed command (the room leaves commands out of what its characters read)."""
-        key = f"web-quiet-{uuid.uuid4().hex}"
-        while len(self._quiet) >= 100:  # answers that never came (the core was restarted, say)
-            lost = self._quiet.pop(next(iter(self._quiet)))["future"]
+        key = f"{QUIET_PREFIX}{uuid.uuid4().hex}"
+        # Model-menu asks are bounded (a page can send them in a loop); a chat's setup never is evicted: its
+        # answer must reach _answer_quietly to be cleaned up (and there is at most one per open page).
+        asks = [item for item, quiet in self._quiet.items() if quiet["purpose"] in MODEL_PURPOSES]
+        while purpose in MODEL_PURPOSES and len(asks) >= 100:
+            lost = self._quiet.pop(asks.pop(0))["future"]
             if not lost.done():
                 lost.set_result({"ok": False, "code": "lost", "text": "", "result": {}})
         future = asyncio.get_running_loop().create_future()
@@ -422,7 +463,10 @@ class WebUI(Interface):
         try:
             return await asyncio.wait_for(asyncio.shield(future), QUIET_TIMEOUT_S)
         except asyncio.TimeoutError:
-            return {"ok": False, "code": "timeout", "text": "", "result": {}}
+            answer = {"ok": False, "code": "timeout", "text": "", "result": {}}
+            if not future.done():
+                future.set_result(answer)  # given up: an answer that still comes is a late one
+            return answer
 
     async def _ask_models(self, ws: web.WebSocketResponse, conversation: str, text: str, purpose: str) -> None:
         """The model menu's `$model`: its answer is broadcast as a `models` event when it comes; a refusal is told
@@ -454,6 +498,11 @@ class WebUI(Interface):
         ready = False
         try:
             problem = await self._assign(conversation, personas)
+            if self._stopping:
+                return  # the chat stays; _tidy finishes its setup at the next start
+            if self.store.conversation(conversation) is None:
+                await self._unassign(conversation)  # deleted (on any page) while it was being set up
+                return
             if problem:
                 await self._delete(conversation)
                 await ws.send_json({"type": "error", "text": f"Couldn't start that chat: {problem}"})
@@ -470,9 +519,14 @@ class WebUI(Interface):
         if base is None:
             return "no engine is assigned to the web UI's chats"
         if list(base["personas"]) == personas:
+            if base.get("pattern") != str(address):
+                self.store.unmark_assigned(conversation)  # nothing of its own to keep, or to remove later
             return ""
         value = {key: item for key, item in base.items() if key not in ("pattern", "since")}
         arguments = {"pattern": str(address), "assignment": {**value, "personas": personas}}
+        # Recorded first: if the answer comes too late (the chat is deleted as failed by then) or never, the
+        # assignment may still exist, and _tidy removes it.
+        self.store.mark_assigned(conversation)
         answer = await self._quietly(conversation, "$call core.set_assignment "
                                      + json.dumps(arguments, ensure_ascii=False), "assign")
         now = self.port.policy(address).get("assignment") or {}
@@ -500,15 +554,47 @@ class WebUI(Interface):
         self.port.log("chat_deleted")
         await self._broadcast({"type": "deleted", "conversation": conversation,
                                "items": self.store.conversations()})
+        await self._unassign(conversation)
+
+    async def _unassign(self, conversation: str) -> None:
+        """Remove the runtime assignment this page set for a chat that is gone. Only ours (recorded in
+        `assigned`): one configured in core.yml, or set by someone else, is never touched. The record stays
+        while its `set_assignment` may still land (asked, not yet answered)."""
+        if conversation not in self.store.assigned():
+            return
+        address = Address(self.name, conversation)
         if (self.port.policy(address).get("assignment") or {}).get("pattern") == str(address):
             await self._quietly(conversation, "$call core.delete_assignment "
                                 + json.dumps({"pattern": str(address)}), "unassign")
+        asking = any(item["purpose"] == "assign" and item["conversation"] == conversation
+                     for item in self._quiet.values())
+        if not asking and (self.port.policy(address).get("assignment") or {}).get("pattern") != str(address):
+            self.store.unmark_assigned(conversation)
+            self.port.log("chat_unassigned")
+
+    async def _tidy(self, delay: float = 0) -> None:
+        """Make the core's assignments match the page's chats again: remove those left behind by chats that are
+        gone (a setup answered after its chat was deleted as failed, a deletion cut off by a restart), and set
+        again those a chat with some of the classmates lacks (a setup cut off by a restart or a crash)."""
+        if delay:
+            await asyncio.sleep(delay)
+        picked = {chat["id"]: chat["personas"] for chat in self.store.conversations() if chat["personas"]}
+        for conversation in sorted(set(self.store.assigned()) | set(picked)):
+            if self.store.conversation(conversation) is None:
+                await self._unassign(conversation)
+                continue
+            personas = picked.get(conversation)
+            now = self.port.policy(Address(self.name, conversation)).get("assignment") or {}
+            if personas and list(now.get("personas") or []) != personas:
+                problem = await self._assign(conversation, personas)
+                self.port.log("chat_reassigned", ok=not problem)
 
     async def _send(self, ws: web.WebSocketResponse, conversation: str, event: dict) -> None:
         request_id = str(event.get("id") or "")[:64] or uuid.uuid4().hex
         text = str(event.get("text") or "")[: self.display.max_text_chars]
         files = []
-        for file_id in list(event.get("files") or [])[:10]:
+        listed = event.get("files")
+        for file_id in (listed if isinstance(listed, list) else [])[:10]:
             record = self.store.file(str(file_id))
             if record is not None:
                 files.append(record)
@@ -578,6 +664,8 @@ class WebUI(Interface):
                   "result": result if isinstance(result, dict) else {}}
         if not quiet["future"].done():
             quiet["future"].set_result(answer)
+        elif quiet["purpose"] == "assign" and self.store.conversation(quiet["conversation"]) is None:
+            self._spawn(self._unassign(quiet["conversation"]))  # it came too late: its chat was given up
         if quiet["purpose"] in MODEL_PURPOSES:
             await self._broadcast({"type": "models", "conversation": quiet["conversation"],
                                    "purpose": quiet["purpose"], **answer})
@@ -589,6 +677,10 @@ class WebUI(Interface):
         quiet = self._quiet.get(reply.in_reply_to or "")
         if quiet is not None:  # (before the chat is re-created: removing a deleted chat's assignment answers too)
             return await self._answer_quietly(reply, quiet)
+        if (reply.in_reply_to or "").startswith(QUIET_PREFIX):
+            # The answer to a page's own command that is no longer awaited (dropped, or from before a restart):
+            # never a bubble in the chat, and never a reason to bring a deleted chat back.
+            return Delivery(True, message_id=f"quiet-{reply.id}")
         conversation = reply.address.conversation
         if not CONVERSATION_ID.fullmatch(conversation):
             conversation = DEFAULT_CONVERSATION

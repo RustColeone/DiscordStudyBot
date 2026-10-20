@@ -21,8 +21,8 @@ from .interface import WebUI
 
 CLASSMATES = ["luna", "gemini", "claude", "deepseek", "grok"]
 # How the room behaves here (the assignment's `options`, merged under `assignment: {options: ...}`): a long
-# window with a rolling summary, classmates who chime in, and one diary shared by every web chat, so a
-# classmate remembers you across the class and your direct messages with her.
+# window with a rolling summary, classmates who chime in, and one diary scope for every web chat, so a
+# classmate remembers you across the class and your direct messages with her (notes stay filed per chat).
 OPTIONS = {"history_limit": 40, "compact": True, "chime_in": True, "diary_scope": "webui"}
 
 

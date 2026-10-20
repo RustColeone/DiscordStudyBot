@@ -83,8 +83,7 @@ printed at startup) from a laptop or phone at home:
 * ＋ New chat asks who is in it: everyone, a few classmates, or one for a direct message (also 💬 on her
   card); direct messages have their own heading in the sidebar;
 * a message naming no one gets an answer from whoever's turn it is, and the others may chime in; long
-  chats are summarised as they scroll out of view, and every web chat shares the classmates' diary, so
-  they remember you across the class and your direct messages.
+  chats are summarised as they scroll out of view, and the classmates remember you across every web chat.
 
 Whoever opens the page is the bot's creator, like the console. So it answers only the local network
 (private and link-local addresses, or `networks:`), refuses other websites in your browser and

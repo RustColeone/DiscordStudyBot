@@ -89,8 +89,10 @@ chat's members.
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
 (`compact`), a message naming no one gets an answer from whoever's turn it is while the others may chime
 in or stay silent (`chime_in`), and every web chat shares one diary scope (`diary_scope: webui`), so
-what Luna learns about you in the classroom she still knows in your direct messages with her. Change
-any of these under `assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).
+what Luna learns about you in the classroom she still knows in your direct messages with her. Each note
+stays filed in the chat it was written in; the scope only lets the others read it, so changing or removing
+it loses nothing. Change any of these under
+`assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).
 With `chime_in`, a message to the whole class can take up to five model calls.
 
 ## How it works
@@ -116,15 +118,15 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif). |
 | `GET /favicon.ico` | `static/favicon.png`. |
 | `GET /files/{file_id}` | A stored upload or delivered file (below). |
-| `GET /api/history?conversation=&after=` | A chat's stored messages: the latest 300, or those after a message ID (not a number: 400). |
-| `POST /api/upload` | Multipart upload; each part is written to `uploads/<id>/<name>` and recorded; returns `{files: [{id, name, mime, size}]}`. |
+| `GET /api/history?conversation=&after=` | A chat's stored messages: the latest 300, or those after a message ID (not a whole number from 0 to 2^63-1: 400). |
+| `POST /api/upload` | Multipart upload; each part is written to `uploads/<id>/<name>` and recorded; returns `{files: [{id, name, mime, size}]}`. More than `max_upload_mb` in all: 413, and nothing of it is kept. |
 | `GET /ws` | The websocket (heartbeat 30 s, messages up to 1 MiB). |
 
 ### From page events to requests
 
 The page never answers anything itself; everything a person types goes through `port.submit`, as
 [EXTENSIONS.md, Submitting requests](../../docs/core/EXTENSIONS.md#submitting-requests) requires.
-`_send` (interface.py:503) builds the `Request`:
+`_send` (interface.py:547) builds the `Request`:
 
 * `id` is `web-<id>`, where the page makes `id` (a random UUID per message). If the page resends after
   a reconnect, the core drops the duplicate and the page still gets a positive `ack`.
@@ -153,31 +155,41 @@ The page never answers anything itself; everything a person types goes through `
 
 The page uses the core's ordinary `$commands` instead of a private API, but keeps them out of the chat:
 
-* `_quiet_command` (interface.py:399) submits a command with ID `web-quiet-<uuid>`, remembers that ID in
-  `self._quiet` with its purpose and a future (at most 100 entries; the oldest go first, their futures
-  answered `lost`), and returns the future: `{ok, code, text, result}`, or `ok: false` with the reason if
+* `_quiet_command` (interface.py:410) submits a command with ID `web-quiet-<uuid>`, remembers that ID in
+  `self._quiet` with its purpose and a future (at most 100 model-menu asks; the oldest go first, their
+  futures answered `lost`; a chat's setup is never dropped, since its answer is needed for clean-up), and
+  returns the future: `{ok, code, text, result}`, or `ok: false` with the reason if
   `submit` refused it. Every value that goes into a command is checked first (`persona` and `model`
   against strict patterns, personas against the roster, JSON-encoded arguments), so nothing else can be
   smuggled into the command text.
 * In `deliver`, before anything else, a reply whose `in_reply_to` is a quiet ID goes to
-  `_answer_quietly` (interface.py:557): its progress and `waiting_approval` notices are swallowed, and
+  `_answer_quietly` (interface.py:608): its progress and `waiting_approval` notices are swallowed, and
   the answer resolves the future (with `reply.data["result"]`, the command's result data, as JSON)
-  instead of being stored as a bubble.
+  instead of being stored as a bubble. A reply to a quiet ID no longer awaited (dropped, or from before a
+  restart) is swallowed the same way: never a bubble, and never a reason to re-create a deleted chat.
 * **The model menu**: `$model` (purpose `overview`) and `$model <persona> <provider>/<model|reset>`
   (purpose `choose`). Their answers are broadcast as `models` events; a refusal goes to the asking page.
 * The page shows the overview's `personas` (`name`, `display_name`, `model`, `chosen`), `models` (per
   provider) and `errors`; after a choice it shows the answer as a toast and asks again. If the core
   answers `not_permitted` (`$model` is for admins), the page hides the menu.
 
-* **A chat's classmates** (`_new`, `_assign`, interface.py:436-461): for a `new` event with `personas`,
+* **A chat's classmates** (`_new`, `_assign`, interface.py:450-479): for a `new` event with `personas`,
   the chat is stored with them and shown at once. If they differ from the personas of the assignment the
   chat has now (`port.policy(address)`, normally `webui:*`), the interface sends
   `$call core.set_assignment {"pattern": "webui:<chat>", "assignment": {...}}`: that assignment with only
   `personas` changed (purpose `assign`). As the creator's own `$call`, it needs no approval. Whether it
-  worked is read back from `port.policy`, not from the answer's wording; on failure the chat is deleted
-  again and the page gets an `error` event. Deleting a chat whose policy pattern is exactly
-  `webui:<chat>` sends `$call core.delete_assignment` (purpose `unassign`); a pattern configured in
-  core.yml cannot be deleted that way, and the failure is ignored.
+  worked is read back from `port.policy`, not from the answer's wording; on failure (or no answer within
+  20 s) the chat is deleted again and the page gets an `error` event.
+* **Removing them** (`_unassign`, `_tidy`): before asking, the chat is recorded in `webui.db`
+  (`assigned`), and only recorded chats are ever unassigned, so an assignment configured in core.yml or
+  set by someone else for a `webui:` address is never touched. Deleting a chat sends
+  `$call core.delete_assignment` (purpose `unassign`) and drops the record once the policy shows it gone.
+  A setup answered after its chat was given up (the core was slow) is removed as soon as that late
+  answer arrives. A chat deleted while its setup runs is unassigned once the setup answers. 5 s after each
+  start, `_tidy` makes the core match the page: it removes the assignments of recorded chats that no
+  longer exist (a deletion cut off by a restart), and sets again those a chat with some of the classmates
+  lacks (a setup cut off by a restart or a crash). On stop, setups still waiting are given up at once and
+  their chats kept for `_tidy`, so stopping never waits for the core.
 
 The core still records these commands like typed ones; the room leaves commands out of what its
 characters read. A runtime assignment copies the `webui:*` one when the chat is made, so later changes
@@ -185,7 +197,7 @@ to `webui:*` (in core.yml or the config) do not reach chats started with some of
 
 ### Rendering each reply kind
 
-`deliver` (interface.py:486) maps the reply to a stored item and broadcasts it:
+`deliver` (interface.py:628) maps the reply to a stored item and broadcasts it:
 
 | `reply.kind` | Server | Page |
 | --- | --- | --- |
@@ -204,7 +216,9 @@ row ID>)`, `Delivery(False, detail="missing_file")` for a missing file, or `not_
 
 ### The websocket protocol
 
-One socket per open page; every event is a JSON object with `type`. The server sends `hello` first.
+One socket per open page; every event is a JSON object with `type`. The server sends `hello` first. An
+event that fails (a field of the wrong type, say) is logged as `event_failed` and skipped; it never closes
+the connection.
 
 Page to server:
 
@@ -240,7 +254,7 @@ fetches `/api/history?after=<last id>` after each `hello`, so nothing is missed.
 ### Security
 
 Whoever opens the page has creator rights, so the server treats every request as hostile until proven
-local. The `_guard` middleware (interface.py:174) runs on every route, the websocket included:
+local. The `_guard` middleware (interface.py:194) runs on every route, the websocket included:
 
 1. **Peer address**: only loopback, private and link-local addresses (or exactly `networks:`); IPv4
    mapped IPv6 is unwrapped. Otherwise 403.
@@ -270,14 +284,14 @@ Under its data directory (`<data_dir>/extensions/webui/`, by default `data/core/
 
 | Path | Contents | Kept |
 | --- | --- | --- |
-| `webui.db` | Chats (title, position, pinned, personas), each delivered or sent message as the JSON the page renders, and file records. | Until the chat is deleted on the page. |
-| `uploads/<id>/<name>` | Files you uploaded. | Until a chat that showed them is deleted. Uploads never sent are not removed. |
+| `webui.db` | Chats (title, position, pinned, personas), each delivered or sent message as the JSON the page renders, file records, and the chats it asked the core for a runtime assignment for (`assigned`). | Until the chat is deleted on the page (`assigned`: until its assignment is gone). |
+| `uploads/<id>/<name>` | Files you uploaded. | Until the last chat that showed them is deleted. Uploads never sent are not removed. |
 | `files/<id>/<name>` | Copies of files the bot sent. | Until their chat is deleted. |
 | `session.key` | The random key for the sign-in cookie. | Always; delete it to sign every browser out. |
 
 Progress lines and quiet requests live only in memory. The core keeps the real conversation history
 separately, as for any interface, and each smaller chat's runtime assignment until the chat is deleted.
-The classmates' diaries about you are the core's, in the `webui` diary scope. The browser keeps the current chat, panel widths and open panels in
+The classmates' diaries about you are the core's, filed per chat and read across the `webui` scope. The browser keeps the current chat, panel widths and open panels in
 `localStorage`.
 
 ## Tests
@@ -290,7 +304,9 @@ never sent); new chats as their own conversations titled by their first line; ch
 classmates (with the room and fake models: only they answer, a message sent at once waits for the
 assignment, everything else is copied from `webui:*`, nothing shows in the chat), one classmate as a
 direct chat, the whole class or unknown names setting no assignment, deleting a chat removing its
-assignment, and a chat the core cannot staff not being kept; pinning, ordering and
+assignment, and a chat the core cannot staff not being kept; a message queued behind a failed setup not
+reaching the whole class (from the same page or another); an assignment that lands after its chat was
+given up being removed; and the start-up sweep removing only this page's own leftovers; pinning, ordering and
 deleting with files; approval cards and button presses; typing lines until a run speaks; files both
 ways and inline only for media; avatars and nothing else from the folders; refusal of other sites and
 rebound names, and the CSP; the passphrase flow and cookie flags; and the default room assignment.
@@ -303,16 +319,16 @@ venv/bin/python -m unittest tests.test_plugin_webui
 
 * **Contribute defaults for your own interface only** (extension.py:37-41): an assignment and admission
   for `webui:*` make the plugin work on drop-in; core.yml still wins.
-* **Report the owner and a fallback control route** in `start` (interface.py:144) when your platform
+* **Report the owner and a fallback control route** in `start` (interface.py:146) when your platform
   has a natural owner, as the CLI does at a terminal.
 * **Return promptly from `start`**: aiohttp's `AppRunner`/`TCPSite` run in the background; on a bind
-  failure call `port.set_ready(False, ...)` and raise (interface.py:155-162).
+  failure call `port.set_ready(False, ...)` and raise (interface.py:157-164).
 * **Submit first, store after**: record the person's message only when `submit` accepted it, and use a
-  page-made ID so resends are deduplicated (interface.py:503-532).
-* **Copy delivered files out of the run workspace** before referring to them later (interface.py:296).
-* **Key progress by `run_id` and clear it on the run's next reply** (interface.py:588-605).
-* **Talk to the core with commands, not private hooks**: the quiet command pattern (interface.py:399
-  and 557) shows how a page feature can use any `$command` (here `$model` and `$call
+  page-made ID so resends are deduplicated (interface.py:547-583).
+* **Copy delivered files out of the run workspace** before referring to them later (interface.py:307).
+* **Key progress by `run_id` and clear it on the run's next reply** (interface.py:641-658).
+* **Talk to the core with commands, not private hooks**: the quiet command pattern (interface.py:410
+  and 608) shows how a page feature can use any `$command` (here `$model` and `$call
   core.set_assignment`) and read `reply.data["result"]`; check the effect through `port.policy` where
   you can rather than parsing the answer.
 * **Keep `deliver` safe to call concurrently**: the store serialises with a lock, and `_broadcast`

@@ -394,6 +394,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.05)
         self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:*")
         self.assertIsNone(self.web.store.conversation("dm-luna"))  # the answer did not bring the chat back
+        self.assertEqual(self.web.store.assigned(), [])
         # A chat the core cannot give those classmates (here: an engine for one persona) is not kept.
         self.core.manager.set_assignment("webui:*", {"engine": "probe", "personas": ["p"]})
         await ws.send_json({"type": "new", "conversation": "chat-pair", "title": "x", "personas": ["luna", "grok"]})
@@ -428,6 +429,129 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.core.tank.recent_messages("webui:dm-luna", 5))
         await other.close()
         await ws.close()
+
+    async def test_an_assignment_that_lands_after_its_chat_was_given_up_is_removed(self):
+        import sys
+        from contracts import SubmitResult
+        await self.start_room()
+        module = sys.modules[type(self.web).__module__]
+        self.addCleanup(setattr, module, "QUIET_TIMEOUT_S", module.QUIET_TIMEOUT_S)
+        module.QUIET_TIMEOUT_S = 0.2
+        release, submit, held = asyncio.Event(), self.web.port.submit, []
+
+        async def slow_core(request):  # the core takes the setup only after the page has given up waiting
+            if request.text.startswith("$call core.set_assignment"):
+                async def later():
+                    await release.wait()
+                    await submit(request)
+                held.append(asyncio.create_task(later()))
+                return SubmitResult(True, "accepted")
+            return await submit(request)
+        self.web.port.submit = slow_core
+        ws, _ = await self.socket()
+        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        error, _ = await self.until(ws, lambda e: e["type"] == "error")
+        self.assertIn("timeout", error["text"])
+        self.assertIsNone(self.web.store.conversation("dm-luna"))
+        self.assertEqual(self.web.store.assigned(), ["dm-luna"])  # it may still land
+        release.set()
+        await asyncio.gather(*held)
+        for _ in range(60):
+            if not self.web.store.assigned():
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        self.assertIsNone(self.web.store.conversation("dm-luna"))  # its answer did not bring the chat back
+        await ws.close()
+
+    async def test_at_start_only_this_pages_own_leftover_assignments_are_removed(self):
+        await self.start_room()
+        mine = {"engine": "room", "personas": ["luna"]}
+        for chat in ("dm-gone", "dm-kept", "set-by-hand"):
+            self.core.manager.set_assignment(f"webui:{chat}", mine)
+        self.web.store.ensure("dm-kept", "Luna", ["luna"])
+        self.web.store.mark_assigned("dm-gone")
+        self.web.store.mark_assigned("dm-kept")
+        await self.web._tidy()
+        self.assertEqual(self.assignment("dm-gone")["pattern"], "webui:*")
+        self.assertEqual(self.assignment("dm-kept")["pattern"], "webui:dm-kept")  # its chat is still there
+        self.assertEqual(self.assignment("set-by-hand")["pattern"], "webui:set-by-hand")  # not ours
+        self.assertEqual(self.web.store.assigned(), ["dm-kept"])
+        self.assertEqual(self.web.store.messages("dm-gone"), [])  # the quiet $call showed nowhere
+
+    async def test_answers_to_the_pages_own_commands_never_become_bubbles(self):
+        await self.start()
+        ws, _ = await self.socket()
+        for _ in range(110):  # more model-menu asks than are kept: the oldest are dropped, and their answers too
+            await ws.send_json({"type": "models", "conversation": "classroom"})
+        await self.until(ws, lambda e: e["type"] == "models", limit=200)
+        await settle(self.core)
+        self.assertEqual(self.web.store.messages("classroom"), [])
+        await ws.close()
+
+    async def test_a_chat_deleted_while_it_is_set_up_leaves_no_assignment(self):
+        await self.start_room()
+        a, _ = await self.socket()
+        b, _ = await self.socket()
+        await a.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        await b.send_json({"type": "delete", "conversation": "dm-luna"})
+        await self.until(b, lambda e: e["type"] == "deleted")
+        for _ in range(60):
+            if self.assignment("dm-luna")["pattern"] == "webui:*" and not self.web.store.assigned():
+                break
+            await asyncio.sleep(0.05)
+        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        self.assertIsNone(self.web.store.conversation("dm-luna"))
+        await a.close()
+        await b.close()
+
+    async def test_at_start_a_chat_missing_its_assignment_gets_it_again(self):
+        await self.start_room()
+        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # a setup cut off by a crash: the chat, no assignment
+        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:*")
+        await self.web._tidy()
+        self.assertEqual((self.assignment("dm-luna")["pattern"], self.assignment("dm-luna")["personas"]),
+                         ("webui:dm-luna", ["luna"]))
+
+    async def test_bad_events_and_parameters_are_refused_without_breaking_anything(self):
+        await self.start({"max_upload_mb": 0.01})
+        ws, _ = await self.socket()
+        for event in ({"type": "order", "conversations": 5}, {"type": "order", "conversations": True},
+                      {"type": "send", "conversation": "classroom", "text": "echo x", "files": 7, "id": "f7"}):
+            await ws.send_json(event)
+        await self.say(ws, "echo still here", id="alive")
+        answer, _ = await self.until(ws, lambda e: e["type"] == "message" and e["item"]["text"] == "still here")
+        self.assertFalse(ws.closed)
+        for after in ("99999999999999999999", "-5"):
+            async with self.http.get(f"{self.base}/api/history?conversation=classroom&after={after}") as response:
+                self.assertEqual(response.status, 400)
+        form = aiohttp.FormData()
+        form.add_field("file", b"x" * 50000, filename="big.bin")
+        async with self.http.post(f"{self.base}/api/upload", data=form) as response:
+            self.assertEqual(response.status, 413)
+        self.assertFalse(any((self.web.data_dir / "uploads").glob("*/big.bin")))
+        await ws.close()
+
+    def test_the_store_keeps_shared_files_and_puts_unlisted_chats_after(self):
+        from plugins_webui import Store
+        store = Store(self.tmp / "web.db")
+        try:
+            for chat in ("classroom", "chat-a", "chat-b"):
+                store.ensure(chat, chat)
+            photo = self.tmp / "photo.png"
+            photo.write_bytes(b"png")
+            store.add_file("f1", photo, "photo.png", "image/png", 3)
+            for chat in ("chat-a", "chat-b"):
+                store.add(chat, {"kind": "user", "text": "look", "files": [{"id": "f1"}]})
+            self.assertEqual(store.delete("chat-a"), [])  # chat-b still shows it
+            self.assertIsNotNone(store.file("f1"))
+            self.assertEqual(store.delete("chat-b"), [photo])
+            store.ensure("chat-c", "chat-c")
+            store.ensure("chat-d", "chat-d")
+            store.order(["classroom", "chat-c"])
+            self.assertEqual([chat["id"] for chat in store.conversations()], ["classroom", "chat-c", "chat-d"])
+        finally:
+            store.close()
 
     async def test_the_room_is_the_default_for_its_conversations(self):
         from core.loader import import_extension

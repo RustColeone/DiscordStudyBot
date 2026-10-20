@@ -22,6 +22,7 @@ CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages(conversation, id
 CREATE INDEX IF NOT EXISTS messages_by_approval ON messages(approval);
 CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, path TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL,
                                   size INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS assigned (conversation TEXT PRIMARY KEY, at REAL NOT NULL);
 """
 
 
@@ -86,13 +87,19 @@ class Store:
             self._db.execute("UPDATE conversations SET pinned=? WHERE id=?", (int(pinned), conversation))
 
     def order(self, conversations: list[str]) -> None:
-        """Arrange chats in this order (unknown IDs are ignored; chats not listed keep their place after)."""
+        """Arrange chats in this order (unknown IDs are ignored; chats not listed follow, in their old order)."""
         with self._lock:
-            for index, conversation in enumerate(conversations):
+            current = [row["id"] for row in self._db.execute(
+                "SELECT id FROM conversations ORDER BY pinned DESC, position, created_at DESC")]
+            known = set(current)
+            listed = list(dict.fromkeys(item for item in conversations if item in known))
+            rest = [item for item in current if item not in set(listed)]
+            for index, conversation in enumerate([*listed, *rest]):
                 self._db.execute("UPDATE conversations SET position=? WHERE id=?", (index, conversation))
 
     def delete(self, conversation: str) -> list[Path]:
-        """Remove a chat and its transcript; returns the files only it showed, for the caller to remove."""
+        """Remove a chat and its transcript; returns the files only it showed, for the caller to remove (a file
+        another chat also showed, such as an upload sent to both, is kept)."""
         with self._lock:
             rows = self._db.execute("SELECT item FROM messages WHERE conversation=?", (conversation,)).fetchall()
             ids = set()
@@ -102,6 +109,10 @@ class Store:
                            if file.get("id"))
             paths = []
             for file_id in ids:
+                shared = self._db.execute("SELECT 1 FROM messages WHERE conversation!=? AND instr(item, ?) > 0 LIMIT 1",
+                                          (conversation, f'"{file_id}"')).fetchone()
+                if shared is not None:
+                    continue
                 record = self._db.execute("SELECT path FROM files WHERE id=?", (file_id,)).fetchone()
                 if record is not None:
                     paths.append(Path(record["path"]))
@@ -109,6 +120,21 @@ class Store:
             self._db.execute("DELETE FROM messages WHERE conversation=?", (conversation,))
             self._db.execute("DELETE FROM conversations WHERE id=?", (conversation,))
         return paths
+
+    # ---- the runtime assignments this page asked the core for ----------------------------------------
+    def assigned(self) -> list[str]:
+        """Chats this page asked `core.set_assignment` for (kept until that assignment is known to be gone)."""
+        with self._lock:
+            return [row["conversation"] for row in self._db.execute("SELECT conversation FROM assigned")]
+
+    def mark_assigned(self, conversation: str) -> None:
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO assigned(conversation, at) VALUES(?,?)",
+                             (conversation, time.time()))
+
+    def unmark_assigned(self, conversation: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM assigned WHERE conversation=?", (conversation,))
 
     # ---- messages ---------------------------------------------------------------------------------
     def add(self, conversation: str, item: dict[str, Any]) -> dict[str, Any]:
@@ -149,6 +175,10 @@ class Store:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO files(id, path, name, mime, size) VALUES(?,?,?,?,?)",
                              (file_id, str(path), name, mime, size))
+
+    def delete_file(self, file_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM files WHERE id=?", (file_id,))
 
     def file(self, file_id: str) -> dict[str, Any] | None:
         with self._lock:
