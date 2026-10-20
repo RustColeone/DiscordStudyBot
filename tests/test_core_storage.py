@@ -242,6 +242,38 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(len(core.tank.notes("p", "chat:dm", "alice")), 1)  # not hers to clear
 
+    async def test_recall_gives_the_newest_of_a_key_however_many_notes_outrank_it(self):
+        from types import SimpleNamespace
+        from core.manager.diary import DiaryHandle
+        core = await self.core()
+        tank = core.tank
+        tank.save_note("p", "chat:dm", "alice", "food.favorite", "fact", "Likes spicy noodles", 5, 200)
+        for index in range(6):
+            tank.save_note("p", "chat:dm", "alice", f"other.{index}", "fact", f"Important {index}", 5, 200)
+        tank.save_note("p", "chat:group", "alice", "food.favorite", "fact", "Now prefers sushi", 3, 200)  # newer
+        record = SimpleNamespace(id="r", address="chat:dm", origin="conversation")
+        diary = DiaryHandle(core.manager, record, "p", "hi", "alice", chats=["chat:dm", "chat:group"])
+        recalled = [note.note for note in diary.recall("", limit=50)]
+        self.assertIn("Now prefers sushi", recalled)
+        self.assertNotIn("Likes spicy noodles", recalled)
+        recalled = [note.note for note in diary.recall("food", limit=3)]
+        self.assertNotIn("Likes spicy noodles", recalled)
+
+    async def test_notes_the_previous_version_filed_under_a_scope_are_filed_in_a_chat_again(self):
+        core = await self.core(self.shared("chat:dm", "chat:group"))
+        core.tank.record_message("chat:dm", "in", "hi", sender_id="alice", at=100.0)
+        core.tank.record_message("chat:group", "in", "hello", sender_id="alice", at=200.0)  # where she spoke last
+        core.tank.save_note("p", ":scope:mine", "chat:alice", "food.favorite", "fact", "Likes spicy noodles", 4, 200)
+        core.tank.save_note("p", ":scope:gone", "chat:alice", "old.key", "fact", "From a scope nobody names", 4, 200)
+        core.tank.save_note("p", "chat:group", "alice", "food.favorite", "fact", "An older note", 4, 200)
+        core.tank.db.execute("UPDATE diary SET updated_at=1 WHERE note='An older note'")
+        core.manager._refile_shared_diaries()
+        self.assertEqual([n.note for n in core.tank.notes("p", "chat:group", "alice")], ["Likes spicy noodles"])
+        self.assertEqual([n.key for n in core.tank.notes("p", ":scope:gone", "chat:alice")], ["old.key"])
+        await iface(core).say("$memory", conversation="dm")
+        await settle(core)
+        self.assertIn("Likes spicy noodles", iface(core).texts("dm")[-1])
+
     def test_a_scope_name_is_text_and_anything_else_means_none(self):
         from core.manager.manager import Manager
         names = [Manager.diary_scope({"diary_scope": value}) for value in

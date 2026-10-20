@@ -162,10 +162,18 @@ class Tank:
         return self._note(row) if row is not None else None
 
     def notes(self, persona: str, address: str | Sequence[str], subject: str, limit: int = 20, offset: int = 0,
-              terms: list[str] | None = None) -> list[DiaryNote]:
+              terms: list[str] | None = None, newest: bool = False) -> list[DiaryNote]:
+        """Notes about one person, most important and newest first. `newest`: of several notes with one key
+        (chats of a diary scope that each kept one), only the newest, before any limit is applied."""
         where, chats = self._chats(address)
-        sql = f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=?"
+        sql = f"SELECT * FROM diary AS d WHERE persona=? AND {where} AND subject=?"
         parameters: list[Any] = [persona, *chats, subject]
+        if newest and len(chats) > 1:
+            inner = where.replace("address", "n.address")
+            sql += (f" AND NOT EXISTS (SELECT 1 FROM diary AS n WHERE n.persona=d.persona AND n.subject=d.subject "
+                    f"AND n.key=d.key AND {inner} AND (n.updated_at > d.updated_at OR "
+                    "(n.updated_at = d.updated_at AND n.id > d.id)))")
+            parameters += chats
         if terms:
             sql += " AND (" + " OR ".join("LOWER(note || ' ' || key) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
             parameters += ["%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -178,6 +186,36 @@ class Tank:
         return {row["persona"]: row["n"] for row in self.db.query(
             f"SELECT persona, COUNT(*) AS n FROM diary WHERE {where} AND subject=? GROUP BY persona ORDER BY persona",
             (*chats, subject))}
+
+    def legacy_shared_notes(self) -> list[dict]:
+        """Notes filed under a diary scope's own key (`:scope:<name>`, subject `<interface>:<sender>`), as the
+        version before scopes became a filter kept them; `refile_note` moves each into a conversation."""
+        return [dict(row) for row in self.db.query(
+            "SELECT id, persona, address, subject, key, updated_at FROM diary WHERE substr(address, 1, 7)=':scope:' "
+            "ORDER BY id")]
+
+    def last_chats(self, sender_id: str, interface: str) -> list[str]:
+        """The conversations of one interface where this sender spoke, most recent first."""
+        prefix = interface + ":"
+        return [row["address"] for row in self.db.query(
+            "SELECT address, MAX(seq) AS last FROM messages WHERE direction='in' AND sender_id=? "
+            "AND substr(address, 1, ?)=? GROUP BY address ORDER BY last DESC", (sender_id, len(prefix), prefix))]
+
+    def refile_note(self, note_id: int, address: str, subject: str) -> None:
+        """File a note under another conversation and subject. If that one already holds the key, the newer of
+        the two notes is kept."""
+        with self.db.transaction() as db:
+            row = db.one("SELECT * FROM diary WHERE id=?", (note_id,))
+            if row is None:
+                return
+            other = db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
+                           (row["persona"], address, subject, row["key"]))
+            if other is not None:
+                if other["updated_at"] >= row["updated_at"]:
+                    db.execute("DELETE FROM diary WHERE id=?", (note_id,))
+                    return
+                db.execute("DELETE FROM diary WHERE id=?", (other["id"],))
+            db.execute("UPDATE diary SET address=?, subject=? WHERE id=?", (address, subject, note_id))
 
     def note_addresses(self, subject: str, interface: str) -> list[str]:
         """The chats of one interface holding notes about this sender (a diary scope's candidates)."""

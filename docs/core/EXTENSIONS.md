@@ -621,7 +621,8 @@ across them, like the web UI's chats, which only their owner reads). The scope i
 it on, off or to another name moves nothing, so notes are never stranded. It spans one interface, since a
 sender ID names a person only there. A note written under a key that another conversation of the scope
 already holds updates that note where it is; if two hold the same key (from before they shared),
-`recall` gives the newest. `$memory`, `forget` and `clear` cover the whole scope. A scope name is text (a
+`recall` gives the newest. `$memory`, `forget` and `clear` cover the whole scope. (Notes an earlier version filed under the scope
+itself are filed once, at start-up, in the scope's conversation their person spoke in last.) A scope name is text (a
 number counts as its digits); anything else, `false` included, means none. `recall(text, limit)` returns `DiaryNote`s, those
 matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
 under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses

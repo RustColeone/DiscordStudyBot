@@ -286,6 +286,31 @@ class Manager:
                 chats.append(other)
         return chats
 
+    def _refile_shared_diaries(self) -> None:
+        """Once, for notes the previous version filed under a scope's own key: file each in a conversation of
+        that scope, the latest one its person spoke in, so recall and `$memory` find them again. A note whose
+        scope no conversation names any more stays where it is (it was out of reach already)."""
+        moved = kept = 0
+        for row in self.tank.legacy_shared_notes():
+            name = row["address"][len(":scope:"):]
+            interface, _, sender = row["subject"].partition(":")
+            target = None
+            for chat in self.tank.last_chats(sender, interface) if sender else []:
+                try:
+                    assignment = self.assignment_for(Address.parse(chat))
+                except ValueError:
+                    continue
+                if assignment is not None and self.diary_scope(assignment.options) == name:
+                    target = chat
+                    break
+            if target is None:
+                kept += 1
+                continue
+            self.tank.refile_note(row["id"], target, sender)
+            moved += 1
+        if moved or kept:
+            self.audit.record("diary_refiled", moved=moved, unplaced=kept)
+
     def register_capability(self, capability: Capability, extension: str) -> None:
         if capability.name in self.capabilities:
             raise ValueError(f"Capability {capability.name!r} is already registered")
@@ -322,6 +347,7 @@ class Manager:
     async def start(self) -> None:
         self._stopping = False
         self._clean_workspaces()
+        self._refile_shared_diaries()
         # Decisions the stop cut off are reported first, for running runs too (a room keeps running while one job
         # waits for its approval): without awaiting, as the gateway already takes `$approve`, and before any run
         # starts, so each finds its outcomes. Then the running runs go on, then the waiting ones are resumed.

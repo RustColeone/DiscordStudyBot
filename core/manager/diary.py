@@ -59,18 +59,12 @@ class DiaryHandle:
         limit = max(1, min(int(limit), 50))
         tank = self._manager.tank
         terms = search_terms(text)
-        relevant = tank.notes(self.persona, self._chats, self._subject, limit * 2, terms=terms) if terms else []
-        rest = tank.notes(self.persona, self._chats, self._subject, limit * 2)
         # Two chats of a scope may each hold a note of the same key (from before they shared): the newest wins.
-        newest: dict[str, float] = {}
-        for note in [*relevant, *rest]:
-            newest[note.key] = max(newest.get(note.key, 0.0), note.updated_at)
-        chosen, seen = [], set()
-        for note in [*relevant, *rest]:
-            if note.id not in seen and note.key not in {item.key for item in chosen} and note.updated_at == newest[note.key]:
-                seen.add(note.id)
-                chosen.append(note)
-        return chosen[:limit]
+        relevant = tank.notes(self.persona, self._chats, self._subject, limit, terms=terms, newest=True) if terms else []
+        seen = {note.id for note in relevant}
+        rest = [note for note in tank.notes(self.persona, self._chats, self._subject, limit, newest=True)
+                if note.id not in seen]
+        return [*relevant, *rest][:limit]
 
     def write(self, key: str, kind: str, note: str, importance: int) -> bool:
         if not self.available:
