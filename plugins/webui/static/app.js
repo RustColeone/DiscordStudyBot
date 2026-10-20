@@ -36,6 +36,8 @@
   };
   const messages = $("#messages");
   const input = $("#input");
+  // A touch screen (a phone's on-screen keyboard): Return makes a new line and ➤ sends, as in phone chat apps.
+  const touch = window.matchMedia("(pointer: coarse)").matches;
 
   // ---- people --------------------------------------------------------------------------------------
   const keyOf = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
@@ -592,7 +594,7 @@
     renderMembers();
     renderTyping();
     await loadHistory();
-    input.focus();
+    if (!touch) input.focus();  // on a phone that would pop the keyboard over the chat just opened
   }
 
   async function loadHistory() {
@@ -813,7 +815,7 @@
       choose(matches[state.paletteIndex]);
     } else if (event.key === "Escape") {
       closePalette();
-    } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing && !touch) {
       event.preventDefault();
       submit();
     }
@@ -975,6 +977,38 @@
   resizable($("#resize-members"), "members");
   applyLevel();
   setInterval(renderTyping, 60000);
+
+  // ---- the phone keyboard ----------------------------------------------------------------------------
+  // The app is sized to the visual viewport (what is actually visible): when the keyboard opens it shrinks,
+  // so the header and composer stay on screen and the newest message stays in view. iOS would otherwise
+  // slide the whole page up behind the keyboard; Android also resizes (interactive-widget in index.html).
+  // Whether the chat was at its newest message, kept from the last scroll: by the time a resize is reported
+  // the chat has already shrunk, so asking then would say no.
+  let pinned = true;
+  messages.addEventListener("scroll", () => { pinned = nearBottom(); }, { passive: true });
+  function fitViewport() {
+    const view = window.visualViewport;
+    if (!view) return;
+    const stick = pinned;
+    const root = document.documentElement.style;
+    root.setProperty("--app-height", `${Math.round(view.height)}px`);
+    root.setProperty("--app-top", `${Math.round(view.offsetTop)}px`);
+    document.body.classList.toggle("keyboard-open", touch && document.activeElement === input);
+    if (stick) scrollDown();
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fitViewport);
+    window.visualViewport.addEventListener("scroll", fitViewport);
+  }
+  window.addEventListener("resize", fitViewport);  // Android resizes the window itself (resizes-content)
+  input.addEventListener("focus", () => setTimeout(fitViewport, 50));
+  input.addEventListener("blur", () => setTimeout(fitViewport, 50));
+  if (touch) {
+    input.setAttribute("enterkeyhint", "enter");
+    // Tapping ➤ would move focus to the button and close the keyboard between messages: keep it on the input.
+    $("#send").addEventListener("pointerdown", (event) => { if (document.activeElement === input) event.preventDefault(); });
+  }
+  fitViewport();
 
   renderChats();
   connect();

@@ -36,7 +36,10 @@ kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 6p
 
 /* Panels: each shown or hidden on its own (body.show-sidebar, body.show-members); widths set by dragging. */
 :root { --sidebar-w: 260px; --members-w: 240px; }
-.app { display: grid; height: 100dvh; grid-template-columns: auto minmax(0, 1fr) auto; }
+/* The visible area, not the screen: app.js sets --app-top/--app-height from the visual viewport, so a phone's
+   keyboard shrinks the app (header and composer stay in view) instead of covering or scrolling it. */
+.app { display: grid; position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-height, 100dvh);
+       grid-template-columns: auto minmax(0, 1fr) auto; }
 .sidebar { grid-column: 1; width: var(--sidebar-w); position: relative; }
 .room { grid-column: 2; }
 .members { grid-column: 3; width: var(--members-w); position: relative; }
@@ -270,7 +273,8 @@ button.member:hover { background: color-mix(in srgb, var(--paper) 75%, transpare
 @keyframes dots { from { background-position: 0 50%; } to { background-position: 9px 50%; } }
 
 /* composer */
-.composer { position: relative; padding: 10px 22px 18px; }
+.composer { position: relative; padding: 10px 22px max(18px, env(safe-area-inset-bottom, 0px)); }
+body.keyboard-open .composer { padding-bottom: 8px; }  /* the keyboard covers the home bar: no gap above it */
 .composer-row { display: flex; align-items: flex-end; gap: 8px; background: var(--paper); border: 1px solid var(--line);
                 border-radius: 22px; padding: 6px 6px 6px 10px; box-shadow: var(--shadow); }
 .composer-row:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
