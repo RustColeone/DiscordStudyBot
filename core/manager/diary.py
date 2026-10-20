@@ -1,8 +1,9 @@
-"""Persona diaries: notes a persona keeps about one person in one conversation.
+"""Persona diaries: notes a persona keeps about one person, filed in the conversation they were written in.
 
 The core owns the rules so every engine keeps diaries the same way: notes are short paraphrases with a
 key, kind and importance; a run can write only a few; they are only about the person who triggered the
-run; and that person can read or delete them with `$memory`.
+run; and that person can read or delete them with `$memory`. A `diary_scope` reads the notes of several
+conversations together; it never moves them.
 """
 
 from __future__ import annotations
@@ -43,10 +44,12 @@ class DiaryHandle:
     """Implements contracts.Diary for one run and one of its personas."""
 
     def __init__(self, manager: "Manager", record: "RunRecord", persona: str, trigger_text: str, subject: str,
-                 scope: str | None = None):
+                 chats: list[str] | None = None):
         self._manager, self._run_id, self.persona = manager, record.id, persona
-        # The notes' scope: the conversation, or a name several conversations share (`diary_scope`).
-        self._address, self._subject = scope or record.address, subject
+        # Where notes are read: this conversation first, then those sharing its `diary_scope`. New ones are
+        # filed in this conversation.
+        self._chats = list(chats or [record.address])
+        self._address, self._subject = self._chats[0], subject
         self._source = normalized(trigger_text)
         self.available = bool(subject) and record.origin != "routine"
 
@@ -56,10 +59,18 @@ class DiaryHandle:
         limit = max(1, min(int(limit), 50))
         tank = self._manager.tank
         terms = search_terms(text)
-        relevant = tank.notes(self.persona, self._address, self._subject, limit, terms=terms) if terms else []
-        seen = {note.id for note in relevant}
-        rest = [note for note in tank.notes(self.persona, self._address, self._subject, limit) if note.id not in seen]
-        return [*relevant, *rest][:limit]
+        relevant = tank.notes(self.persona, self._chats, self._subject, limit * 2, terms=terms) if terms else []
+        rest = tank.notes(self.persona, self._chats, self._subject, limit * 2)
+        # Two chats of a scope may each hold a note of the same key (from before they shared): the newest wins.
+        newest: dict[str, float] = {}
+        for note in [*relevant, *rest]:
+            newest[note.key] = max(newest.get(note.key, 0.0), note.updated_at)
+        chosen, seen = [], set()
+        for note in [*relevant, *rest]:
+            if note.id not in seen and note.key not in {item.key for item in chosen} and note.updated_at == newest[note.key]:
+                seen.add(note.id)
+                chosen.append(note)
+        return chosen[:limit]
 
     def write(self, key: str, kind: str, note: str, importance: int) -> bool:
         if not self.available:
@@ -77,12 +88,12 @@ class DiaryHandle:
             raise ValueError("Diary notes must paraphrase, not copy the message")
         record = self._manager.tank.run(self._run_id)
         if record.usage.get("diary_writes", 0) >= WRITES_PER_RUN:
-            current = self._manager.tank.note(self.persona, self._address, self._subject, key)
+            current = self._manager.tank.note(self.persona, self._chats, self._subject, key)
             if current is not None and (current.kind, current.note, current.importance) == (kind, text, importance):
                 return False
             raise ValueError(f"A run can write at most {WRITES_PER_RUN} diary notes")
         changed = self._manager.tank.save_note(self.persona, self._address, self._subject, key, kind, text,
-                                               importance, NOTES_PER_PERSON)
+                                               importance, NOTES_PER_PERSON, shared=self._chats[1:])
         if changed:
             self._manager._add_usage(self._run_id, diary_writes=1)
             self._manager.audit.record("diary_write", run=self._run_id, persona=self.persona, key=key)

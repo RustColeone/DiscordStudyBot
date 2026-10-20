@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
+import datetime as dt
 import json
+import math
 import time
 
 from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, HistorySummary, ModelError,
@@ -59,14 +61,32 @@ class HistoryHandle:
         return HistorySummary(value["text"], float(value["upto"]), float(value["at"])) if value else None
 
     def summarize(self, text: str, upto: float) -> None:
-        text = str(text or "").strip()
+        if not isinstance(text, str):
+            raise ValueError("A summary is text")
+        text = text.strip()
         if not text or len(text) > SUMMARY_CHARS:
             raise ValueError(f"A summary is 1 to {SUMMARY_CHARS} characters")
+        try:
+            upto = float(upto)
+        except (TypeError, ValueError):
+            raise ValueError("upto is the time of the newest message the summary covers") from None
+        if not math.isfinite(upto):
+            raise ValueError("upto is the time of the newest message the summary covers")
+        # Scrubbing can lengthen it ("[secret NAME]" for a short value): what is stored stays within the limit.
         self._manager.tank.store(SUMMARIES).set(str(self._address), {
-            "text": self._manager.secrets.scrub(text), "upto": float(upto), "at": time.time()})
+            "text": self._manager.secrets.scrub(text)[:SUMMARY_CHARS], "upto": upto, "at": time.time()})
 
 
 SUMMARIES = "core:summaries"  # conversation address → its rolling summary (History.summarize)
+
+
+def local_time(at: float) -> str:
+    """A stored time for people, `YYYY-MM-DD HH:MM` in local time; one an interface recorded wrongly (in
+    milliseconds, say) is shown as unknown instead of failing whatever shows it."""
+    try:
+        return dt.datetime.fromtimestamp(at).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (OverflowError, OSError, ValueError, TypeError):
+        return "unknown time"
 
 
 def module_store(manager: "Manager", module: str, address: Address, sender: Sender, personas: Sequence[str], *,
@@ -117,7 +137,6 @@ class SessionHandle:
         self.tools = ToolsHandle(manager, record.id)
         self.history = HistoryHandle(manager, self.address)
         self._module = manager.origin_of("engine:" + record.engine)
-        self._diary_scope = manager.diary_scope(record.address, self.options)
 
     def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False):
         return module_store(self._manager, self._module, self.address, self.trigger.sender,
@@ -133,9 +152,9 @@ class SessionHandle:
         if persona not in {item.name for item in self.personas}:
             raise ValueError("A session can only open the diary of its own personas")
         record = self._manager.tank.run(self.run_id)
-        return DiaryHandle(self._manager, record, persona, self.trigger.text,
-                           self._manager.diary_subject(record.address, self._diary_scope, self.trigger.sender.id),
-                           scope=self._diary_scope)
+        subject = self.trigger.sender.id
+        return DiaryHandle(self._manager, record, persona, self.trigger.text, subject,
+                           chats=self._manager.diary_chats(record.address, self.options, subject))
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)

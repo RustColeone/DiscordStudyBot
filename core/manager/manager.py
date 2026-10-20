@@ -24,7 +24,7 @@ from contracts import (Action, Address, Capability, Command, Delivery, Display, 
                        ModelRequest, ModelResult, Operation, Option, Persona, Reply, Request, Risk, RunYield, Sender,
                        ToolResult)
 from core.audit import Audit
-from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle
+from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, local_time
 from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
@@ -34,7 +34,6 @@ from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
 
 COMMAND_ENGINE = "$command"
-SHARED_DIARY = ":scope:"  # the key prefix of diaries several conversations share (diary_scope)
 BUILTIN_COMMANDS = (
     Command("help", "List commands, or explain one", (Option("command", "A command name"),),
             examples=("", "remind")),
@@ -258,21 +257,34 @@ class Manager:
         return self._origin.get(key, "core")
 
     @staticmethod
-    def diary_scope(address: str, options: Mapping[str, Any]) -> str:
-        """Where diary notes live: the conversation, or `:scope:<name>` shared by every conversation whose
-        assignment sets `diary_scope: <name>` (the same character remembering a person across them). A shared
-        key starts with `:`, which no address can (an interface name is never empty), so no conversation's
-        own notes can mix with a scope's."""
-        name = str(options.get("diary_scope") or "").strip()
-        return SHARED_DIARY + name if name else address
+    def diary_scope(options: Mapping[str, Any]) -> str:
+        """The assignment's `diary_scope` name, or "" (each conversation keeps its own notes). A name is text
+        (a number is taken as its digits); anything else, `false` included, means no scope."""
+        value = options.get("diary_scope")
+        if isinstance(value, int) and not isinstance(value, bool):
+            value = str(value)
+        return value.strip()[:80] if isinstance(value, str) else ""
 
-    @staticmethod
-    def diary_subject(address: str, scope: str, sender_id: str) -> str:
-        """Who a diary note is about. In its own conversation a sender ID is enough; a scope shared across
-        conversations may span interfaces, where sender IDs collide, so there it is `<interface>:<sender>`."""
-        if not sender_id or not scope.startswith(SHARED_DIARY):
-            return sender_id
-        return f"{Address.parse(address).interface}:{sender_id}"
+    def diary_chats(self, address: str, options: Mapping[str, Any], subject: str) -> list[str]:
+        """The conversations whose notes about this person are read together here: this one first, then, when
+        its assignment sets a `diary_scope`, every other conversation of the same interface whose assignment
+        sets the same name and that holds notes about the person. A note is always filed in the conversation
+        it was written in; the scope only decides what is read together, so changing it moves nothing. The
+        same interface only: a sender ID names a person on one platform, and another may reuse it."""
+        name = self.diary_scope(options)
+        if not name or not subject:
+            return [address]
+        chats = [address]
+        for other in self.tank.note_addresses(subject, Address.parse(address).interface):
+            if other == address:
+                continue
+            try:
+                assignment = self.assignment_for(Address.parse(other))
+            except ValueError:
+                continue
+            if assignment is not None and self.diary_scope(assignment.options) == name:
+                chats.append(other)
+        return chats
 
     def register_capability(self, capability: Capability, extension: str) -> None:
         if capability.name in self.capabilities:
@@ -1279,8 +1291,11 @@ class Manager:
         # A routine a model set up acts as its creator but cannot speak for them: its $commands are not
         # their approval, and the creator-only built-ins are closed to it.
         vouched = self.vouched(request)
-        if not vouched and name in ("approve", "deny", "admin", "call", "setup", "permissions"):
-            await say(f"A routine set up through a tool cannot use ${name}; type `$routine` yourself for that.")
+        # Forgetting is the person's own decision too: a routine a model set up may read $memory, never clear it.
+        erases = name == "memory" and rest.split()[:1] and rest.split()[0].lower() in ("clear", "forget")
+        if not vouched and (name in ("approve", "deny", "admin", "call", "setup", "permissions") or erases):
+            shown = f"$memory {rest.split()[0].lower()}" if erases else f"${name}"
+            await say(f"A routine set up through a tool cannot use {shown}; type `$routine` yourself for that.")
             return
         if name in ("approve", "deny"):
             parts = rest.split()
@@ -1534,9 +1549,10 @@ class Manager:
         its `diary_scope`); only theirs. Also this chat's rolling summary (`summary`, `clear summary`)."""
         conversation = str(request.address)
         assignment = self.assignment_for(request.address)
-        address = self.diary_scope(conversation, assignment.options if assignment else {})
-        subject = self.diary_subject(conversation, address, request.sender.id)
-        here = "here" if address == conversation else "in the chats that share this memory"
+        options = assignment.options if assignment else {}
+        subject = request.sender.id
+        address = self.diary_chats(conversation, options, subject)  # this chat, and those sharing its memory
+        here = "in the chats that share this memory" if self.diary_scope(options) else "here"
         code = (lambda value: f"`{value}`") if request.display.markdown else str
         usage = (f"Personas keep short notes about you {here}.\n"
                  f"{code('$memory [persona] [page]')} read them\n"
@@ -1560,7 +1576,7 @@ class Manager:
             summary = summaries.get(conversation)
             if not summary:
                 return "No summary of this chat yet (it is written once the chat is long enough)."
-            day = dt.datetime.fromtimestamp(summary["upto"]).astimezone().strftime("%Y-%m-%d %H:%M")
+            day = local_time(summary["upto"])
             return f"This chat's summary (up to {day}):\n{summary['text']}"
         if action == "clear" and parts[1:] == ["summary"]:
             # The summary is the whole chat's: an admin's to clear, or yours in a direct chat.

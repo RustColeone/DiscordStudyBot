@@ -6,10 +6,10 @@ import dataclasses
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from contracts import DiaryNote, Event, FileRef, HistoryItem
-from core.storage.sqlite import Database, ScopedStore, dumps, loads
+from core.storage.sqlite import Database, ScopedStore, dumps, fold, loads
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages (
@@ -98,10 +98,18 @@ class Tank:
                              (address, max(1, min(int(limit), 200))))
         return [self._history_item(row) for row in reversed(rows)]
 
-    def search_messages(self, address: str, text: str, limit: int = 20) -> list[HistoryItem]:
-        """Messages of one conversation containing `text` in any case (Unicode case folding), newest first."""
+    def search_messages(self, address: str, text: str, limit: int = 20, before: str | None = None) -> list[HistoryItem]:
+        """Messages of one conversation containing `text` in any case (Unicode case folding), newest first.
+        `before`: an incoming message's ID; only messages recorded ahead of it (so not the question itself)."""
+        bound = ("AND seq < COALESCE((SELECT MAX(seq) FROM messages WHERE address=? AND direction='in' "
+                 "AND message_id=?), 9223372036854775807) ") if before else ""
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError, OverflowError):
+            limit = 20
+        parameters = (address, fold(text), *((address, before) if before else ()), limit)
         rows = self.db.query("SELECT * FROM messages WHERE address=? AND instr(casefold(text), ?) > 0 "
-                             "ORDER BY seq DESC LIMIT ?", (address, text.casefold(), max(1, min(int(limit), 100))))
+                             f"{bound}ORDER BY seq DESC LIMIT ?", parameters)
         return [self._history_item(row) for row in rows]
 
     @staticmethod
@@ -118,13 +126,22 @@ class Tank:
         return DiaryNote(row["id"], row["key"], row["kind"], row["note"], row["importance"], row["created_at"],
                          row["updated_at"])
 
+    @staticmethod
+    def _chats(address: str | Sequence[str]) -> tuple[str, list[str]]:
+        """A diary query's chats: one address or several (a diary scope), as SQL and parameters."""
+        chats = [address] if isinstance(address, str) else list(address)
+        return f"address IN ({','.join('?' * len(chats))})", chats
+
     def save_note(self, persona: str, address: str, subject: str, key: str, kind: str, note: str,
-                  importance: int, keep: int) -> bool:
-        """Upsert one note; beyond `keep` notes for this person, the least important oldest ones go."""
+                  importance: int, keep: int, shared: Sequence[str] = ()) -> bool:
+        """Upsert one note in `address`; beyond `keep` notes for this person there, the least important oldest
+        ones go. With `shared` (the other chats of a diary scope), a note of the same key in any of them is
+        updated where it is (the newest, if several), so a correction never leaves an older copy in view."""
         now = time.time()
+        where, chats = self._chats([address, *shared])
         with self.db.transaction() as db:
-            row = db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
-                         (persona, address, subject, key))
+            row = db.one(f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=? AND key=? "
+                         "ORDER BY updated_at DESC, id DESC LIMIT 1", (persona, *chats, subject, key))
             if row is not None:
                 if (row["kind"], row["note"], row["importance"]) == (kind, note, importance):
                     return False
@@ -138,15 +155,17 @@ class Tank:
                        (persona, address, subject, keep))
             return True
 
-    def note(self, persona: str, address: str, subject: str, key: str) -> DiaryNote | None:
-        row = self.db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
-                          (persona, address, subject, key))
+    def note(self, persona: str, address: str | Sequence[str], subject: str, key: str) -> DiaryNote | None:
+        where, chats = self._chats(address)
+        row = self.db.one(f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=? AND key=? "
+                          "ORDER BY updated_at DESC, id DESC LIMIT 1", (persona, *chats, subject, key))
         return self._note(row) if row is not None else None
 
-    def notes(self, persona: str, address: str, subject: str, limit: int = 20, offset: int = 0,
+    def notes(self, persona: str, address: str | Sequence[str], subject: str, limit: int = 20, offset: int = 0,
               terms: list[str] | None = None) -> list[DiaryNote]:
-        sql = "SELECT * FROM diary WHERE persona=? AND address=? AND subject=?"
-        parameters: list[Any] = [persona, address, subject]
+        where, chats = self._chats(address)
+        sql = f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=?"
+        parameters: list[Any] = [persona, *chats, subject]
         if terms:
             sql += " AND (" + " OR ".join("LOWER(note || ' ' || key) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
             parameters += ["%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
@@ -154,13 +173,23 @@ class Tank:
         sql += " ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?"
         return [self._note(row) for row in self.db.query(sql, [*parameters, limit, offset])]
 
-    def note_counts(self, address: str, subject: str) -> dict[str, int]:
+    def note_counts(self, address: str | Sequence[str], subject: str) -> dict[str, int]:
+        where, chats = self._chats(address)
         return {row["persona"]: row["n"] for row in self.db.query(
-            "SELECT persona, COUNT(*) AS n FROM diary WHERE address=? AND subject=? GROUP BY persona ORDER BY persona",
-            (address, subject))}
+            f"SELECT persona, COUNT(*) AS n FROM diary WHERE {where} AND subject=? GROUP BY persona ORDER BY persona",
+            (*chats, subject))}
 
-    def delete_notes(self, address: str, subject: str, persona: str | None = None, note_id: int | None = None) -> int:
-        sql, parameters = "DELETE FROM diary WHERE address=? AND subject=?", [address, subject]
+    def note_addresses(self, subject: str, interface: str) -> list[str]:
+        """The chats of one interface holding notes about this sender (a diary scope's candidates)."""
+        prefix = interface + ":"
+        return [row["address"] for row in self.db.query(
+            "SELECT DISTINCT address FROM diary WHERE subject=? AND substr(address, 1, ?)=? ORDER BY address",
+            (subject, len(prefix), prefix))]
+
+    def delete_notes(self, address: str | Sequence[str], subject: str, persona: str | None = None,
+                     note_id: int | None = None) -> int:
+        where, chats = self._chats(address)
+        sql, parameters = f"DELETE FROM diary WHERE {where} AND subject=?", [*chats, subject]
         if persona is not None:
             sql, parameters = sql + " AND persona=?", [*parameters, persona]
         if note_id is not None:

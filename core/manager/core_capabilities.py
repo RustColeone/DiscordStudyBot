@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from contracts import Address, Capability, Command, Option, Reply, Risk, ToolResult
 from core.gateway.routines import describe
+from core.serialize import request_from_dict
+from core.manager.handles import local_time as when
 from core.manager.model_choice import model_arguments_tier
 from core.manager.routines import Caller
 
@@ -118,12 +120,15 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
         query = str(arguments["query"]).strip()
         if not query:
             return ToolResult.fail("What should I look for?", "invalid_arguments")
-        found = manager.tank.search_messages(str(context.address), query, int(arguments.get("limit") or 10))
+        record = manager.tank.run(context.run_id)
+        trigger = request_from_dict(record.trigger).id if record is not None and record.trigger else None
+        # Earlier than the request that asked: not the question itself, nor what came after it.
+        found = manager.tank.search_messages(str(context.address), query, int(arguments.get("limit") or 10),
+                                             before=trigger)
         if not found:
             return ToolResult.ok(f"Nothing earlier in this conversation mentions {query!r}.", data={"matches": 0})
         speaker = (lambda item: item.sender_name or ("assistant" if item.direction == "out" else item.sender_id))
-        lines = [f"[{dt.datetime.fromtimestamp(item.at).astimezone():%Y-%m-%d %H:%M}] {speaker(item)}: "
-                 f"{item.text[:400]}" for item in found]
+        lines = [f"[{when(item.at)}] {speaker(item)}: {item.text[:400]}" for item in found]
         return ToolResult.ok("\n".join(lines), data={"matches": len(found)})
 
     async def model(arguments, context) -> ToolResult:

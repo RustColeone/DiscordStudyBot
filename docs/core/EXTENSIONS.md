@@ -546,7 +546,7 @@ class MyEngine(Engine):
 | `diary(name)` | That persona's notes about the trigger's sender, in this conversation or across those sharing its `diary_scope` (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
 | `history.search(text, limit)` | This conversation's messages containing `text` (any case), newest first, at most 100: further back than `recent` reaches (200). |
-| `history.summary()`, `history.summarize(text, upto)` | The conversation's rolling summary (`HistorySummary`: `text`, `upto`, `updated_at`), shared by every engine and persona in it. An engine compacting older history writes it (at most 8000 characters, scrubbed of secrets) covering messages up to `upto`; people read and clear it with `$memory`. |
+| `history.summary()`, `history.summarize(text, upto)` | The conversation's rolling summary (`HistorySummary`: `text`, `upto`, `updated_at`), shared by every engine and persona in it. An engine compacting older history writes it (1 to 8000 characters; secrets are scrubbed and what is stored is kept within 8000) covering messages up to `upto`, a finite time (otherwise `ValueError`); people read and clear it with `$memory`. |
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
 | `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). |
@@ -614,15 +614,20 @@ to any conversation:
 ### Diaries
 
 `session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
-only by default; a DM disclosure never shows up in a server. An assignment's `diary_scope: <name>` option
-makes every conversation with that scope share them instead: the same character remembering the same person
-across them (the web UI's chats, which only their owner reads). In a shared scope a person is their interface
-and sender ID together, since sender IDs are only unique within one interface. `$memory` follows the scope. `recall(text, limit)` returns `DiaryNote`s, those
+only by default; a DM disclosure never shows up in a server. A note is always filed in the conversation it
+was written in. An assignment's `diary_scope: <name>` option makes a conversation also read the notes of every
+other conversation whose assignment sets the same name (the same character remembering the same person
+across them, like the web UI's chats, which only their owner reads). The scope is only a filter: turning
+it on, off or to another name moves nothing, so notes are never stranded. It spans one interface, since a
+sender ID names a person only there. A note written under a key that another conversation of the scope
+already holds updates that note where it is; if two hold the same key (from before they shared),
+`recall` gives the newest. `$memory`, `forget` and `clear` cover the whole scope. A scope name is text (a
+number counts as its digits); anything else, `false` included, means none. `recall(text, limit)` returns `DiaryNote`s, those
 matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
 under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses
 (`ValueError`) invalid keys or values, notes over 400 characters, notes that copy the message instead
 of paraphrasing it, and more than 4 changed notes per run; it keeps at most 200 notes per persona and
-person, dropping the least important oldest. Routine runs have no person: `available` is false,
+person in each conversation, dropping the least important oldest. Routine runs have no person: `available` is false,
 `recall` is empty and `write` raises. People manage their notes with `$memory`, so engines need no
 commands of their own for this.
 
@@ -794,7 +799,7 @@ counts as approval.
 | `core.list_routes` / `core.set_route` | `pattern`, `route` (`{target, kinds}` or null) |
 | `core.add_routine` (write, anyone) | `schedule` (`every 1h`, `daily 08:00`, `weekdays 09:00`, `mon,wed 18:30`, `at 18:30`, `at 2026-10-17 08:00`), `text` (a message or a `$command`), `chat` (admins: another conversation) |
 | `core.list_routines` (anyone) | none: this conversation's routines; every conversation's for admins |
-| `core.search_history` (read, anyone) | `query`, `limit` (1–50): this conversation's earlier messages containing it, with time and speaker |
+| `core.search_history` (read, anyone) | `query`, `limit` (1–50): this conversation's messages from before the request that called it, containing it, with time and speaker. Matching ignores case and how a letter is written (é as one character or two, full-width letters, İ and i). |
 | `core.pause_routine` / `core.resume_routine` / `core.delete_routine` (write, anyone) | `id`: the caller's own routine here; admins: any |
 | `core.set_routine` (owner) | a configured routine in `routine:<name>`: `name`, `text`, `every_minutes` or `daily_at`, `enabled` |
 | `core.list_assignments` / `core.set_assignment` / `core.delete_assignment` | `pattern`, `assignment` |
@@ -815,7 +820,8 @@ In any conversation, `$routine every 1h $status` posts `$status` there every hou
 morning. People can also just ask the bot ("check the server every hour"), which calls
 `core.add_routine`; those run the same way, as the person who asked, with one difference: a routine a
 model set up does not speak for its creator. Its `$commands` are not the creator's approval (writes
-wait for approval), it cannot use `$approve`, `$deny`, `$admin` or `$call`, and routines it adds are
+wait for approval), it cannot use `$approve`, `$deny`, `$admin`, `$call`, `$setup`, `$permissions`,
+`$memory clear` or `$memory forget` (forgetting is the person's own decision), and routines it adds are
 marked the same way. `$routine` lists them,
 `$routine pause|resume|delete <id>` manages them.
 

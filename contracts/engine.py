@@ -120,14 +120,15 @@ class History(Protocol):
     def recent(self, limit: int = 30) -> Sequence[HistoryItem]: ...
 
     def search(self, text: str, limit: int = 20) -> Sequence[HistoryItem]:
-        """Messages of this conversation containing `text` (any case), newest first, beyond `recent`'s reach."""
+        """Messages of this conversation containing `text` (any case, however a letter is written), newest first,
+        beyond `recent`'s reach."""
 
     def summary(self) -> HistorySummary | None:
         """The conversation's rolling summary, if an engine wrote one."""
 
     def summarize(self, text: str, upto: float) -> None:
-        """Replace the rolling summary: `text` (at most 8000 characters) covers messages up to `upto`.
-        Engines compact older history this way; the summary is shared by every engine and persona in the
+        """Replace the rolling summary: `text` (1 to 8000 characters) covers messages up to `upto`, a finite time;
+        anything else raises ValueError. Engines compact older history this way; the summary is shared by every engine and persona in the
         conversation, and people can read and clear it with `$memory`."""
 
 
@@ -195,8 +196,9 @@ class Session(Protocol):
         `store(persona=...)`, which is the module's own)."""
 
     def diary(self, persona: str) -> Diary:
-        """The persona's notes about the trigger's sender: in this conversation, or in every conversation
-        sharing the assignment's `diary_scope` option."""
+        """The persona's notes about the trigger's sender. Notes are filed in the conversation they were written
+        in; with the assignment's `diary_scope` option, those of every conversation (same interface) sharing
+        that name are read and corrected together."""
 
     def inbox(self) -> list[Request]:
         """Requests for this run's lane that arrived while this run was thinking. Each is returned once.
