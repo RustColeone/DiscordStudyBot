@@ -71,7 +71,7 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `max_steps` | 24 | Model turns the whole room may take per run, across all characters. Clamped to 4..50. It also caps the number of jobs on the board. |
+| `max_steps` | 24 | Model turns the whole room may take per run, across all characters. Clamped to 4..50, and never below the number of characters (so "everyone" lets each answer once). It also caps the jobs a character may add to the board. |
 | `history_limit` | 30 | Earlier conversation messages each character reads word for word (at most 150). Older ones are in the rolling summary, and `core.search_history` finds their exact words. |
 | `chime_in` | false | A message naming no one goes to whoever's turn it is, and the other characters may each add something or pass. Off: only the one in turn answers. |
 | `compact` | true | Keep the conversation's rolling summary of the messages older than `history_limit`. |
@@ -79,6 +79,10 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 | `compact_profile` | `default` | The model profile that writes the summary. |
 | `max_tokens` | 1500 | `max_tokens` of each model turn. |
 | `aliases` | `{claude: [Haiku]}` | Extra names per persona that count as addressing her. |
+
+On/off settings accept `true`/`false`, `yes`/`no`, `on`/`off` and `1`/`0`, so `chime_in: "false"` is off. A
+number that is not a number (`history_limit: abc`) falls back to its default instead of failing the run; the
+same goes for these keys in an assignment's `options`.
 | `providers` | none | Merged key by key over the module's `grok` provider (or adds a new one). |
 | `profiles` | none | Replaces whole profiles by name (`luna`, `grok`, ...). |
 
@@ -107,9 +111,9 @@ assignments:
 Assignment `options` the room reads: `instructions` (added to every character's system prompt),
 `owner_instructions` (added only when an owner sent the request), `max_steps`, `history_limit`,
 `chime_in`, `compact`, `compact_every`, `compact_profile`, `history_image_minutes` (default 30) and
-`diary: false`. The core reads `diary_scope` (a name: the characters' notes about a person are shared by
-every conversation whose assignment uses the same name; see
-[Diaries](../../docs/core/EXTENSIONS.md#diaries)). The room does not read the assistant's `history_scope`
+`diary: false`. The core reads `diary_scope` (a name: each character also reads her notes about a person
+from every conversation whose assignment uses the same name; notes stay filed where they were written, so
+the setting can change freely; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). The room does not read the assistant's `history_scope`
 or `quote`.
 
 Discord channels and the web UI use this same engine; only these options differ. For example, a quiet
@@ -134,7 +138,9 @@ naming them.
   "everyone", "everybody", "you all", "you guys", "all of you" and "the team" address everybody, unless
   a Chinese phrase says they need not ("你们不用...", "不用...大家"). An unaddressed message goes to one
   character in rotation per conversation. With `chime_in` on, the others may also add something short or
-  stay silent (`pass`); the one in turn always answers, so nobody is left without a reply.
+  stay silent (`pass`); the one in turn always answers, so nobody is left without a reply. A chime-in is
+  one short remark: no tools, questions or hand-offs, and if it fails (or the run's steps are used up) she
+  just stays silent.
 * **Long conversations.** Each character reads the last `history_limit` messages word for word. Older
   ones are folded into the conversation's rolling summary, which every character reads, and she can
   look up their exact words with `core.search_history`. `$memory summary` shows the summary.
@@ -221,21 +227,27 @@ and whose model to name on the reply. The schema (`turn_schema`) is strict JSON:
 
 `status`, `message`, `actions` and `jobs` are required; `character` is an enum of the session's
 personas. `pass` (stay silent) is accepted only on an optional job, with no actions or jobs; it
-completes the job without a reply. `_check` then rejects a turn with an empty message, a `work_note` over 480 characters,
+completes the job without a reply. An optional job may otherwise only `complete`. `_check` then rejects a turn with an empty message, a `work_note` over 480 characters,
 `continue` without actions or jobs, actions or jobs with any other status, unknown tools, `complete`
-right after her own failed action, a board that would exceed `max_steps` jobs, duplicate or overlong job
+right after her own failed action, new jobs that would take the board past `max_steps` jobs (a turn adding
+none is never refused for a full board), duplicate or overlong job
 IDs, unknown characters, empty or overlong (over 2000 characters) instructions, and missing or cyclic
 `after` dependencies. A rejected or unparsable turn gets one correction; a second failure blocks the job
 with the `invalid_turn` sentence. Any other error in her turn (for example no model available) blocks
-only her job (`request_failed`); the run goes on.
+only her job (`request_failed`); the run goes on. An optional (chime-in) job that fails or meets the step
+limit ends without a word.
 
 The messages for a turn (`_messages`):
 
 * **System**: the persona prompt, her display name and the current time, `options.instructions`,
   `owner_instructions` when an owner is speaking, the room rules (`INSTRUCTION`, with the roster and the
-  tool catalog: name, description, parameters, risk), her diary, and the conversation's rolling summary
-  if there is one.
-* **History** (`_history`): the last `history_limit` messages from before the request. Her own earlier
+  tool catalog: name, description, parameters, risk) and her diary.
+* **Summary**: the conversation's rolling summary, if there is one, as a `user` message labelled untrusted
+  data (a model wrote it from what people said, so it is never part of the system prompt).
+* **History** (`_history`): the last `history_limit` messages from before the request, "before" meaning
+  recorded ahead of the trigger (found by its message ID), so a picture sent in the same second as the
+  question is still seen. If the window would start in the middle of a second, it takes that whole second.
+  Her own earlier
   replies are `assistant` messages; everyone else's (people and other characters) are `user` lines with
   time, speaker, the quoted text and attachments. `$commands` and the replies that answered them are
   left out: `$model` lists and `$help` text are for the person who typed them, not the room's topic.
@@ -249,13 +261,15 @@ character on every turn.
 
 ### The rolling summary
 
-`_compact` runs once per run, before the first turn. It takes the conversation from before the request
-(the last 200 messages, `$commands` and their answers left out), keeps the ones older than the window,
-and counts those newer than the summary's `upto`. When there are at least `compact_every`, one call to
+`_compact` runs once per run, before the first turn. It splits the same list the characters read (the
+last 200 messages before the request, `$commands` and their answers left out) into the window and the
+older ones (`_split`), so every message is in one or the other, and counts the older ones newer than the
+summary's `upto`. When there are at least `compact_every`, one call to
 `compact_profile` (`COMPACT` prompt, `effort="low"`, 900 tokens) rewrites the summary to include them, and
 `session.history.summarize(text, upto=<the newest one's time>)` stores it (the core keeps one per
-conversation, at most 8000 characters, secrets scrubbed). A model failure keeps the old summary; the run
-goes on either way. Messages that scroll out more than 200 behind at once are not summarized, but
+conversation, at most 8000 characters, secrets scrubbed). A model failure keeps the old summary, and
+the next try waits 15 minutes (`compact_retry_at` in the conversation store), since each try costs a model
+call; the run goes on either way. The call counts against the run's `budget` like any model call. Messages that scroll out more than 200 behind at once are not summarized, but
 `core.search_history` still finds them.
 
 ### Speaking and acting
@@ -301,12 +315,12 @@ are shown only when an owner sent the request. Diary notes are private to each c
   `observations`, `steps`, `call_seq`, `job_seq`, `event_cursor`, `opened`, `images` (up to 6 file
   references) and, briefly, `deliver`. Runs are kept indefinitely; the run's workspace files are deleted
   7 days after it ends ([Retention](../../docs/core/EXTENSIONS.md#retention)).
-* **Conversation store**: the rotation counter, `rotation`, in `session.store(conversation=True)` (the
-  module's store for this conversation).
+* **Conversation store**: the rotation counter, `rotation`, and after a failed summary `compact_retry_at`,
+  in `session.store(conversation=True)` (the module's store for this conversation).
 * **Rolling summary**: the core's per-conversation summary (`session.history.summarize`); an admin can
   remove it with `$memory clear summary`.
-* **Diaries**: each character's notes about the person who sent the request, in that conversation only,
-  or in every conversation of the same `diary_scope`.
+* **Diaries**: each character's notes about the person who sent the request, filed in that conversation
+  and read there, or also in every conversation of the same `diary_scope`.
   Only notes of importance 3 or more are written; the core enforces the rest (at most 200 notes per
   persona and person; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). Turn off with
   `diary: false`.
@@ -320,8 +334,10 @@ starts one job per character in parallel and each reply names its own model; too
 approvals resuming the run only when both are done; `$commands` and their answers left out of history;
 chime-in (the one in turn answers, the others may pass, and a `pass` from the one in turn is
 corrected); the rotation kept per conversation across restarts; old messages folded into the summary
-every character reads, only once `compact_every` have scrolled out; a question answered by the next
-message; one correction for invalid turns; a retryable failure retried
+every character reads, only once `compact_every` have scrolled out; chime-ins limited to one quiet remark;
+a full board still taking plain replies; settings written as strings; messages of the same second kept in
+view; `$commands` never hiding older messages; a failed summary not retried on every message; a question
+answered by the next message; one correction for invalid turns; a retryable failure retried
 once only and unknown characters refused; images shown to every character; separate diaries; and the
 profile precedence (code, then `config.yml`, then `core.yml`).
 

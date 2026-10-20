@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contracts import Contributions, Extension, Setting
 
-from .engine import RoomEngine
+from .engine import RoomEngine, flag, number
 from .personas import PERSONAS
 
 # What the room owns: each character's model profile, and Grok's provider (xAI, an OpenAI-compatible API; the
@@ -29,12 +29,12 @@ PROFILES["grok"] = [{"provider": "grok", "model": "grok-4-fast"}, *PROFILES["lun
 
 def setup(context) -> Contributions:
     config = context.config
-    engine = RoomEngine(max_steps=max(4, min(int(config.get("max_steps", 24)), 50)),
-                        history_limit=int(config.get("history_limit", 30)),
-                        max_tokens=int(config.get("max_tokens", 1500)),
+    engine = RoomEngine(max_steps=number(config.get("max_steps"), 24, 4, 50),
+                        history_limit=number(config.get("history_limit"), 30, 1, 150),
+                        max_tokens=number(config.get("max_tokens"), 1500, 100, 32000),
                         aliases=config.get("aliases") or {"claude": ["Haiku"]},
-                        chime_in=bool(config.get("chime_in", False)), compact=bool(config.get("compact", True)),
-                        compact_every=max(1, int(config.get("compact_every", 20))),
+                        chime_in=flag(config.get("chime_in"), False), compact=flag(config.get("compact"), True),
+                        compact_every=number(config.get("compact_every"), 20, 1, 1000),
                         compact_profile=str(config.get("compact_profile") or "default"))
     providers = {name: dict(settings) for name, settings in PROVIDERS.items()}
     for name, settings in (config.get("providers") or {}).items():
