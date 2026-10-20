@@ -15,6 +15,24 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "core_fixtures"
 
 
+def _isolate_local_configs() -> None:
+    """Tests never read a repository module's own `config.yml`: it is the owner's local, git-ignored settings
+    (a web UI passphrase, a room's profiles), and tests must not depend on them. Tests of that file use
+    module folders of their own, which are still read."""
+    import core.loader
+    import core.setup
+    real = core.loader.local_config
+    shared = (ROOT / "extensions", ROOT / "plugins")
+
+    def local_config(path):
+        folder = Path(path).resolve()
+        return {} if any(folder.is_relative_to(root) for root in shared) else real(path)
+    core.loader.local_config = core.setup.local_config = local_config
+
+
+_isolate_local_configs()
+
+
 class FakeAdapter:
     """A provider adapter returning scripted outputs (dicts become JSON text)."""
 
