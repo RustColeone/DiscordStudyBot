@@ -131,6 +131,7 @@ class WebUI(Interface):
         self._sockets: set[web.WebSocketResponse] = set()
         self._progress: dict[str, dict] = {}  # run (or conversation) → the latest progress event
         self._failures: dict[str, deque] = {}
+        self._refusals: deque = deque()  # when the guard last logged a refusal (rate limit)
         self._quiet: dict[str, dict] = {}  # request ID → {conversation, purpose, future}: the page's own commands
         self._setups: dict[str, asyncio.Future] = {}  # a new chat whose classmates are being set up
         self._background: set[asyncio.Task] = set()
@@ -199,13 +200,13 @@ class WebUI(Interface):
     @web.middleware
     async def _guard(self, request: web.Request, handler):
         if not local_remote(request.remote, self.networks):
-            return self._secured(web.Response(status=403, text="Only the local network may use this page."))
+            return self._refuse(request, "network", "Only the local network may use this page.")
         if not local_host(request.headers.get("Host"), self.hostnames):
-            return self._secured(web.Response(status=403, text="Open this page by the computer's address."))
+            return self._refuse(request, "host", "Open this page by the computer's address.")
         origin = request.headers.get("Origin")
         if origin is not None and origin != f"{request.scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
-            return self._secured(web.Response(status=403, text="Cross-site requests are refused."))
+            return self._refuse(request, "origin", "Cross-site requests are refused.")
         public = request.path in ("/login", "/static/style.css", "/favicon.ico")
         if self.passphrase and not public and not self._signed_in(request):
             if request.method == "GET" and request.path == "/":
@@ -213,13 +214,28 @@ class WebUI(Interface):
             return self._secured(web.Response(status=401, text="Sign in first."))
         return self._secured(await handler(request))
 
+    def _refuse(self, request: web.Request, check: str, text: str) -> web.Response:
+        """A 403 from the guard, logged (at most 20 a minute, so a hostile page cannot flood the log) with what
+        the request showed, so a refusal can be told from a real attack afterwards."""
+        now = time.monotonic()
+        while self._refusals and now - self._refusals[0] > 60:
+            self._refusals.popleft()
+        if len(self._refusals) < 20:
+            self._refusals.append(now)
+            self.port.log("refused", check=check, method=request.method, path=request.path[:100],
+                          remote=request.remote or "", host=str(request.headers.get("Host") or "")[:100],
+                          origin=str(request.headers.get("Origin") or "")[:100])
+        return self._secured(web.Response(status=403, text=text))
+
     @staticmethod
     def _secured(response):
         if isinstance(response, web.WebSocketResponse):
             return response
         response.headers.setdefault("Content-Security-Policy", CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # same-origin, not no-referrer: under no-referrer a browser sends `Origin: null` with a form POST (the
+        # sign-in form), which the guard above would refuse. Other sites still get no referrer from the page.
+        response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("X-Frame-Options", "DENY")
         return response
 

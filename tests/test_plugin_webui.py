@@ -295,9 +295,17 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         async with self.http.post(f"{self.base}/login", data={"passphrase": "wrong"}) as response:
             self.assertEqual(response.status, 401)
             self.assertIn("not right", await response.text())
+        async with self.http.get(f"{self.base}/login") as response:
+            # Not no-referrer: under it a browser sends `Origin: null` with the form below, which is refused.
+            self.assertEqual(response.headers["Referrer-Policy"], "same-origin")
         async with self.http.post(f"{self.base}/login", data={"passphrase": "open sesame"},
-                                  allow_redirects=False) as response:
-            self.assertEqual(response.status, 303)
+                                  headers={"Origin": "null"}, allow_redirects=False) as response:
+            self.assertEqual(response.status, 403)  # what no-referrer made browsers send
+        refused = [event for event in self.core.audit.events if event.get("detail") == "refused"]
+        self.assertEqual((refused[-1]["check"], refused[-1]["path"], refused[-1]["origin"]), ("origin", "/login", "null"))
+        async with self.http.post(f"{self.base}/login", data={"passphrase": "open sesame"},
+                                  headers={"Origin": self.base}, allow_redirects=False) as response:
+            self.assertEqual(response.status, 303)  # what a browser sends under same-origin
             cookie = response.cookies["webui_session"]
             self.assertTrue(cookie["httponly"])
             self.assertEqual(cookie["samesite"], "Strict")

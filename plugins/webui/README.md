@@ -273,7 +273,7 @@ local. The `_guard` middleware (interface.py:194) runs on every route, the webso
    Wrong tries wait one second, and five within five minutes from one address lock it out for a while.
 5. **Headers** on every HTTP response: a Content-Security-Policy (`default-src 'self'`, scripts only
    from the page and the pinned KaTeX file, `connect-src 'self'`, `frame-ancestors 'none'`,
-   `object-src 'none'`, ...), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+   `object-src 'none'`, ...), `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` (not `no-referrer`, under which browsers send `Origin: null` with the sign-in form),
    `X-Frame-Options: DENY`.
 
 Content safety: files are served inline only for pictures, audio, video and PDF; anything else (an
