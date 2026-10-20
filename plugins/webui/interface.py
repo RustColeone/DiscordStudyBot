@@ -595,6 +595,9 @@ class WebUI(Interface):
         self._setups[conversation] = setup
         try:
             problem = await self._assign(conversation, personas)
+            if self.store.conversation(conversation) is None:  # deleted (on any page) while it was repaired
+                await self._unassign(conversation)
+                problem = "deleted"
         finally:
             self._setups.pop(conversation, None)
             setup.set_result(True)
@@ -641,9 +644,14 @@ class WebUI(Interface):
             return
         if record["personas"] and await self._repair(conversation, record["personas"]):
             # Its own assignment is missing (a crash cut its setup off) and could not be set again: the message
-            # would reach the whole class instead.
-            await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "chat_not_ready"})
+            # would reach the whole class instead. Or the chat was deleted meanwhile (checked below).
+            gone = self.store.conversation(conversation) is None
+            await ws.send_json({"type": "ack", "id": request_id, "ok": False,
+                                "reason": "unknown_chat" if gone else "chat_not_ready"})
             return
+        if self.store.conversation(conversation) is None:  # deleted while this message waited (for a repair
+            await ws.send_json({"type": "ack", "id": request_id, "ok": False, "reason": "unknown_chat"})
+            return  # another page ran): sending now would bring it back
         if record["title"] == "New chat" and text.strip() and not text.startswith("$"):
             self.store.rename(conversation, text.strip().splitlines()[0][:48])
         refs = tuple(FileRef(item["path"], item["name"], item["mime"], item["size"]) for item in files)

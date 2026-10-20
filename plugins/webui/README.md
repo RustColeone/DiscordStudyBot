@@ -138,7 +138,9 @@ The page never answers anything itself; everything a person types goes through `
   a chat that does not exist (deleted, perhaps on another device, or removed after a failed setup) is
   refused the same way with `unknown_chat`: sending never creates a chat, which would bring it back with
   the whole class. A chat with some of the classmates whose assignment the core no longer has (a crash
-  cut its setup off) gets it again first (`_repair`); if that fails, `chat_not_ready`.
+  cut its setup off) gets it again first (`_repair`); if that fails, `chat_not_ready`. The chat is read
+  again after that wait: deleted meanwhile (on another page), the message is refused with `unknown_chat`
+  and the assignment the repair set is removed.
 * `sender` is `Sender(user_id, user_name)`; `text` is cut to `max_text_chars`; up to 10 previously
   uploaded files become `FileRef`s; `kind` is `text`, else `image` if all files are pictures, else `file`.
 * Only after `submit` is accepted is the message stored and broadcast, so the transcript holds what the

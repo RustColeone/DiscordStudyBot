@@ -565,6 +565,41 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:dm-luna")
         await ws.close()
 
+    async def test_a_chat_deleted_while_its_repair_waits_is_not_brought_back_by_a_queued_message(self):
+        from contracts import SubmitResult
+        spoke = await self.start_room()
+        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # needs its repair on the first message
+        release, submit, held = asyncio.Event(), self.web.port.submit, []
+
+        async def slow_core(request):  # the repair's setup is held until the chat is deleted elsewhere
+            if request.text.startswith("$call core.set_assignment"):
+                async def later():
+                    await release.wait()
+                    await submit(request)
+                held.append(asyncio.create_task(later()))
+                return SubmitResult(True, "accepted")
+            return await submit(request)
+        self.web.port.submit = slow_core
+        a, _ = await self.socket()
+        b, _ = await self.socket()
+        await self.say(a, "only for Luna", conversation="dm-luna", id="queued")
+        await asyncio.sleep(0.1)
+        await b.send_json({"type": "delete", "conversation": "dm-luna"})
+        await self.until(b, lambda e: e["type"] == "deleted")
+        release.set()
+        ack, _ = await self.until(a, lambda e: e["type"] == "ack")
+        self.assertEqual((ack["ok"], ack["reason"]), (False, "unknown_chat"))
+        await asyncio.gather(*held)
+        for _ in range(60):
+            if self.assignment("dm-luna")["pattern"] == "webui:*" and not self.web.store.assigned():
+                break
+            await asyncio.sleep(0.05)
+        await settle(self.core)
+        self.assertEqual((spoke, self.web.store.conversation("dm-luna")), ([], None))
+        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        await a.close()
+        await b.close()
+
     async def test_deleting_a_chat_from_before_the_record_still_removes_its_assignment(self):
         await self.start_room()
         self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["luna"]})
