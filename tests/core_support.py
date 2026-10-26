@@ -72,6 +72,16 @@ class FakeToolAdapter(FakeAdapter):
 CALL_IDS = iter(range(1, 10 ** 6))
 
 
+def turn_context(call) -> str:
+    """The part of a request that holds this turn's context (the time, notes, mood…), which the engines send after the
+    history rather than in the system prompt."""
+    for message in call["messages"]:
+        content = str(message.get("content") or "")
+        if "[This turn's context" in content:
+            return content[content.index("[This turn's context"):]
+    return ""
+
+
 def calls(text="", *made, replay=None) -> AdapterResult:
     """A function-calling answer: its words, then each call as (tool name, arguments)."""
     from contracts.models import ToolCall

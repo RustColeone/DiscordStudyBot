@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.core_support import FakeAdapter, FakeToolAdapter, calls, iface, settle, start_core
+from tests.core_support import FakeAdapter, FakeToolAdapter, calls, iface, settle, start_core, turn_context
 
 
 def turn(message="", status="complete", actions=()):
@@ -191,8 +191,7 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         await iface(core).say("is it done yet?")
         await asyncio.sleep(0.05)
         self.assertEqual(iface(core).texts("room"), ["Converting.", "It's still converting."])
-        system = adapter.calls[1]["messages"][0]["content"]
-        self.assertIn('Alice: "convert the video" (running tools.slow', system)
+        self.assertIn('Alice: "convert the video" (running tools.slow', turn_context(adapter.calls[1]))
         tools.SLOW_RELEASE.set()
         await settle(core)
         self.assertEqual(iface(core).texts("room")[-1], "Done converting.")
@@ -214,6 +213,17 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(iface(core).texts("room"), ["Checking.", "Out of time."])
         self.assertIn("You must stop now", self.prompt(adapter, 1))
+
+    async def test_each_turn_reuses_the_last_ones_system_prompt_and_history_as_its_prefix(self):
+        core, adapter = await self.core([turn("Hello!"), turn("Still here."), turn("Sure.")])
+        for text in ("hi", "are you there?", "ok"):
+            await iface(core).say(text)
+            await settle(core)
+        second, third = adapter.calls[1]["messages"], adapter.calls[2]["messages"]
+        self.assertNotIn("The current time is", second[0]["content"])  # the system prompt holds nothing per turn
+        self.assertIn("The current time is", turn_context(adapter.calls[2]))
+        self.assertEqual(len(second), 4)  # the system prompt, the first exchange, this turn's context and message
+        self.assertEqual(third[:3], second[:3])  # all but the last turn's own message: what the cache can serve
 
     async def test_unavailable_model_fails_the_run_with_a_notice(self):
         core, adapter = await self.core([ConnectionError("down")])
@@ -306,7 +316,7 @@ class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
                        next(m for m in adapter.calls[1]["messages"] if m.get("tool_calls"))["tool_calls"][0]["id"]),
                       self.roles(adapter, 1))
         self.assertEqual([n.note for n in core.tank.notes("p", "chat:room", "alice")], ["Lives in Paris"])
-        self.assertIn("call remember", adapter.calls[0]["messages"][0]["content"])
+        self.assertIn("call remember", turn_context(adapter.calls[0]))
 
     async def test_wrong_calls_get_a_correction_then_the_step_is_asked_as_json(self):
         core, adapter = await self.core([calls("", ("basic.now", {"timezone": 5})),
@@ -317,13 +327,14 @@ class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("does not match its parameters", adapter.calls[1]["messages"][-1]["content"])
         self.assertEqual((adapter.calls[2]["tools"], adapter.calls[2]["schema"]["required"][0]), ([], "message"))
 
-    async def test_a_note_without_words_is_sent_back(self):
+    async def test_a_note_without_words_is_a_step_of_its_own_and_the_answer_follows(self):
         note = {"key": "home.city", "kind": "fact", "note": "Lives in Paris", "importance": 4}
-        core, adapter = await self.core([calls("", ("remember", note)), calls("Nice, Paris!", ("remember", note))])
+        core, adapter = await self.core([calls("", ("remember", note)), calls("Nice, Paris!")])
         await iface(core).say("I live in Paris")
         await settle(core)
         self.assertEqual(iface(core).texts("room"), ["Nice, Paris!"])
-        self.assertIn("your answer needs words", adapter.calls[1]["messages"][-1]["content"])
+        answered = [m["content"] for m in adapter.calls[1]["messages"] if m["role"] == "tool"]
+        self.assertEqual(answered, ["[tool remember] Noted."])
         self.assertEqual([n.note for n in core.tank.notes("p", "chat:room", "alice")], ["Lives in Paris"])
 
     async def test_call_ids_a_server_repeats_are_made_unique_so_no_result_is_lost(self):

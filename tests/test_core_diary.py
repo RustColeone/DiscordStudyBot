@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from tests.core_support import FakeAdapter, iface, settle, start_core
+from tests.core_support import FakeAdapter, iface, settle, start_core, turn_context
 
 
 def turn(message="", status="complete", actions=(), diary=None):
@@ -38,8 +38,8 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
         self.cores.append(core)
         return core, adapter
 
-    def system(self, adapter, index=0):
-        return adapter.calls[index]["messages"][0]["content"]
+    def context(self, adapter, index=0):
+        return turn_context(adapter.calls[index])
 
     async def test_notes_are_kept_per_person_and_conversation_and_recalled_next_time(self):
         core, adapter = await self.core([
@@ -49,10 +49,10 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
                               ("any music for me?", {}), ("hi", {"conversation": "elsewhere"})):
             await iface(core).say(text, **options)
             await settle(core)
-        self.assertNotIn("Andy Hui", self.system(adapter, 1))
-        self.assertIn('"note": "Loves Andy Hui\'s songs"', self.system(adapter, 2))
-        self.assertIn("Your diary about Alice", self.system(adapter, 2))
-        self.assertNotIn("Andy Hui", self.system(adapter, 3))
+        self.assertNotIn("Andy Hui", self.context(adapter, 1))
+        self.assertIn('"note": "Loves Andy Hui\'s songs"', self.context(adapter, 2))
+        self.assertIn("Your diary about Alice", self.context(adapter, 2))
+        self.assertNotIn("Andy Hui", self.context(adapter, 3))
         notes = core.tank.notes("p", "chat:room", "alice")
         self.assertEqual([(n.key, n.importance) for n in notes], [("music.favorite", 4)])
 
@@ -132,7 +132,7 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
             "assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": False}}}})
         await iface(core).say("I moved to Tokyo")
         await settle(core)
-        self.assertNotIn("Your diary", self.system(adapter))
+        self.assertNotIn("Your diary", self.context(adapter))
         self.assertEqual(core.tank.note_counts("chat:room", "alice"), {})
 
 

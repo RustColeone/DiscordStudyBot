@@ -77,8 +77,12 @@ when {name} shares something worth remembering across chats: personal facts, pre
 projects. Usually add nothing; never record secrets, tool output or other people's words."""
 NATIVE_DIARY_STEP = """\
 When {name} shares something worth remembering across chats (personal facts, preferences, goals, ongoing \
-projects), call remember with your answer (at most 2 per step); usually call nothing. Never record secrets, tool \
+projects), call remember (at most 2 per step); usually call nothing. Never record secrets, tool \
 output or other people's words."""
+
+# What changes from turn to turn (the time, her notes, mood and who the person is to her) comes in one message after
+# the thread rather than in the system prompt, so the system prompt and the thread stay one cached prefix.
+TURN_CONTEXT = "[This turn's context, from the system, not from the person]"
 
 # ---- a step as function calls (where her model can call tools) -------------------------------------------------
 ASK, REMEMBER = "ask", "remember"  # the engine's own tools (no dots, so no capability shares their names)
@@ -186,12 +190,13 @@ def from_calls(result) -> tuple[dict, str | None]:
         return {}, "at most 2 remember calls per step."
     if questions and not questions[0]:
         return {}, "ask needs a question."
-    if not actions and not questions and not text:
-        return {}, "your answer needs words (remember goes with an answer; it is not one)."
+    if not actions and not questions and not text and not diary:
+        return {}, "your answer needs words."
     message = text
     if questions and "?" not in text and "？" not in text:  # her words may already ask it
         message = "\n\n".join(part for part in (text, questions[0]) if part)
-    status = "continue" if actions else "needs_input" if questions else "complete"
+    # notes and no words: a step of its own (the notes are kept and answered; the words come next step)
+    status = "continue" if actions or (diary and not text and not questions) else "needs_input" if questions else "complete"
     native = {"text": result.text or "", "tool_calls": [{"id": call.id, "name": call.name,
                                                           "arguments": dict(call.arguments)}
                                                          for call in result.tool_calls]}
@@ -568,8 +573,7 @@ class ChatEngine(Engine):
         tools = [] if motive else [{key: tool[key] for key in ("name", "description", "parameters", "risk")}
                                    for tool in session.tools.list()]
         now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
-        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}. The current time is "
-                  f"{now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')}).\n\n"
+        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}.\n\n"
                   + (f"Instructions for this conversation:\n{session.options['instructions']}\n\n"
                      if session.options.get("instructions") else "")
                   + (f"You are talking with your owner. Private instructions for them:\n"
@@ -582,12 +586,13 @@ class ChatEngine(Engine):
             system += ("\n\nVoice replies are on in this chat: a short final message is sent as a voice message "
                        + (f"by itself, so do not call the speak tool ({VOICE_TOOL}) for it." if native else
                           f"by itself, so do not call {VOICE_TOOL} for it."))
+        context = f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."
         block = state.get("memory_block")
         if block:
-            system += "\n\n" + block.split("\nA step may add")[0]  # (a run from before carries the JSON rule in it)
+            context += "\n\n" + block.split("\nA step may add")[0]  # (a run from before carries the JSON rule in it)
             if state.get("memory_engine") == "core":
                 step = NATIVE_DIARY_STEP if native else DIARY_STEP
-                system += "\n" + step.format(name=self._person(session))
+                context += "\n" + step.format(name=self._person(session))
         messages = [{"role": "system", "content": system}]
         direct = session.trigger.is_direct
         for item in self._thread(session):
@@ -604,6 +609,7 @@ class ChatEngine(Engine):
             for file in item.files:
                 text += f"\n[{'image' if is_image(file) else 'file'} {file.name or 'attachment'}]"
             messages.append({"role": "user", "content": text})
+        messages.append({"role": "user", "content": f"{TURN_CONTEXT}\n\n{context}"})
         trigger = session.trigger
         if motive:
             text = SPEAK_UP.format(name=trigger.sender.name or "them", motive=motive)

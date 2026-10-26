@@ -6,7 +6,7 @@ from pathlib import Path
 
 from contracts import Address, Sender
 from core.manager.handles import HistoryHandle, module_store
-from tests.core_support import FakeAdapter, iface, settle, start_core
+from tests.core_support import FakeAdapter, iface, settle, start_core, turn_context
 
 
 def turn(message="", status="complete", diary=None):
@@ -184,8 +184,8 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                                   conversation=conversation)
             await settle(core)
         adapter = core.providers._adapters["fake"]
-        self.assertIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])  # the group reads it
-        self.assertNotIn("Likes spicy noodles", adapter.calls[2]["messages"][0]["content"])  # elsewhere does not
+        self.assertIn("Likes spicy noodles", turn_context(adapter.calls[1]))  # the group reads it
+        self.assertNotIn("Likes spicy noodles", turn_context(adapter.calls[2]))  # elsewhere does not
         self.assertEqual([n.key for n in core.tank.notes("p", "chat:dm", "alice")], ["food.favorite"])  # filed in dm
         await iface(core).say("$memory", conversation="group")
         await settle(core)
@@ -237,7 +237,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         await iface(core, "owner").say("hello", conversation="dm")  # a different alice, on owner
         await settle(core)
         adapter = core.providers._adapters["fake"]
-        self.assertNotIn("Likes spicy noodles", adapter.calls[1]["messages"][0]["content"])
+        self.assertNotIn("Likes spicy noodles", "\n".join(m["content"] for m in adapter.calls[1]["messages"]))
         await iface(core, "owner").say("$memory clear", conversation="dm")
         await settle(core)
         self.assertEqual(len(core.tank.notes("p", "chat:dm", "alice")), 1)  # not hers to clear

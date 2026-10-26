@@ -169,12 +169,16 @@ description), and the diary rules say to call `remember`.
 
 ### What the model sees
 
-`_messages` builds the system prompt from the persona prompt, its display name, the current time,
-`options.instructions`, `owner_instructions` (owners only), the turn contract with the display rules
-(Markdown or plain text, `display.max_text_chars`) and the tool catalog (name, description,
-parameters, risk), the diary, and up to 5 other open runs from `session.activity()`. Then come the
-history (`history_limit` messages before the request; the bot's replies as `assistant`, people's
-messages as lines with time, speaker, quoted text and attachments) and the run's transcript.
+`_messages` builds the system prompt from what stays the same from turn to turn: the persona prompt, its
+display name, `options.instructions`, `owner_instructions` (owners only), the turn contract with the
+display rules (Markdown or plain text, `display.max_text_chars`) and the tool catalog (name, description,
+parameters, risk). Then come the history (`history_limit` messages before the request; the bot's replies
+as `assistant`, people's messages as lines with time, speaker, quoted text and attachments), one message
+with this turn's context (the current time, the diary, and up to 5 other open runs from
+`session.activity()`), and the run's transcript. What changes every turn comes after the history, so the
+system prompt and the history stay the same prefix from one request to the next, which the provider's
+prompt cache serves at a fraction of the price (DeepSeek: 87% of a turn's input cached, against 5% with
+the time and diary inside the system prompt).
 Consecutive messages with the same role are merged, and the first message after the system prompt is
 always a `user` message.
 

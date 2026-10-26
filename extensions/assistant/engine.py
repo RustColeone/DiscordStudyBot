@@ -149,12 +149,13 @@ def from_calls(result) -> tuple[dict, str | None]:
     text = (result.text or "").strip()
     if questions and not questions[0]:
         return {}, "ask needs a question."
-    if not actions and not questions and not text:
-        return {}, "your answer needs words (remember goes with an answer; it is not one)."
+    if not actions and not questions and not text and not diary:
+        return {}, "your answer needs words."
     message = text
     if questions and "?" not in text and "？" not in text:  # her words may already ask it
         message = "\n\n".join(part for part in (text, questions[0]) if part)
-    status = "continue" if actions else "needs_input" if questions else "complete"
+    # notes and no words: a step of its own (the notes are kept and answered; the words come next step)
+    status = "continue" if actions or (diary and not text and not questions) else "needs_input" if questions else "complete"
     native = {"text": result.text or "", "tool_calls": [{"id": call.id, "name": call.name,
                                                           "arguments": dict(call.arguments)}
                                                          for call in result.tool_calls]}
@@ -200,6 +201,10 @@ DIARY = """Your diary about {name} in this conversation: selective notes from ea
 A turn may add "diary": [{{"key": "study.subject", "kind": "fact"|"episode"|"reflection", "note": string, "importance": 1-5}}] (at most 2) when {name} shares something worth remembering for future conversations: personal facts, preferences, goals, relationships or a meaningful shared moment. Usually add nothing. Never record greetings, routine questions, secrets, tool output, other people's words or guesses. Write a brief paraphrase in your own voice and the conversation's language, with absolute dates for episodes. Reuse a key to correct a note instead of adding a contradicting one. Only importance 3 or higher is kept. Do not mention diary updates."""
 DIARY_BUDGET = 3500
 
+# What changes from turn to turn (the time, the diary notes, other requests in progress) comes in one message after the
+# history rather than in the system prompt, so the system prompt and the history stay one cached prefix.
+TURN_CONTEXT = "[This turn's context, from the system, not from the person]"
+
 # ---- the turn as function calls (where the model can call tools) ------------------------------------------------
 ASK, REMEMBER = "ask", "remember"  # the engine's own tools (no dots, so no capability shares their names)
 MAX_CALLS = 5  # actions per step, as TURN_SCHEMA allows
@@ -214,7 +219,6 @@ in words, with no calls.
 only says what you are about to do. Never state an action's outcome (saved, sent, done) before its result appears, \
 and never claim a result you have not seen.
 - To ask the person one question and wait for their answer, call ask, alone.
-- Call remember with your answer when the diary rules say so; it is no step of its own.
 - If you cannot finish, say why briefly.
 - Files from successful tools are delivered to the person automatically; do not deliver them again.
 - A call may wait for the owner's approval. If so, tell the person briefly that it is waiting.
@@ -256,6 +260,8 @@ class AssistantEngine(Engine):
                 outcome = await self._execute_pending(session, state)
                 if outcome is not None:
                     return outcome
+                continue
+            if turn["status"] == "continue":  # a step of notes only: the answer comes next
                 continue
             if turn["status"] == "needs_input":
                 return RunYield.WAIT_INPUT
@@ -385,25 +391,26 @@ class AssistantEngine(Engine):
                  for tool in session.tools.list()]
         instructions = str(session.options.get("instructions") or "").strip()
         now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
-        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}. "
-                  f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')}).\n\n"
+        system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}.\n\n"
                   + (f"Instructions for this conversation:\n{instructions}\n\n" if instructions else "")
                   + owner_instructions(session)
                   + (NATIVE_CONTRACT.format(display=layout) if native else
                      CONTRACT.format(display=layout, tools=json.dumps(tools, ensure_ascii=False) if tools else "(none)")))
+        context = [f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."]
         diary = self._diary_prompt(session, native)
         if diary:
-            system += "\n\n" + diary
+            context.append(diary)
         activity = self._activity(session)
         if activity:
-            system += ("\n\nOther requests in this conversation are being handled in parallel. Do not start the same "
-                       "work again; if asked about it, say it is still in progress:\n" + activity)
+            context.append("Other requests in this conversation are being handled in parallel. Do not start the same "
+                           "work again; if asked about it, say it is still in progress:\n" + activity)
         messages: list[dict[str, str]] = [{"role": "system", "content": system}]
         items = self._history(session)
         shown = {file.path for file in self._history_images(session, items)}
         for item in items:
             role = "user" if item.direction == "in" else "assistant"
             messages.append({"role": role, "content": history_line(item, not session.trigger.is_direct, shown)})
+        messages.append({"role": "user", "content": "\n\n".join([TURN_CONTEXT, *context])})
         messages.extend(transcript(state["transcript"], native))
         if correction:
             messages.append({"role": "user", "content": correction})

@@ -172,9 +172,13 @@ diary `remember` keeps a note; each result goes back as its call's `tool` messag
 cannot call tools is asked as JSON. Her final answer at the step limit and her speak-ups are always JSON.
 The assistant engine's README ("Function calls") gives the details; this engine does the same.
 
-**Context** ([`engine.py:531-629`](engine.py)). The system prompt is the persona prompt, her display
-name, the current time, the assignment's `instructions`, `owner_instructions` (only when an owner is
-speaking), the turn contract with the allowed tools, and her diary notes about the sender. The thread
+**Context** ([`engine.py:531-629`](engine.py)). The system prompt is what stays the same from turn to
+turn: the persona prompt, her display name, the assignment's `instructions`, `owner_instructions` (only
+when an owner is speaking) and the turn contract with the allowed tools. What changes every turn (the
+current time, her notes about the sender, her mood and who they are to her) comes in one message after
+the thread, before the turn's own message, so the system prompt and the thread stay a prefix the
+provider's prompt cache serves (DeepSeek, six turns three minutes apart: 75-79% of her input cached,
+against 4% before). The thread
 is the conversation's history since the last `/new`, newest first within `history_limit` and
 `history_chars`. Images come from the run (attachments, tool results) and from messages in the last
 hour of the thread.
