@@ -5,19 +5,33 @@ else (policy, tools, models) belongs to the core."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
+import shutil
+import subprocess
+import time
 from collections import OrderedDict
 from pathlib import Path
 
 import discord
 
-from contracts import Address, Command, Delivery, Display, FileRef, Interface, Reply, Request, Sender
+from contracts import Address, Command, Delivery, Display, FileRef, Interface, Option, Reply, Request, Sender
 
 from . import slash
 from .math_render import MathRenderer, fallback_text, split_math
+from .speakup import MARK, Ledger, Settings, SpeakUp
+from .voice import VOICE_NAME
 
-# Her own commands become plain messages her engine understands; the rest come from the core's catalog.
-LOCAL = {"new": (Command("new", "Start a fresh chat (earlier messages stop being context)"), "/new")}
+# Her own commands become plain messages her engine understands (`/speakup` the bot answers itself); the rest
+# come from the core's catalog.
+LOCAL = {
+    "new": (Command("new", "Start a fresh chat (earlier messages stop being context)"), "/new"),
+    "voice": (Command("voice", "Her replies here as voice messages: on or off",
+                      (Option("mode", "on or off", choices=("on", "off")),)), "/voice {mode}"),
+    "speakup": (Command("speakup", "鲸酱 messaging first: status, rehearse, now, on, off or dry (owner only)",
+                        (Option("do", "what to do", choices=("status", "rehearse", "now", "on", "off", "dry")),),
+                        access="creator"), None),
+}
 SLASH_DEFAULT = ("help", "memory", "remind", "reminders", "routine", "draw", "search", "read", "video")
 
 LIMIT = 2000
@@ -45,8 +59,44 @@ def split_text(text: str, limit: int = LIMIT) -> list[str]:
     return [*chunks, remaining] if remaining or not chunks else chunks
 
 
+class VoiceFile(discord.File):
+    """An attachment that Discord shows as a voice message: it needs its length and a waveform."""
+
+    def __init__(self, path: Path, duration: float, waveform: str):
+        super().__init__(str(path), filename=VOICE_NAME)
+        self.duration, self.waveform = duration, waveform
+
+    def to_dict(self, index: int) -> dict:
+        return {**super().to_dict(index), "duration_secs": round(self.duration, 2), "waveform": self.waveform}
+
+
+def voice_shape(path: Path, points: int = 64) -> tuple[float, str] | None:
+    """(seconds, base64 waveform of up to 256 one-byte levels) for an audio file, measured with ffmpeg."""
+    if not shutil.which("ffmpeg"):
+        return None
+    try:
+        decoded = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", str(path), "-ac", "1", "-ar", "8000", "-f",
+                                  "s16le", "-"], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    samples = memoryview(decoded.stdout).cast("h") if decoded.returncode == 0 and len(decoded.stdout) >= 2 else None
+    if not samples:
+        return None
+    size = max(1, len(samples) // points)
+    levels = [max(abs(value) for value in samples[start:start + size]) for start in range(0, len(samples), size)]
+    top = max(levels) or 1
+    return len(samples) / 8000, base64.b64encode(bytes(min(255, int(255 * level / top))
+                                                        for level in levels[:256])).decode()
+
+
+class SimpleMessage:
+    def __init__(self, message_id):
+        self.id = message_id
+
+
 class WhaleChanBot(Interface):
-    def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None):
+    def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None,
+                 companion=None):
         self.name, self.token = name, token
         self.attachments = Path(data_dir) / "attachments"
         self.attachment_max = int(attachment_max_mb * 1024 * 1024)
@@ -59,8 +109,14 @@ class WhaleChanBot(Interface):
         self.interactions = slash.Interactions()
         self.client: discord.Client | None = None
         self._task: asyncio.Task | None = None
+        self._speaking: asyncio.Task | None = None
         self._channels: dict[str, object] = {}
         self._progress: OrderedDict[str, discord.Message] = OrderedDict()
+        self._owners: list[str] = []
+        speak_up = dict(config.get("speak_up") or {})
+        self.call_them = str(speak_up.get("call_them", "主人"))
+        self.speak_up = SpeakUp(Settings.of(speak_up), Ledger(Path(data_dir) / "speak_up.json"), self._speak_up_submit,
+                                owners=lambda: self._owners, names=lambda user: self.call_them, companion=companion)
 
     async def start(self, port) -> None:
         self.port = port
@@ -104,17 +160,21 @@ class WhaleChanBot(Interface):
     async def stop(self) -> None:
         if self.client is not None:
             await self.client.close()
-        if self._task is not None:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
+        for task in (self._speaking, self._task):
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def on_ready(self) -> None:
         try:
             application = await self.client.application_info()
             team = getattr(application, "team", None)
-            self.port.set_owners([str(member.id) for member in team.members] if team else [str(application.owner.id)])
+            self._owners = [str(member.id) for member in team.members] if team else [str(application.owner.id)]
+            self.port.set_owners(self._owners)
         except discord.HTTPException as error:
             self.port.log("owner_lookup_failed", error=type(error).__name__)
+        if self._speaking is None:
+            self._speaking = asyncio.create_task(self._speak_up_loop())
         await self.sync_commands()
         self.port.set_ready(True, f"Logged in as {self.client.user}.")
         message = f"[{self.name}] Logged in as {self.client.user} in {len(self.client.guilds)} server(s)."
@@ -143,6 +203,10 @@ class WhaleChanBot(Interface):
                     files.append(FileRef(str(path), attachment.filename, attachment.content_type or "", attachment.size))
         if not text and files:
             text = " ".join(f"[{file.name}]" for file in files)
+        if text.startswith(MARK):  # only she starts messages with her impulse's mark
+            text = text[len(MARK):]
+        if direct:
+            self.speak_up.ledger.heard(str(message.author.id), message.created_at.timestamp())
         limit = message.guild.filesize_limit if message.guild else 10 * 1024 * 1024
         await self.port.submit(Request(
             id=str(message.id), address=Address(self.name, conversation),
@@ -203,9 +267,17 @@ class WhaleChanBot(Interface):
                 if command is None:
                     await interaction.response.send_message("That command is no longer available.", ephemeral=True)
                     return
-                await interaction.response.defer(thinking=True)
                 values, _ = slash.values(command, data)
-                text = LOCAL[command.name][1] if command.name in LOCAL else command.render(values)
+                if command.name == "speakup":
+                    await interaction.response.send_message(await self._speak_up_command(
+                        str(interaction.user.id), str(values.get("do") or "status")), ephemeral=True)
+                    return
+                await interaction.response.defer(thinking=True)
+                if command.name in LOCAL:
+                    text = LOCAL[command.name][1].format(**{option.name: values.get(option.name) or ""
+                                                            for option in command.options}).strip()
+                else:
+                    text = command.render(values)
                 await self._submit_interaction(interaction, text, placeholder=True)
             elif (interaction.type == discord.InteractionType.component
                   and str((interaction.data or {}).get("custom_id", "")).startswith(slash.BUTTON_PREFIX)):
@@ -229,6 +301,53 @@ class WhaleChanBot(Interface):
         if not result and pending.placeholder and result.reason not in ("duplicate", "locked"):
             pending.placeholder = False
             await interaction.edit_original_response(content="I can't do that here.")
+
+    # ---- speaking up first ---------------------------------------------------------------------------
+    async def _speak_up_loop(self) -> None:
+        while True:
+            await asyncio.sleep(max(60.0, self.speak_up.settings.every_min * 60))
+            try:
+                for entry in await self.speak_up.tick():
+                    self.port.log("speak_up", **{key: entry[key] for key in ("hit", "line", "reason") if key in entry},
+                                  sent=entry.get("sent"), dry_run=entry.get("dry_run", False))
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self.port.log("speak_up_failed", error=type(error).__name__, detail=str(error)[:200])
+
+    async def _speak_up_submit(self, user: str, name: str, motive: str) -> bool:
+        """Her impulse, handed to her engine in their DM. Interfaces only submit requests for people, so it goes
+        in their name, marked in `extra` (which only this code sets) and shown to her as her own thought."""
+        result = await self.port.submit(Request(
+            id=f"speak-up-{user}-{time.time_ns()}", address=Address(self.name, f"dm:{user}"),
+            sender=Sender(str(user), name), text=MARK + motive, received_at=time.time(),
+            is_direct=True, mentions_me=True, display=self.display, extra={"speak_up": motive}))
+        return bool(result)
+
+    async def _speak_up_command(self, user: str, action: str) -> str:
+        if user not in self._owners:
+            return "Only her owner can change how she speaks up."
+        ledger = self.speak_up.ledger
+        if action in ("on", "off", "dry"):
+            ledger.overrides.update({"on": {"enabled": True, "dry_run": False}, "off": {"enabled": False},
+                                     "dry": {"enabled": True, "dry_run": True}}[action])
+            ledger.save()
+        if action == "now":
+            entry = await self.speak_up.now(user)
+            return f"🐳 She is messaging you now: {entry.get('motive')}" if entry.get("sent") else \
+                f"Could not start it: {entry.get('error') or 'the core refused the request'}"
+        state = self.speak_up.rehearse(user)
+        mode = "off" if not state["enabled"] else ("dry run (writes down, never sends)" if state["dry_run"] else "on")
+        lines = [f"Speak-up: {mode}, every {self.speak_up.settings.every_min:g} min.",
+                 f"Hit line now: {state['how']}.", f"Would say because: {state['motive']}"]
+        if state["blocked"]:
+            lines.insert(1, f"Not now: {state['blocked']}.")
+        recent = ledger.person(user).log[-3:]
+        if action == "status" and recent:
+            lines.append("Last rolls: " + "; ".join(
+                f"{time.strftime('%H:%M', time.localtime(item['at']))} {'hit' if item['hit'] else 'miss'} "
+                f"({item['reason']})" for item in recent))
+        return "\n".join(lines)[:1900]
 
     def _view(self, reply: Reply):
         if not reply.actions:
@@ -276,6 +395,12 @@ class WhaleChanBot(Interface):
             reference = (discord.MessageReference(message_id=int(reply.quote), channel_id=channel.id,
                                                   fail_if_not_exists=False)
                          if pending is None and reply.quote and str(reply.quote).isdigit() else None)
+            if reply.address.conversation.startswith("dm:") and reply.kind in ("text", "file"):
+                self.speak_up.ledger.spoke(reply.address.conversation[3:], time.time())
+            if reply.kind == "file" and reply.file.name == VOICE_NAME and pending is None:
+                sent = await self._send_voice(channel, Path(reply.file.path))
+                if sent is not None:
+                    return Delivery(True, message_id=str(sent.id))
             if reply.kind == "file":
                 sent = await post(content=reply.text[:LIMIT] or None, reference=reference,
                                   file=discord.File(reply.file.path, filename=reply.file.name or None))
@@ -300,6 +425,22 @@ class WhaleChanBot(Interface):
             return Delivery(False, detail=type(error).__name__)
         except discord.HTTPException as error:
             return Delivery(False, detail=f"HTTP {error.status}", uncertain=error.status >= 500)
+
+    async def _send_voice(self, channel, path: Path):
+        """Post Ogg Opus as a Discord voice message (the playable bubble with a waveform); None to fall back to
+        a plain audio file (no ffmpeg to measure it, or Discord refused)."""
+        shape = await asyncio.to_thread(voice_shape, path)
+        if shape is None:
+            return None
+        duration, waveform = shape
+        try:
+            with discord.http.handle_message_parameters(file=VoiceFile(path, duration, waveform),
+                                                        flags=discord.MessageFlags(voice=True)) as params:
+                data = await self.client.http.send_message(channel.id, params=params)
+            return SimpleMessage(data["id"])
+        except discord.HTTPException as error:
+            self.port.log("voice_message_failed", status=getattr(error, "status", 0), detail=str(error)[:200])
+            return None
 
     async def _parts(self, reply: Reply, text: str) -> list[tuple[str, str]]:
         """Text chunks and rendered display-math images, in order."""
