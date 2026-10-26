@@ -140,6 +140,33 @@ action; other statuses take none; `needs_input` and `blocked` need a message. An
 turn is sent back with the problem as a correction, up to two times; then the `ModelError` fails the
 run.
 
+### Function calls
+
+Where the model can call tools itself (an OpenAI-compatible provider: DeepSeek, OpenAI), a turn is its
+words and its function calls instead of JSON (`tool_calls`, on by default; `tool_calls: false` in the
+engine's settings, or the conversation's `tool_calls: false` option, keeps JSON turns):
+
+* the words are `message`, the calls `actions` (at most 5), and the turn is `continue` with calls,
+  `complete` without;
+* the engine adds two tools of its own: `ask` (one non-blank `question`, called alone: `needs_input`; the
+  question is added to the message unless the words already ask one) and, with the diary on, `remember`
+  (one diary note, at most 2 per step, which goes with an answer: a step of notes and no words is sent
+  back);
+* each call gets an id unique in the run (a server's own ids may repeat), and each action keeps it,
+  so its result goes back as that call's `tool` message; a refused call and the calls dropped after it
+  are answered too (the APIs refuse a call left unanswered), and the core places every answer right
+  after its call. The note that a call waits for the owner stays in the JSON form only: in calls, its
+  result says what came of it;
+* the transcript keeps both forms: each step as the JSON turn it amounts to, with its calls and
+  `replay` beside it (and a JSON step reads as its words in a request with calls). So a step can always
+  fall back: when the next candidate in the profile cannot call tools (`ModelError("tools_unsupported")`),
+  or the model calls wrongly twice, that step is asked as JSON, where every candidate counts; a run saved
+  with JSON turns goes on with calls.
+
+The closing turn at `max_steps` is always JSON. The system prompt then says to call the tools as
+functions instead of listing them (they go as `ModelRequest.tools`, with their risk in the
+description), and the diary rules say to call `remember`.
+
 ### What the model sees
 
 `_messages` builds the system prompt from the persona prompt, its display name, the current time,

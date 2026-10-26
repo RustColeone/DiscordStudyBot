@@ -29,6 +29,9 @@ models:
   - {provider: deepseek, model: deepseek-flash}
 #  - {provider: deepseek, model: deepseek-v4-pro, vision: false}   # stronger text model that cannot see images
 
+# Tools as her model's own function calls where it can make them (DeepSeek, OpenAI); false: JSON steps only.
+# tool_calls: true
+
 # Her name, and what her memory calls the bot's owner (their Discord name when unset; others keep theirs).
 # display_name: 鲸酱
 # call_owner: 主人

@@ -733,8 +733,13 @@ class Manager:
             raise ModelError("budget_exceeded", "This run used its model-call budget")
         self._add_usage(run_id, model_calls=1)
         persona = self._model_persona(record, request, profile)
-        result = await self.providers.generate(request, profile,
-                                               first=self.model_choices.first(record.address, persona))
+        try:
+            result = await self.providers.generate(request, profile,
+                                                   first=self.model_choices.first(record.address, persona))
+        except ModelError as error:
+            if error.kind == "tools_unsupported":  # the engine asks this step again at once, without tools:
+                self._add_usage(run_id, model_calls=-1)  # one step stays one model call
+            raise
         if persona:
             self._answered.setdefault(run_id, {})[persona] = result
         self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens)

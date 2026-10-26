@@ -6,10 +6,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from contracts.models import AdapterResult, Image, NotConfigured
+from contracts.models import AdapterResult, Image, NotConfigured, ToolCall
 
 IMAGE_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
                ".webp": "image/webp"}
@@ -63,6 +65,69 @@ def inline_history(messages: Sequence[Mapping[str, str]]) -> list[dict]:
             {"role": "user", "content": "\n\n".join(parts)}]
 
 
+MESSAGE_KEYS = ("role", "content", "tool_calls", "tool_call_id", "name")
+
+
+def function_name(name: str) -> str:
+    """A tool's name as OpenAI-style APIs allow it: letters, digits, `_` and `-`, at most 64 (dots become `__`)."""
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name.replace(".", "__"))[:64] or "tool"
+
+
+def function_names(tools) -> dict[str, str]:
+    """Each tool's API name, distinct even when two names map alike (`web.search` and `web__search`)."""
+    names: dict[str, str] = {}
+    for tool in tools:
+        base, name, number = function_name(tool.name), function_name(tool.name), 2
+        while name in names.values():
+            name, number = f"{base[:60]}_{number}", number + 1
+        names[tool.name] = name
+    return names
+
+
+def openai_messages(messages: Sequence[Mapping[str, Any]], names: Mapping[str, str] | None = None) -> list[dict]:
+    """The core's tool-call messages in OpenAI's form: an assistant message's `tool_calls` as function calls (under
+    their API `names`), with its `replay` keys (DeepSeek's reasoning_content) beside them, and `tool` messages
+    paired by `tool_call_id`."""
+    names = names or {}
+    result = []
+    for message in messages:
+        if message.get("role") == "assistant" and (message.get("tool_calls") or message.get("replay")):
+            item: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}
+            if message.get("tool_calls"):
+                item["tool_calls"] = [{"id": call["id"], "type": "function", "function": {
+                    "name": names.get(call["name"]) or function_name(call["name"]),
+                    "arguments": json.dumps(call.get("arguments") or {}, ensure_ascii=False)}}
+                    for call in message["tool_calls"]]
+            item.update({key: value for key, value in dict(message.get("replay") or {}).items()
+                         if key not in MESSAGE_KEYS})  # (a replay never overwrites the message itself)
+            result.append(item)
+        elif message.get("role") == "tool":
+            result.append({"role": "tool", "tool_call_id": message["tool_call_id"],
+                           "content": message.get("content") or ""})
+        else:
+            result.append({"role": message["role"], "content": message.get("content") or ""})
+    return result
+
+
+def openai_calls(message: Any, names: Mapping[str, str] | None = None) -> tuple[ToolCall, ...]:
+    """The function calls of an OpenAI-style message, under the tools' own names (`names`: API name → name);
+    arguments that are not one JSON object stay a string."""
+    names = names or {}
+    calls = []
+    for index, call in enumerate(getattr(message, "tool_calls", None) or ()):
+        function = getattr(call, "function", None)
+        given = getattr(function, "arguments", "")
+        raw = given if isinstance(given, Mapping) else str(given or "").strip() or "{}"  # (some servers parse it)
+        try:  # the first JSON value in it: models sometimes leave a stray bracket after the object
+            arguments = dict(raw) if isinstance(raw, Mapping) else json.JSONDecoder().raw_decode(raw)[0]
+        except ValueError:
+            arguments = raw
+        name = str(getattr(function, "name", ""))
+        calls.append(ToolCall(str(getattr(call, "id", "") or f"call_{uuid.uuid4().hex[:16]}"), names.get(name, name),
+                              arguments if isinstance(arguments, dict) else raw))
+    return tuple(calls)
+
+
 def api_key(settings: Mapping[str, Any]) -> str:
     """The key from the environment variable `api_key_env` names (.env: kept from models), else `api_key` written
     in the settings themselves (the owner's choice; nothing protects it)."""
@@ -75,6 +140,8 @@ def api_key(settings: Mapping[str, Any]) -> str:
 
 class OpenAICompatible:
     """OpenAI Chat Completions and compatible APIs (DeepSeek, OpenRouter)."""
+
+    supports_tools = True
 
     def __init__(self, settings: Mapping[str, Any], client: Any = None):
         self.settings = dict(settings)
@@ -89,24 +156,37 @@ class OpenAICompatible:
         return self._client
 
     async def complete(self, model: str, messages, schema, schema_name: str, effort: str,
-                       max_tokens: int, timeout_s: float, images: Sequence[Image] = ()) -> AdapterResult:
-        mode = self.settings.get("schema_mode", "json_object") if schema else ""
-        if schema and self.settings.get("inline_history"):
+                       max_tokens: int, timeout_s: float, images: Sequence[Image] = (), tools=()) -> AdapterResult:
+        mode = "tools" if tools else self.settings.get("schema_mode", "json_object") if schema else ""
+        if schema and not tools and self.settings.get("inline_history"):
             messages = inline_history(messages)
-        params: dict[str, Any] = {"model": model, "messages": list(messages),
+        names = function_names(tools) if tools else {}
+        back = {api: name for name, api in names.items()}
+        params: dict[str, Any] = {"model": model,
+                                  "messages": openai_messages(messages, names) if tools else list(messages),
                                   self.settings.get("token_param", "max_tokens"): max_tokens}
-        if schema and mode == "native":
+        if tools:  # the model's own function calls (a thinking model refuses a forced choice: DeepSeek 400)
+            params["tools"] = [{"type": "function", "function": {
+                "name": names[tool.name], "description": tool.description, "parameters": dict(tool.parameters)}}
+                for tool in tools]
+            params["tool_choice"] = "auto"
+        elif schema and mode == "native":
             params["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": schema_name, "strict": bool(self.settings.get("strict_schema", False)), "schema": schema}}
         elif schema:
             params["messages"] = with_schema_instruction(messages, schema)
             params["response_format"] = {"type": "json_object"}
-        if images and params["messages"][-1]["role"] == "user":
-            last = dict(params["messages"][-1])
+        if tools:  # the last user message, which tool results may follow
+            at = next((index for index in range(len(params["messages"]) - 1, -1, -1)
+                       if params["messages"][index]["role"] == "user"), None)
+        else:
+            at = len(params["messages"]) - 1 if params["messages"][-1]["role"] == "user" else None
+        if images and at is not None:
+            last = dict(params["messages"][at])
             last["content"] = [{"type": "text", "text": last["content"]}, *(
                 {"type": "image_url", "image_url": {"url": f"data:{image.mime};base64,{image.base64}"}}
                 for image in images)]
-            params["messages"] = [*params["messages"][:-1], last]
+            params["messages"] = [*params["messages"][:at], last, *params["messages"][at + 1:]]
         if self._effort_supported:
             params["reasoning_effort"] = effort
         client = self.client().with_options(timeout=timeout_s, max_retries=0)
@@ -122,7 +202,9 @@ class OpenAICompatible:
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "prompt_tokens", 0) or 0
         output_tokens = getattr(usage, "completion_tokens", 0) or 0
-        if mode == "json_object" and not (response.choices[0].message.content or "").strip():
+        blank = lambda reply: not (reply.choices[0].message.content or "").strip() and not (
+            mode == "tools" and openai_calls(reply.choices[0].message, back))
+        if mode in ("json_object", "tools") and blank(response):
             # JSON mode sometimes answers only whitespace (DeepSeek); a blank answer is never usable, so ask once more.
             response = await client.chat.completions.create(**params)
             usage = getattr(response, "usage", None)
@@ -130,7 +212,12 @@ class OpenAICompatible:
             output_tokens += getattr(usage, "completion_tokens", 0) or 0
         choice = response.choices[0]
         reason = str(getattr(choice, "finish_reason", "") or "").lower()
-        return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode)
+        if mode != "tools":
+            return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode)
+        reasoning = getattr(choice.message, "reasoning_content", None)  # DeepSeek's thinking: wanted back with tools
+        return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode,
+                             tool_calls=openai_calls(choice.message, back),
+                             replay={"reasoning_content": reasoning} if reasoning is not None else None)
 
 
     async def list_models(self) -> list[tuple[str, dt.datetime | None]]:

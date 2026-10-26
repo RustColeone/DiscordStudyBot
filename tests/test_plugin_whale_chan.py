@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
+from tests.core_support import ROOT, FakeAdapter, FakeToolAdapter, calls, iface, make_config, settle, start_core
 
 PLUGIN = ROOT / "plugins" / "whale_chan"
 # mneme-llm memory on, with nothing that makes extra model calls (mood, note capture, meaning)
@@ -98,6 +98,103 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
         await settle(self.core)
         self.assertEqual(self.texts(chat), ["Best so far."])
         self.assertIn("used all your steps", self.adapter.calls[-1]["messages"][-1]["content"])
+
+
+class NativeChatTests(unittest.IsolatedAsyncioTestCase):
+    """Her steps where her model calls tools as functions."""
+
+    asyncSetUp, asyncTearDown = ChatEngineTests.asyncSetUp, ChatEngineTests.asyncTearDown
+    texts, prompt = ChatEngineTests.texts, ChatEngineTests.prompt
+
+    async def start(self, responses, options=None, plugin=None):
+        self.adapter = FakeToolAdapter(responses)
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN)]
+        self.core = await start_core(self.tmp, {
+            "extensions": extensions, "profiles": {"whale_chan": [{"provider": "fake", "model": "pro"}]},
+            "extension_config": {"whale_chan": plugin if plugin is not None else QUIET},
+            "assignments": {"*": {"engine": "chat", "personas": ["whale_chan"], "options": options or {}}}},
+            self.adapter)
+        return iface(self.core)
+
+    async def test_she_calls_a_tool_and_posts_only_her_answer(self):
+        chat = await self.start([calls("Checking the time.", ("basic.now", {"timezone": "UTC"})),
+                                 calls("## Time\nIt is noon (UTC).")])
+        await chat.say("what time is it?")
+        await settle(self.core)
+        self.assertEqual(self.texts(chat), ["## Time\nIt is noon (UTC)."])
+        self.assertIn("Checking the time.", self.texts(chat, "progress"))
+        first, second = self.adapter.calls
+        names = [tool.name for tool in first["tools"]]
+        self.assertIsNone(first["schema"])
+        self.assertIn("basic.now", names)
+        self.assertNotIn("remember", names)  # mneme-llm keeps her notes after the reply, not her step
+        self.assertIn("Call the tools as functions", first["messages"][0]["content"])
+        tool = next(message for message in second["messages"] if message["role"] == "tool")
+        self.assertTrue(tool["content"].startswith("[tool basic.now → success]"))
+
+    async def test_with_the_core_diary_she_asks_and_remembers_by_calls(self):
+        chat = await self.start([
+            calls("", ("ask", {"question": "哪个城市？"})),
+            calls("好的！", ("remember", {"key": "home.city", "kind": "fact", "note": "住在杭州", "importance": 4})),
+            calls("杭州今天晴。")], plugin={**QUIET, "memory": {"engine": "core"}})
+        for text in ("天气怎么样？", "杭州", "今天呢？"):
+            await chat.say(text)
+            await settle(self.core)
+        self.assertEqual(self.texts(chat), ["哪个城市？", "好的！", "杭州今天晴。"])
+        system = self.adapter.calls[0]["messages"][0]["content"]
+        self.assertIn("call remember", system)
+        self.assertNotIn('A step may add "diary"', system)
+        self.assertIn("remember", [tool.name for tool in self.adapter.calls[0]["tools"]])
+        self.assertIn('"note": "住在杭州"', self.adapter.calls[2]["messages"][0]["content"])  # kept, recalled later
+
+    async def test_a_run_from_before_gets_the_diary_rule_of_the_form_it_is_asked_in(self):
+        chat = await self.start([calls("Saving it.", ("tools.write_value", {"key": "k", "value": "v"})), calls("Saved.")],
+                                plugin={**QUIET, "memory": {"engine": "core"}})
+        await chat.say("save v")
+        await settle(self.core)
+        run = self.core.tank.runs(("waiting_approval",))[0]
+        state = dict(run.state)  # as the previous build saved it: the JSON rule inside her notes
+        state["memory_block"] += '\nA step may add "diary": [...] (at most 2) when Alice shares something.'
+        self.core.tank.update_run(run.id, state=state)
+        approval_id = iface(self.core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(self.core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(self.core)
+        self.assertEqual(self.texts(chat)[-1], "Saved.")
+        system = self.adapter.calls[-1]["messages"][0]["content"]
+        self.assertIn("call remember", system)
+        self.assertNotIn("A step may add", system)
+
+    async def test_her_last_step_and_a_speak_up_are_json(self):
+        from contracts import Address, Request, Sender
+        chat = await self.start([calls("a", ("basic.now", {})), step("Best so far."), step("主人～在干嘛呀")],
+                                {"max_steps": 1})
+        await chat.say("dig deep")
+        await settle(self.core)
+        self.assertEqual(self.texts(chat), ["Best so far."])
+        last = self.adapter.calls[1]
+        self.assertEqual((last["tools"], last["schema"]["required"][0]), ([], "message"))
+        self.assertFalse(any(message["role"] == "tool" for message in last["messages"]))
+        mark = plugin_module(self.core, "speakup").MARK
+        await chat.port.submit(Request(id="su-1", address=Address("chat", "room"), sender=Sender("alice", "Alice"),
+                                       text=mark + "好久没跟主人说话了", received_at=time.time(), is_direct=True,
+                                       mentions_me=True, display=chat.display, extra={"speak_up": "好久没跟主人说话了"}))
+        await settle(self.core)
+        self.assertEqual(self.texts(chat)[-1], "主人～在干嘛呀")
+        self.assertEqual(self.adapter.calls[-1]["tools"], [])  # her own impulse: no tools, as before
+
+    async def test_an_approval_answers_the_call_it_belongs_to(self):
+        chat = await self.start([calls("Saving it.", ("tools.write_value", {"key": "k", "value": "v"})),
+                                 calls("Done, I saved it.")])
+        await chat.say("save v")
+        await settle(self.core)
+        approval_id = iface(self.core, "owner").notices("approval_request")[0].data["approval_id"]
+        await iface(self.core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(self.core)
+        self.assertEqual(self.texts(chat)[-1], "Done, I saved it.")
+        sent = self.adapter.calls[1]["messages"]
+        at = next(index for index, message in enumerate(sent) if message.get("tool_calls"))
+        self.assertEqual(sent[at + 1]["role"], "tool")
+        self.assertEqual(sent[at + 1]["tool_call_id"], sent[at]["tool_calls"][0]["id"])
 
 
 class WhaleChanSetupTests(unittest.TestCase):

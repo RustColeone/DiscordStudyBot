@@ -143,8 +143,20 @@ used (blank, not the requested JSON, cut off at the token limit). A switch is ne
 `provider_rejected` with the reason, and the persona's message carries it (`reply.data["fallback"]`).
 `inline_history: true` (on for DeepSeek) sends a JSON request's earlier turns written into one message,
 because DeepSeek's JSON mode often answers blank after an assistant turn; a blank JSON-mode answer is
-asked once more. An extension may ship default personas in `Contributions.personas`; a configured
-persona with the same name wins.
+asked once more. A request with `tools` (`ToolSpec`s) gets the model's own function calls instead of JSON:
+`ModelResult.tool_calls`, each checked against its tool's `parameters` (a call to an unknown tool, or with
+arguments that do not match, is invalid output, like JSON that does not match), and `replay`, which goes back as it is on
+that answer's assistant message in later requests (`tool_calls` and `replay` on assistant messages, `tool`
+messages with `tool_call_id`). A replay reaches only the provider that wrote it (DeepSeek's thinking, say,
+never another provider after a fallback), and never overwrites the message's own fields. Before any adapter
+sees them, the core places each call's `tool` message right after it, answers a call left without one "did not
+run", and drops a `tool` message that answers no call, because the APIs refuse such a request. Only adapters with
+`supports_tools` take tools (the OpenAI-compatible one, which maps dotted names such as `web.search` to what the
+API allows and back). Candidates are tried in order while they can call tools (one without a key is passed over,
+as ever): the first that cannot ends the request with `ModelError("tools_unsupported")`, rather than letting
+a later candidate answer in its place, so the engine can ask that step in its JSON form; that attempt reached
+no provider for its own sake and does not count against the run's `model_calls`. An extension may ship default
+personas in `Contributions.personas`; a configured persona with the same name wins.
 
 ### Model providers
 

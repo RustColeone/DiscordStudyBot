@@ -52,6 +52,33 @@ class FakeAdapter:
         return AdapterResult(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False), 10, 5)
 
 
+class FakeToolAdapter(FakeAdapter):
+    """A provider adapter that calls tools as functions: scripted answers, made with `calls(...)` (a string is a
+    plain answer; a dict is JSON text, for requests without tools)."""
+
+    supports_tools = True
+
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=(), tools=()):
+        self.calls.append({"model": model, "messages": messages, "schema": schema, "effort": effort,
+                           "images": list(images), "tools": list(tools)})
+        value = self.handler(messages, tools) if self.handler else self.responses.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        if isinstance(value, AdapterResult):
+            return value
+        return AdapterResult(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False), 10, 5)
+
+
+CALL_IDS = iter(range(1, 10 ** 6))
+
+
+def calls(text="", *made, replay=None) -> AdapterResult:
+    """A function-calling answer: its words, then each call as (tool name, arguments)."""
+    from contracts.models import ToolCall
+    return AdapterResult(text, 10, 5, schema_mode="tools", replay=replay,
+                         tool_calls=tuple(ToolCall(f"call_{next(CALL_IDS)}", name, arguments) for name, arguments in made))
+
+
 def merge(base: dict, override: dict) -> dict:
     result = copy.deepcopy(base)
     for key, value in override.items():

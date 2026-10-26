@@ -157,17 +157,22 @@ IDs, so resubmits are dropped as duplicates. Slash commands are deferred at once
 rendered to `$` text with `Command.render` and submitted the same way
 ([`bot.py:198-231`](bot.py)); `/new` becomes the plain text `/new` for the engine.
 
-**The engine** ([`engine.py:86-127`](engine.py)). Each step asks the model for one JSON object matching
+**The engine** ([`engine.py:199-243`](engine.py)). Each step asks the model for one JSON object matching
 `TURN_SCHEMA`: `message`, `status` (`continue`, `complete`, `needs_input`, `blocked`), up to 5
 `actions` and up to 2 `diary` notes. Invalid output or an invalid step (unknown tool, `continue`
-without actions, actions with another status) gets up to two corrections ([`engine.py:219-252`](engine.py)).
+without actions, actions with another status) gets up to two corrections ([`engine.py:468-529`](engine.py)).
 On `continue` it saves the actions with call IDs `c1`, `c2`, … before calling them through
 `session.tools.call`, shows `message` as progress, runs them in order, and stops the batch at the first
 failure. `needs_approval` returns `WAIT_APPROVAL`; after the owner decides, `_absorb_events` reads the
-`tool_result` or `approval_denied` event by index and continues ([`engine.py:153-208`](engine.py)).
+`tool_result` or `approval_denied` event by index and continues ([`engine.py:351-445`](engine.py)).
 `complete` and `blocked` reply and finish; `needs_input` waits for the next message.
+Where her model can call tools itself (DeepSeek, OpenAI; `tool_calls: true`, the default), a step is her
+words and function calls instead: the calls are the actions, `ask` waits for an answer, and with the core
+diary `remember` keeps a note; each result goes back as its call's `tool` message, and a step whose model
+cannot call tools is asked as JSON. Her final answer at the step limit and her speak-ups are always JSON.
+The assistant engine's README ("Function calls") gives the details; this engine does the same.
 
-**Context** ([`engine.py:254-330`](engine.py)). The system prompt is the persona prompt, her display
+**Context** ([`engine.py:531-629`](engine.py)). The system prompt is the persona prompt, her display
 name, the current time, the assignment's `instructions`, `owner_instructions` (only when an owner is
 speaking), the turn contract with the allowed tools, and her diary notes about the sender. The thread
 is the conversation's history since the last `/new`, newest first within `history_limit` and
@@ -272,10 +277,10 @@ and her own folder.
 * **Suggest defaults for your own addresses only**: `<interface>:*` assignments, admission and
   permissions ([`extension.py:69-75`](extension.py)). Anything else refuses to load.
 * **A resumable engine**: state saved after each step, call IDs saved before calling, events tracked by
-  index ([`engine.py:114-122`](engine.py), [`engine.py:153-187`](engine.py)). Compare with the built-in
+  index ([`engine.py:209-214`](engine.py), [`engine.py:351-445`](engine.py)). Compare with the built-in
   [`assistant`](../../extensions/assistant/README.md) engine.
 * **Validate model output and correct it** instead of failing on the first bad step
-  ([`engine.py:219-252`](engine.py)).
+  ([`engine.py:468-529`](engine.py)).
 * **An interface that only translates**: platform facts in `Request` ([`bot.py:147-154`](bot.py)),
   owners from the platform ([`bot.py:111-121`](bot.py)), readiness ([`bot.py:87-102`](bot.py)), the
   command catalog as native commands ([`bot.py:181-196`](bot.py), [`slash.py:29-51`](slash.py)) and

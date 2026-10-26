@@ -79,6 +79,7 @@ def setup(context) -> Contributions:
                         max_tokens=int(config.get("max_tokens", 8000)),
                         new_chat_text=str(config.get("new_chat_text", "🐳 好的主人，新的对话开始啦～")),
                         companion=companion, call_owner=str(config.get("call_owner") or "") or None,
+                        tool_calls=config.get("tool_calls", True) is not False,
                         voice={"speak_up": speech.get("speak_up", True), "max_chars": int(speech.get("max_chars", 400))}
                         if speaking else None)
     contributions = {"engines": [engine], "personas": [persona],

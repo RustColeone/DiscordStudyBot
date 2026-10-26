@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.core_support import FakeAdapter, iface, settle, start_core
+from tests.core_support import FakeAdapter, FakeToolAdapter, calls, iface, settle, start_core
 
 
 def turn(message="", status="complete", actions=()):
@@ -222,6 +222,204 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(iface(core).notices("run_failed")[0].data["error_code"], "unavailable")
         self.assertEqual(iface(core).texts("room", "text"), [])
 
+
+
+class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
+    """The same engine where the model calls tools as functions."""
+
+    asyncSetUp, asyncTearDown = AssistantEngineTests.asyncSetUp, AssistantEngineTests.asyncTearDown
+    counts = AssistantEngineTests.counts
+
+    async def core(self, responses, overrides=None, adapter=None):
+        adapter = adapter or FakeToolAdapter(responses)
+        core = await start_core(self.tmp, {**ASSISTANT, **(overrides or {})}, adapter)
+        self.cores.append(core)
+        return core, adapter
+
+    @staticmethod
+    def roles(adapter, index):
+        return [(m["role"], m.get("tool_call_id") or ("calls" if m.get("tool_calls") else m["content"][:40]))
+                for m in adapter.calls[index]["messages"][1:]]
+
+    async def test_it_calls_a_tool_and_answers_from_its_result(self):
+        core, adapter = await self.core([calls("Let me check.", ("basic.now", {"timezone": "UTC"})),
+                                         calls("It is late.")])
+        await iface(core).say("what time is it?")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Let me check.", "It is late."])
+        first = adapter.calls[0]
+        self.assertIsNone(first["schema"])
+        self.assertIn("basic.now", [tool.name for tool in first["tools"]])
+        self.assertIn("ask", [tool.name for tool in first["tools"]])
+        self.assertIn("Call the tools as functions", first["messages"][0]["content"])
+        self.assertNotIn('"name": "basic.now"', first["messages"][0]["content"])  # offered as a function instead
+        sent = adapter.calls[1]["messages"]
+        call = next(m for m in sent if m.get("tool_calls"))["tool_calls"][0]
+        result = next(m for m in sent if m["role"] == "tool")
+        self.assertEqual((call["name"], result["tool_call_id"]), ("basic.now", call["id"]))
+        self.assertTrue(result["content"].startswith("[tool basic.now → success]"))
+
+    async def test_an_approval_after_a_restart_answers_the_call_it_belongs_to(self):
+        core, adapter = await self.core([calls("Saving it.", ("tools.write_value", {"key": "k", "value": "v"}))])
+        await iface(core).say("remember v")
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await core.stop()
+        self.cores.remove(core)
+        core, adapter = await self.core([calls("Saved.")])
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual((self.counts(), iface(core).texts("room")), ({"write_value": 1}, ["Saved."]))
+        sent = adapter.calls[0]["messages"]
+        at = next(index for index, m in enumerate(sent) if m.get("tool_calls"))
+        self.assertEqual(sent[at + 1]["role"], "tool")  # right after its call
+        self.assertIn("[tool tools.write_value → success] wrote k", sent[at + 1]["content"])
+        self.assertNotIn("Waiting for owner approval", "\n".join(m["content"] for m in sent))  # its result says it
+
+    async def test_a_refusal_answers_its_call_and_the_rest_of_the_step_did_not_run(self):
+        core, adapter = await self.core([calls("Both.", ("tools.write_value", {"key": "k", "value": "v"}),
+                                               ("basic.now", {"timezone": "UTC"}))])
+        await iface(core).say("save and tell the time")
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        adapter.responses.append(calls("Not saved."))
+        await iface(core, "owner").say(f"$deny {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        answers = [m["content"] for m in adapter.calls[1]["messages"] if m["role"] == "tool"]
+        self.assertEqual(len(answers), 2)
+        self.assertIn("The owner denied this action", answers[0])
+        self.assertIn("Not run: an earlier action of this step failed or was refused", answers[1])
+        self.assertEqual(self.counts(), {})
+
+    async def test_ask_waits_for_the_answer_and_remember_writes_the_diary(self):
+        core, adapter = await self.core([
+            calls("", ("ask", {"question": "Which city?"})),
+            calls("Paris it is!", ("remember", {"key": "home.city", "kind": "fact", "note": "Lives in Paris",
+                                                "importance": 4}))])
+        await iface(core).say("weather?")
+        await settle(core)
+        await iface(core).say("Paris")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Which city?", "Paris it is!"])
+        self.assertEqual(len(core.tank.runs(("done",))), 1)
+        self.assertIn(("tool", adapter.calls[0]["messages"] and
+                       next(m for m in adapter.calls[1]["messages"] if m.get("tool_calls"))["tool_calls"][0]["id"]),
+                      self.roles(adapter, 1))
+        self.assertEqual([n.note for n in core.tank.notes("p", "chat:room", "alice")], ["Lives in Paris"])
+        self.assertIn("call remember", adapter.calls[0]["messages"][0]["content"])
+
+    async def test_wrong_calls_get_a_correction_then_the_step_is_asked_as_json(self):
+        core, adapter = await self.core([calls("", ("basic.now", {"timezone": 5})),
+                                         calls("", ("ask", {"question": "?"}), ("basic.now", {})), turn("Fine.")])
+        await iface(core).say("hello")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Fine."])
+        self.assertIn("does not match its parameters", adapter.calls[1]["messages"][-1]["content"])
+        self.assertEqual((adapter.calls[2]["tools"], adapter.calls[2]["schema"]["required"][0]), ([], "message"))
+
+    async def test_a_note_without_words_is_sent_back(self):
+        note = {"key": "home.city", "kind": "fact", "note": "Lives in Paris", "importance": 4}
+        core, adapter = await self.core([calls("", ("remember", note)), calls("Nice, Paris!", ("remember", note))])
+        await iface(core).say("I live in Paris")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Nice, Paris!"])
+        self.assertIn("your answer needs words", adapter.calls[1]["messages"][-1]["content"])
+        self.assertEqual([n.note for n in core.tank.notes("p", "chat:room", "alice")], ["Lives in Paris"])
+
+    async def test_call_ids_a_server_repeats_are_made_unique_so_no_result_is_lost(self):
+        from contracts.models import ToolCall
+        from tests.core_support import AdapterResult
+        same = lambda zone: AdapterResult("", 10, 5, schema_mode="tools",
+                                          tool_calls=(ToolCall("call_0", "basic.now", {"timezone": zone}),))
+        core, adapter = await self.core([same("UTC"), same("Asia/Tokyo"), calls("Both done.")])
+        await iface(core).say("time here and in Tokyo?")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Both done."])
+        sent = adapter.calls[2]["messages"]
+        ids = [call["id"] for m in sent for call in m.get("tool_calls") or ()]
+        answers = [m["content"] for m in sent if m["role"] == "tool"]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual([answer.split("]")[0] for answer in answers], ["[tool basic.now → success"] * 2)
+
+    async def test_a_blank_question_is_sent_back(self):
+        core, adapter = await self.core([calls("", ("ask", {"question": "   "})),
+                                         calls("", ("ask", {"question": "Which city?"}))])
+        await iface(core).say("weather?")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Which city?"])
+        self.assertIn("ask needs a question", adapter.calls[1]["messages"][-1]["content"])
+
+    async def test_a_question_already_in_her_words_is_not_repeated(self):
+        core, adapter = await self.core([calls("Sure! Which city do you live in?", ("ask", {"question": "Which city?"}))])
+        await iface(core).say("weather?")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Sure! Which city do you live in?"])
+
+    async def test_the_profiles_order_holds_and_json_is_asked_where_tools_cannot_be(self):
+        tools = FakeToolAdapter([calls("unused")])
+        plain = FakeAdapter([turn("From the first choice.")])
+        from core.app import Core
+        from tests.core_support import make_config
+        core = Core(make_config(self.tmp, {**ASSISTANT, "profiles": {"default": [{"provider": "plain", "model": "p"},
+                                                                              {"provider": "tools", "model": "t"}]}}),
+                    provider_adapters={"plain": plain, "tools": tools}, tick_seconds=3600)
+        await core.start()
+        self.cores.append(core)
+        await iface(core).say("hello")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["From the first choice."])
+        self.assertEqual((len(plain.calls), len(tools.calls)), (1, 0))
+        self.assertIsNotNone(plain.calls[0]["schema"])
+        self.assertEqual(core.tank.runs(("done",))[0].usage["model_calls"], 1)  # the step cost one model call
+
+    async def test_tool_calls_off_keeps_json_turns(self):
+        core, adapter = await self.core([turn("JSON it is.")], {"extension_config": {"assistant": {"tool_calls": False}}})
+        await iface(core).say("hello")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["JSON it is."])
+        self.assertEqual((adapter.calls[0]["tools"], adapter.calls[0]["schema"]["required"]),
+                         ([], ["message", "status", "actions"]))
+
+    async def test_a_run_saved_with_json_turns_goes_on_with_function_calls(self):
+        core = await start_core(self.tmp, ASSISTANT, FakeAdapter(
+            [turn("Saving it.", "continue", [("tools.write_value", {"key": "k", "value": "v"})])]))
+        await iface(core).say("remember v")
+        await settle(core)
+        approval_id = iface(core, "owner").notices("approval_request")[0].data["approval_id"]
+        await core.stop()
+        core, adapter = await self.core([calls("Saved.")])  # the new build, now with function calls
+        await iface(core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Saved."])
+        sent = adapter.calls[0]["messages"]
+        self.assertFalse(any(m["role"] == "tool" or m.get("tool_calls") for m in sent))  # its notes stay text
+        text = "\n".join(m["content"] for m in sent)
+        self.assertIn("[tool tools.write_value → success]", text)
+        self.assertIn("Saving it.\n[called tools.write_value]", text)  # its JSON step, as words
+        self.assertNotIn('"status"', text)
+
+    async def test_a_step_falls_back_to_json_and_reads_the_native_steps_as_text(self):
+        wrong = calls("", ("nope.missing", {}))
+        core, adapter = await self.core([calls("Checking.", ("basic.now", {"timezone": "UTC"})), wrong, wrong, wrong,
+                                         turn("Done.")])
+        await iface(core).say("time?")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Checking.", "Done."])
+        last = adapter.calls[-1]
+        self.assertEqual((last["tools"], last["schema"]["required"][0]), ([], "message"))
+        self.assertFalse(any(m["role"] == "tool" or m.get("tool_calls") for m in last["messages"]))
+        text = "\n".join(m["content"] for m in last["messages"])
+        self.assertIn("[tool basic.now → success]", text)
+        self.assertIn('"tool": "basic.now"', text)  # her native step, written as the JSON turn it was
+
+    async def test_the_closing_turn_is_json_whatever_the_model_can_do(self):
+        core, adapter = await self.core([calls("Checking.", ("basic.now", {})), turn("Out of time.", "blocked")],
+                                        {"extension_config": {"assistant": {"max_steps": 1}}})
+        await iface(core).say("go")
+        await settle(core)
+        self.assertEqual(iface(core).texts("room"), ["Checking.", "Out of time."])
+        self.assertEqual((adapter.calls[1]["tools"], adapter.calls[1]["schema"]["required"][0]), ([], "message"))
+        self.assertFalse(any(m["role"] == "tool" for m in adapter.calls[1]["messages"]))
 
 if __name__ == "__main__":
     unittest.main()

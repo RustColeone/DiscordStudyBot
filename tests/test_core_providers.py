@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from contracts import ModelError, ModelRequest
+from contracts import ModelError, ModelRequest, ToolCall, ToolSpec
 from core.providers.adapters import AdapterResult, Anthropic, Gemini, OpenAICompatible
 from core.providers.registry import Providers
 from tests.core_support import FakeAdapter
@@ -288,6 +288,255 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await providers.generate(ModelRequest([{"role": "user", "content": "2"}]))
         self.assertGreaterEqual(time.monotonic() - started, 0.19)
 
+
+TOOLS = (ToolSpec("run", "Run a line.", {"type": "object", "properties": {"command": {"type": "string"}},
+                                            "required": ["command"], "additionalProperties": False}),)
+
+
+class ToolAdapter:
+    """A provider that calls tools: answers in turn, each (text, [(name, arguments)])."""
+
+    supports_tools = True
+
+    def __init__(self, answers):
+        self.answers, self.calls = list(answers), []
+
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=(),
+                       tools=()):
+        self.calls.append({"messages": messages, "tools": tools, "schema": schema})
+        if isinstance(self.answers[0], Exception):
+            raise self.answers.pop(0)
+        text, calls = self.answers.pop(0)
+        return AdapterResult(text, 10, 5, tool_calls=tuple(ToolCall(f"c{index}", name, arguments)
+                                                           for index, (name, arguments) in enumerate(calls)),
+                             replay={"reasoning_content": "thought"})
+
+
+class ToolCallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_calls_go_out_as_functions_and_come_back_with_their_replay(self):
+        call = SimpleNamespace(id="call_1", function=SimpleNamespace(name="run", arguments='{"command": "ls"}]'))
+
+        class Client(FakeOpenAIClient):
+            async def create(self, **params):
+                self.calls.append(params)
+                message = SimpleNamespace(content="Looking.", tool_calls=[call], reasoning_content="I should list.")
+                return SimpleNamespace(choices=[SimpleNamespace(finish_reason="tool_calls", message=message)],
+                                       usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+        client = Client()
+        history = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
+                   {"role": "assistant", "content": "", "replay": {"reasoning_content": "earlier"},
+                    "tool_calls": [{"id": "call_0", "name": "run", "arguments": {"command": "pwd"}}]},
+                   {"role": "tool", "tool_call_id": "call_0", "content": "/work"}]
+        result = await OpenAICompatible({"schema_mode": "json_object", "inline_history": True}, client).complete(
+            "ds", history, None, "turn", "high", 100, 30, tools=TOOLS)
+        sent = client.calls[0]
+        self.assertEqual((sent["tools"][0]["function"]["name"], sent["tool_choice"]), ("run", "auto"))
+        self.assertNotIn("response_format", sent)
+        self.assertEqual(sent["messages"][2], {"role": "assistant", "content": "", "reasoning_content": "earlier",
+                                               "tool_calls": [{"id": "call_0", "type": "function", "function": {
+                                                   "name": "run", "arguments": '{"command": "pwd"}'}}]})
+        self.assertEqual(sent["messages"][3], {"role": "tool", "tool_call_id": "call_0", "content": "/work"})
+        self.assertEqual(result.tool_calls, (ToolCall("call_1", "run", {"command": "ls"}),))  # stray bracket dropped
+        self.assertEqual((result.text, result.replay, result.schema_mode),
+                         ("Looking.", {"reasoning_content": "I should list."}, "tools"))
+
+    async def test_a_blank_tool_answer_is_asked_once_more(self):
+        class Client(FakeOpenAIClient):
+            async def create(self, **params):
+                self.calls.append(params)
+                calls = [] if len(self.calls) == 1 else [SimpleNamespace(
+                    id="c", function=SimpleNamespace(name="run", arguments='{"command": "ls"}'))]
+                message = SimpleNamespace(content="", tool_calls=calls)
+                return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=message)],
+                                       usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+        client = Client()
+        result = await OpenAICompatible({}, client).complete("ds", REQUEST.messages, None, "turn", "low", 100, 30,
+                                                             tools=TOOLS)
+        self.assertEqual((len(client.calls), result.tool_calls[0].name, result.replay), (2, "run", None))
+
+    async def test_tool_calls_are_checked_against_their_tools(self):
+        request = ModelRequest([{"role": "user", "content": "go"}], tools=TOOLS)
+        good = ToolAdapter([("", [("run", {"command": "ls"})])])
+        providers = Providers({"calls": {"kind": "openai_compatible"}}, {"default": [{"provider": "calls", "model": "c"}]},
+                              adapters={"calls": good})
+        result = await providers.generate(request)
+        self.assertEqual((result.provider, result.tool_calls[0].arguments, result.replay),
+                         ("calls", {"command": "ls"}, {"provider": "calls", "fields": {"reasoning_content": "thought"}}))
+        self.assertEqual(good.calls[0]["tools"], TOOLS)
+        for answer, problem in (([("run", {})], "does not match its parameters"), ([("rm", {})], "not one of its tools"),
+                                ([("run", '{"command": ')], "not a JSON object"), ([], "blank answer")):
+            bad = Providers({"calls": {"kind": "openai_compatible"}}, {"default": [{"provider": "calls", "model": "c"}]},
+                            adapters={"calls": ToolAdapter([("", answer)])})
+            with self.assertRaises(ModelError) as caught:
+                await bad.generate(request)
+            self.assertEqual(caught.exception.kind, "invalid_output")
+            self.assertIn(problem, str(caught.exception))
+
+    async def test_a_candidate_that_cannot_call_tools_ends_the_attempt_in_its_place(self):
+        """The profile's order holds: a later candidate never answers instead of one that cannot call tools."""
+        request = ModelRequest([{"role": "user", "content": "go"}], tools=TOOLS)
+
+        def providers(order, down=()):
+            adapters = {"plain": FakeAdapter([{"answer": "x"}]),
+                        "calls": ToolAdapter([RuntimeError("down")] if "calls" in down else
+                                             [("", [("run", {"command": "ls"})])])}
+            return Providers({name: {"kind": "openai_compatible"} for name in adapters},
+                             {"default": [{"provider": name, "model": name[0]} for name in order]}, adapters=adapters)
+        self.assertEqual((await providers(["calls", "plain"]).generate(request)).provider, "calls")
+        for order, down, said in ((["plain", "calls"], (), "plain/p cannot call tools"),
+                                  (["calls", "plain"], ("calls",), "before it: calls/c: RuntimeError")):
+            with self.assertRaises(ModelError) as caught:
+                await providers(order, down).generate(request)
+            self.assertEqual(caught.exception.kind, "tools_unsupported")
+            self.assertIn(said, str(caught.exception))
+        with self.assertRaises(ModelError) as caught:  # all can call tools and none answered: as ever
+            await providers(["calls"], ("calls",)).generate(request)
+        self.assertEqual(caught.exception.kind, "unavailable")
+        chosen = providers(["calls"])  # a model chosen with $model that cannot call tools: asked in JSON instead
+        with self.assertRaises(ModelError) as caught:
+            await chosen.generate(request, first={"provider": "plain", "model": "p"})
+        self.assertEqual(caught.exception.kind, "tools_unsupported")
+
+    async def test_every_call_is_answered_right_after_it_whatever_order_the_engine_wrote(self):
+        call = lambda id, name="run": {"id": id, "name": name, "arguments": {"command": "x"}}
+        request = ModelRequest([
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "", "tool_calls": [call("a"), call("b"), call("c")]},
+            {"role": "user", "content": "[tool run] waiting for the owner's approval"},
+            {"role": "tool", "tool_call_id": "b", "content": "B"},
+            {"role": "tool", "tool_call_id": "a", "content": "A"},
+            {"role": "tool", "tool_call_id": "zzz", "content": "answers no call"},
+            {"role": "user", "content": "and then?"}], tools=TOOLS)
+        adapter = ToolAdapter([("Done.", [])])
+        await Providers({"calls": {"kind": "openai_compatible"}}, {"default": [{"provider": "calls", "model": "c"}]},
+                        adapters={"calls": adapter}).generate(request)
+        sent = adapter.calls[0]["messages"]
+        self.assertEqual([(m["role"], m.get("tool_call_id") or m.get("content")) for m in sent], [
+            ("user", "go"), ("assistant", ""), ("tool", "a"), ("tool", "b"), ("tool", "c"),
+            ("user", "[tool run] waiting for the owner's approval"), ("user", "and then?")])
+        self.assertEqual(sent[4]["content"], "[tool run] This call did not run.")
+
+    async def test_dotted_tool_names_reach_the_api_as_it_allows_and_come_back_as_they_were(self):
+        call = SimpleNamespace(id="call_9", function=SimpleNamespace(name="web__search", arguments='{"command": "q"}'))
+
+        class Client(FakeOpenAIClient):
+            async def create(self, **params):
+                self.calls.append(params)
+                message = SimpleNamespace(content="", tool_calls=[call])
+                return SimpleNamespace(choices=[SimpleNamespace(finish_reason="tool_calls", message=message)],
+                                       usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+        tools = (ToolSpec("web.search", "Search.", TOOLS[0].parameters), ToolSpec("web__search", "Other.", {}),
+                 ToolSpec("a" * 70 + ".b", "Long.", {}))
+        history = [{"role": "user", "content": "hi"},
+                   {"role": "assistant", "content": "", "tool_calls": [{"id": "c0", "name": "web.search", "arguments": {}}]},
+                   {"role": "tool", "tool_call_id": "c0", "content": "found"}]
+        client = Client()
+        result = await OpenAICompatible({}, client).complete("ds", history, None, "turn", "low", 100, 30, tools=tools)
+        names = [tool["function"]["name"] for tool in client.calls[0]["tools"]]
+        self.assertEqual(names[:2], ["web__search", "web__search_2"])
+        self.assertTrue(all(len(name) <= 64 and name.replace("_", "").replace("-", "").isalnum() for name in names))
+        self.assertEqual(client.calls[0]["messages"][1]["tool_calls"][0]["function"]["name"], "web__search")
+        self.assertEqual(result.tool_calls[0].name, "web.search")
+
+    async def test_images_go_with_the_last_user_message_when_tool_results_follow_it(self):
+        from contracts.models import Image
+        client = FakeOpenAIClient(contents=["ok"])
+        history = [{"role": "user", "content": "look"},
+                   {"role": "assistant", "content": "", "tool_calls": [{"id": "c0", "name": "run", "arguments": {}}]},
+                   {"role": "tool", "tool_call_id": "c0", "content": "done"}]
+        await OpenAICompatible({}, client).complete("gpt", history, None, "turn", "low", 100, 30,
+                                                    images=[Image("image/png", b"ABC")], tools=TOOLS)
+        sent = client.calls[0]["messages"]
+        self.assertEqual(sent[0]["content"][1]["type"], "image_url")
+        self.assertEqual(sent[-1], {"role": "tool", "tool_call_id": "c0", "content": "done"})
+
+    async def test_a_replay_goes_back_only_to_the_provider_that_wrote_it_and_never_overwrites_the_message(self):
+        from core.providers.adapters import openai_messages
+        replay = {"provider": "deepseek", "fields": {"reasoning_content": "mine", "role": "user", "content": "X"}}
+        history = [{"role": "user", "content": "go"},
+                   {"role": "assistant", "content": "", "replay": replay,
+                    "tool_calls": [{"id": "c1", "name": "run", "arguments": {"command": "x"}}]},
+                   {"role": "tool", "tool_call_id": "c1", "content": "done"}]
+        for provider, expected in (("deepseek", "mine"), ("openai", None)):
+            adapter = ToolAdapter([("ok", [])])
+            await Providers({provider: {"kind": "openai_compatible"}}, {"default": [{"provider": provider, "model": "m"}]},
+                            adapters={provider: adapter}).generate(ModelRequest(history, tools=TOOLS))
+            sent = openai_messages(adapter.calls[0]["messages"])[1]
+            self.assertEqual((sent.get("reasoning_content"), sent["role"], sent["content"]), (expected, "assistant", ""))
+
+    async def test_a_candidate_without_a_key_is_passed_over_as_ever_not_ended_on(self):
+        request = ModelRequest([{"role": "user", "content": "go"}], tools=TOOLS)
+        providers = Providers({"gemini": {"kind": "gemini", "api_key_env": "NO_SUCH_KEY_FOR_TESTS"},
+                               "calls": {"kind": "openai_compatible"}},
+                              {"default": [{"provider": "gemini", "model": "g"}, {"provider": "calls", "model": "c"}]},
+                              adapters={"calls": ToolAdapter([("", [("run", {"command": "ls"})])])})
+        result = await providers.generate(request)
+        self.assertEqual(result.provider, "calls")
+        self.assertIn("gemini/g: not configured", result.fallbacks[0])
+
+    async def test_parsed_arguments_and_missing_ids_are_read(self):
+        from core.providers.adapters import openai_calls
+        message = SimpleNamespace(tool_calls=[
+            SimpleNamespace(id="", function=SimpleNamespace(name="run", arguments={"command": "a"})),
+            SimpleNamespace(id=None, function=SimpleNamespace(name="run", arguments='{"command": "b"}'))])
+        first, second = openai_calls(message)
+        self.assertEqual((first.arguments, second.arguments), ({"command": "a"}, {"command": "b"}))
+        self.assertTrue(first.id and second.id and first.id != second.id)
+
+    async def test_requests_without_tools_place_images_and_notes_as_before(self):
+        from contracts.models import Image
+        client = FakeOpenAIClient(contents=['{"answer": "ok"}'])
+        history = [{"role": "system", "content": "sys"}, {"role": "user", "content": "look"},
+                   {"role": "assistant", "content": "seen"}]
+        await OpenAICompatible({}, client).complete("gpt", history, SCHEMA, "reply", "low", 100, 30,
+                                                    images=[Image("image/png", b"ABC")])
+        self.assertEqual([m["content"] for m in client.calls[0]["messages"][1:]], ["look", "seen"])  # untouched
+
+    async def test_requests_without_tools_are_unchanged(self):
+        client = FakeOpenAIClient(contents=['{"answer": "ok"}'])
+        result = await OpenAICompatible({}, client).complete("ds", REQUEST.messages, SCHEMA, "reply", "low", 100, 30)
+        self.assertNotIn("tools", client.calls[0])
+        self.assertEqual((result.tool_calls, result.replay, result.schema_mode), ((), None, "json_object"))
+
+
+
+class SettleToolMessagesTests(unittest.TestCase):
+    def test_any_order_of_messages_settles_into_one_the_apis_accept(self):
+        import random
+        from core.providers.registry import settle_tool_messages
+        for seed in range(300):
+            rng = random.Random(seed)
+            messages, open_calls, number = [{"role": "user", "content": "start"}], [], 0
+            for _ in range(rng.randint(1, 14)):
+                roll = rng.random()
+                if roll < 0.3:
+                    ids = [f"c{number + index}" for index in range(rng.randint(1, 3))]
+                    number += len(ids)
+                    messages.append({"role": "assistant", "content": "",
+                                     "tool_calls": [{"id": id, "name": "run", "arguments": {}} for id in ids]})
+                    open_calls += ids
+                elif roll < 0.6 and open_calls:
+                    id = open_calls.pop(rng.randrange(len(open_calls)))
+                    messages.append({"role": "tool", "tool_call_id": id, "content": f"result {id}"})
+                elif roll < 0.7:
+                    messages.append({"role": "tool", "tool_call_id": f"stray{seed}", "content": "answers nothing"})
+                else:
+                    messages.append({"role": rng.choice(["user", "assistant"]), "content": f"text {roll:.3f}"})
+            settled = settle_tool_messages(messages)
+            for index, message in enumerate(settled):
+                if message.get("tool_calls"):
+                    ids = [call["id"] for call in message["tool_calls"]]
+                    after = settled[index + 1:index + 1 + len(ids)]
+                    self.assertEqual([item.get("tool_call_id") for item in after], ids, seed)
+                    self.assertTrue(all(item["role"] == "tool" for item in after), seed)
+            asked = {call["id"] for m in settled for call in m.get("tool_calls") or ()}
+            answered = [m["tool_call_id"] for m in settled if m["role"] == "tool"]
+            self.assertEqual(sorted(answered), sorted(asked), seed)  # each call once, no strays
+            kept = [m for m in messages if m["role"] != "tool"]
+            self.assertEqual([m for m in settled if m["role"] != "tool"], kept, seed)  # the rest in its order
+            for m in settled:  # a real result is kept as it was
+                if m["role"] == "tool" and not m["content"].endswith("did not run."):
+                    self.assertEqual(m["content"], f"result {m['tool_call_id']}", seed)
 
 if __name__ == "__main__":
     unittest.main()

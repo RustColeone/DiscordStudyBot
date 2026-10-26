@@ -7,7 +7,7 @@ import datetime as dt
 import json
 import re
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 import jsonschema
 
@@ -15,6 +15,64 @@ from contracts import ModelError, ModelRequest, ModelResult
 from core.providers.adapters import ADAPTERS, NotConfigured, api_key, load_images
 
 FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+
+
+def check_calls(result, tools) -> None:
+    """A tool-calling answer is usable when it says or calls something, and every call names one of the tools
+    with arguments matching its `parameters`."""
+    specs = {tool.name: tool for tool in tools}
+    if not result.tool_calls and not (result.text or "").strip():
+        raise ModelError("invalid_output", "The model gave a blank answer (no words, no calls)", result.text)
+    for call in result.tool_calls:
+        if call.name not in specs:
+            raise ModelError("invalid_output", f"The model called {call.name!r}, which is not one of its tools",
+                             result.text)
+        if not isinstance(call.arguments, Mapping):
+            raise ModelError("invalid_output", f"The call to {call.name} has arguments that are not a JSON object",
+                             result.text)
+        try:
+            jsonschema.validate(dict(call.arguments), specs[call.name].parameters)
+        except jsonschema.SchemaError:
+            continue  # the tool's own parameters are no valid schema: its call is checked where it runs, as ever
+        except jsonschema.ValidationError as error:
+            path = "/".join(str(part) for part in error.absolute_path) or "(arguments)"
+            raise ModelError("invalid_output", f"The call to {call.name} does not match its parameters at {path}: "
+                             f"{error.message}", result.text) from None
+
+
+def replay_for(provider: str, messages: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Messages for one provider: an assistant message's `replay` goes back only to the provider that wrote it
+    (another would get a stranger's reasoning, or refuse it), as that provider's own fields."""
+    sent = []
+    for message in messages:
+        message = dict(message)
+        replay = message.pop("replay", None)
+        if isinstance(replay, Mapping) and replay.get("provider") == provider and isinstance(replay.get("fields"), Mapping):
+            message["replay"] = dict(replay["fields"])
+        sent.append(message)
+    return sent
+
+
+def settle_tool_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict]:
+    """Messages as a tool-calling API accepts them: each assistant message with `tool_calls` followed at once by one
+    `tool` message per call, in the calls' order (anything else that came between them moves after them), a call
+    with no result answered "did not run", and a `tool` message that answers no call dropped. Engines may write
+    their transcript in the order things happened; the APIs refuse a request otherwise (OpenAI and DeepSeek: 400)."""
+    messages = [dict(message) for message in messages]
+    results: dict[str, dict] = {}
+    for message in messages:
+        if message.get("role") == "tool" and message.get("tool_call_id"):
+            results.setdefault(str(message["tool_call_id"]), message)
+    settled: list[dict] = []
+    for message in messages:
+        if message.get("role") == "tool":
+            continue  # placed after its call below (or dropped, when it answers no call)
+        settled.append(message)
+        for call in message.get("tool_calls") or () if message.get("role") == "assistant" else ():
+            answer = results.pop(str(call.get("id")), None)
+            settled.append(answer or {"role": "tool", "tool_call_id": str(call.get("id")),
+                                      "content": f"[tool {call.get('name')}] This call did not run."})
+    return settled
 
 
 def parse_json(text: str, schema: Mapping[str, Any]) -> Any:
@@ -193,17 +251,33 @@ class Providers:
         attempts = [(candidate, bool(images) and self._sees(candidate)) for candidate in candidates]
         # Candidates that can see the images go first; the others get a note instead of the images.
         attempts.sort(key=lambda attempt: not attempt[1] and bool(images))
+        unsupported = ""  # with tools: the first candidate that cannot call them, where the native attempt ends
         for candidate, with_images in attempts:
             provider, model = candidate["provider"], candidate["model"]
-            messages = [dict(m) for m in request.messages]
-            if images and not with_images and messages and messages[-1]["role"] == "user":
-                messages[-1]["content"] += (f"\n\n[{len(images)} image(s) attached, but you cannot see images; "
-                                            "say so if they matter.]")
+            if request.tools:
+                messages = replay_for(provider, settle_tool_messages(request.messages))
+                last_user = next((index for index in range(len(messages) - 1, -1, -1)
+                                  if messages[index]["role"] == "user"), None)  # (tool results may follow it)
+            else:
+                messages = [dict(m) for m in request.messages]
+                last_user = len(messages) - 1 if messages and messages[-1]["role"] == "user" else None
+            if images and not with_images and last_user is not None:
+                messages[last_user]["content"] = (str(messages[last_user].get("content") or "") + (
+                    f"\n\n[{len(images)} image(s) attached, but you cannot see images; say so if they matter.]"))
             started = time.monotonic()
             try:
+                if request.tools and not self.ready(provider):  # (before the adapter exists, which ready() trusts)
+                    raise NotConfigured("no key")  # passed over as ever: it could not answer without tools either
                 adapter = self._adapter(provider)
-                await self._space(provider)
                 extra = {"images": images} if with_images else {}
+                if request.tools:
+                    if not getattr(adapter, "supports_tools", False):
+                        # The profile's order is its owner's preference: rather than let a later candidate answer
+                        # in this one's place, the engine asks again in its JSON form, where every candidate counts.
+                        unsupported = f"{provider}/{model}"
+                        break
+                    extra["tools"] = tuple(request.tools)
+                await self._space(provider)
                 result = await asyncio.wait_for(
                     adapter.complete(model, messages, request.output_schema,
                                      request.schema_name, candidate.get("effort") or request.effort,
@@ -228,6 +302,13 @@ class Providers:
                 invalid = ModelError("invalid_output", "The model output was truncated", result.text)
                 failures.append(f"{provider}/{model}: truncated")
                 rejected = "answer cut off at the token limit"
+            elif request.tools:
+                try:
+                    check_calls(result, request.tools)
+                except ModelError as error:
+                    invalid = error
+                    failures.append(f"{provider}/{model}: invalid output")
+                    rejected = str(error)[:200]
             elif request.output_schema is not None:
                 try:
                     data = parse_json(result.text, request.output_schema)
@@ -243,7 +324,12 @@ class Providers:
                 continue
             return ModelResult(text=result.text, data=data, provider=provider, model=model,
                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                               duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped))
+                               duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped),
+                               tool_calls=tuple(result.tool_calls),
+                               replay={"provider": provider, "fields": dict(result.replay)} if result.replay else None)
+        if unsupported:
+            raise ModelError("tools_unsupported", f"{unsupported} cannot call tools" + (
+                f"; before it: {'; '.join(failures)}" if failures else ""))
         if invalid is not None:
             raise invalid
         kind = "not_configured" if failures and all("not configured" in item for item in failures) else "unavailable"

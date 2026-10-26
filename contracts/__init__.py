@@ -8,9 +8,11 @@ from contracts.extension import Contributions, Extension, ExtensionContext, Sett
 from contracts.interface import Interface, InterfacePort, Operation
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
 from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter, ModelError, ModelRequest,
-                              ModelResult, Models, NotConfigured)
+                              ModelResult, Models, NotConfigured, ToolCall, ToolSpec)
 from contracts.stores import Store
 
+# 1.5, plus the tool calls of 1.7 (ToolSpec, ToolCall, ModelRequest.tools), ported ahead from the clone. The
+# rest of 1.6 and 1.7 is not here yet, so the minor version stays.
 CONTRACTS_VERSION = "1.5"
 
 __all__ = [
@@ -21,5 +23,5 @@ __all__ = [
     "HistorySummary",
     "Interface", "InterfacePort", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
     "Persona", "Reply", "Request", "Risk", "TIER_ORDER", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
-    "ToolResult", "Tools",
+    "ToolCall", "ToolResult", "ToolSpec", "Tools",
 ]
