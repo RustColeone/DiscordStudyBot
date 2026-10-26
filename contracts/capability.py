@@ -7,12 +7,15 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, Mapping, Protocol
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Literal, Mapping, Protocol
 
 from contracts.commands import Access, Command, derive
 from contracts.messages import Address, Display, FileRef, Origin, Sender
 from contracts.models import Models
 from contracts.stores import Store
+
+if TYPE_CHECKING:
+    from contracts.engine import History
 
 ResultStatus = Literal["success", "failed", "needs_input", "needs_approval"]
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
@@ -90,6 +93,8 @@ class ToolContext(Protocol):
     the person who started the run attached (in a group, others may add messages to a run).
     `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces
     receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`).
+    `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for
+    capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it.
     """
 
     address: Address
@@ -104,6 +109,7 @@ class ToolContext(Protocol):
     models: Models
     workspace: Path
     access: Access  # the caller's effective level: member, admin or creator
+    history: "History"  # added in 1.6: this conversation's history, to read
 
     async def progress(self, text: str) -> None: ...
 

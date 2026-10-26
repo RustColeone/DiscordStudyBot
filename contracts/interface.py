@@ -98,7 +98,32 @@ class InterfacePort(Protocol):
         interfaces that offer a native command menu or their own help. Access is still checked per
         request; `Command.access` says the lowest level that may run each one."""
 
+    def models_ready(self, profile: str) -> bool:
+        """Whether some candidate of the model profile can be called (its provider has a key), for showing who
+        can answer before anyone asks (added in 1.7; engines and capabilities have `Models.ready`)."""
+
+    def publish(self, *, link: str | None = None, status: Mapping[str, Any] | None = None) -> None:
+        """Tell the other interfaces where people reach this one (`link`, a URL) and a small public status (JSON,
+        at most 16 KB), so they can link to it and show what happens there (added in 1.7). Each call replaces
+        what it names; `status` may describe a place, see PLACE_STATUS. Kept while the core runs."""
+
+    def directory(self) -> Mapping[str, Mapping[str, Any]]:
+        """What every interface has published: name → `{"link", "status", "ready"}` (added in 1.7)."""
+
+    def approval_status(self, approval_id: str) -> str | None:
+        """`pending`, `approved`, `denied` or `expired` for an approval asked in one of this interface's
+        conversations, else None (added in 1.7). An interface that shows approval cards asks this, so a card decided
+        elsewhere (typed, in another interface) or expired with its run stops offering its buttons."""
+
     def log(self, event: str, **fields: Any) -> None: ...
+
+
+# The shape of a published `status` that describes a place people can go (a classroom, a lab), so any interface
+# can draw any other place: {"place": {"name", "icon", "note"}, "people": [{"key", "name", "avatar", "doing",
+# "title"}], "away": [keys of people from elsewhere who are here now], "tickets": [{"key", "by", "title", "link"}:
+# invitations to come here, held by people elsewhere]}. A key is the name lowercased, with only its letters and digits
+# kept, in any script ("Flash-chan" → "flashchan", "露娜" → "露娜"); an empty key matches nobody.
+PLACE_STATUS = ("place", "people", "away", "tickets")
 
 
 class Interface(ABC):

@@ -1,9 +1,10 @@
+import json
 import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from contracts import ModelError, ModelRequest
+from contracts import ModelError, ModelRequest, ToolCall, ToolSpec
 from core.providers.adapters import AdapterResult, Anthropic, Gemini, OpenAICompatible
 from core.providers.registry import Providers
 from tests.core_support import FakeAdapter
@@ -48,6 +49,15 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.kind, "invalid_output")
         providers, _ = self.providers(FakeAdapter(["not json"]), FakeAdapter(['{"answer": "fine"}']))
         self.assertEqual((await providers.generate(REQUEST)).data, {"answer": "fine"})
+        # Several objects (with words around them): the last one that fits the schema is the answer, as a model that
+        # writes two usually corrects the first.
+        providers, _ = self.providers(FakeAdapter(['{"answer": "first"}\n{"answer": "second"} and some words']))
+        self.assertEqual((await providers.generate(REQUEST)).data, {"answer": "second"})
+        providers, _ = self.providers(FakeAdapter(['{"answer": "x"} {"answer": 1}']))
+        self.assertEqual((await providers.generate(REQUEST)).data, {"answer": "x"})  # the later one does not fit
+        providers, _ = self.providers(FakeAdapter(['{"answer": 1} {"answer": 2}']))
+        with self.assertRaises(ModelError):
+            await providers.generate(REQUEST)  # none fits: still invalid
 
     async def test_missing_keys_and_unknown_profiles_are_not_configured(self):
         providers = Providers({"x": {"kind": "openai_compatible", "api_key_env": "CORE_TEST_MISSING_KEY"}},
@@ -60,6 +70,8 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ModelError) as raised:
             await providers.generate(ModelRequest([{"role": "user", "content": "hi"}], profile="nope"))
         self.assertEqual(raised.exception.kind, "not_configured")
+        self.assertFalse(providers.ready("x"))  # still not ready after a failed call made (and cached) its adapter
+        self.assertFalse(providers.profile_ready("default"))
         with self.assertRaises(ValueError):
             Providers({}, {"default": [{"provider": "ghost", "model": "m"}]})
 
@@ -95,6 +107,109 @@ class ProvidersTests(unittest.IsolatedAsyncioTestCase):
             providers = Providers({"x": {"kind": "openai_compatible", "api_key_env": "CORE_TEST_KEY"}},
                                   {"default": [{"provider": "x", "model": "m"}]})
             self.assertEqual((providers.configured(), providers.available()), ([], []))
+
+
+class Status(Exception):
+    """A provider's HTTP error, as the SDKs raise them (`status_code`)."""
+
+    def __init__(self, status: int):
+        super().__init__(f"status {status}")
+        self.status_code = status
+
+
+class RetryTests(unittest.IsolatedAsyncioTestCase):
+    def club(self, first, second):
+        recorded = []
+        providers = Providers({"a": {"kind": "openai_compatible"}, "b": {"kind": "openai_compatible"}},
+                              {"default": [{"provider": "a", "model": "m"}, {"provider": "b", "model": "n"}]},
+                              adapters={"a": first, "b": second}, record=lambda event, **fields: recorded.append(event))
+        return providers, recorded
+
+    async def test_a_rate_limit_is_asked_again_before_the_next_candidate(self):
+        first, second = FakeAdapter([Status(429), Status(503), {"answer": "ok"}]), FakeAdapter([{"answer": "other"}])
+        providers, recorded = self.club(first, second)
+        with patch("core.providers.registry.RETRY_DELAYS_S", (0.0, 0.0)):
+            result = await providers.generate(REQUEST)
+        self.assertEqual((result.data, len(first.calls), len(second.calls)), ({"answer": "ok"}, 3, 0))
+        self.assertEqual(recorded.count("provider_retry"), 2)
+
+    async def test_a_refusal_or_a_lasting_failure_goes_to_the_next_candidate(self):
+        for failures in ([Status(402)], [Status(429)] * 3):  # no balance: at once; still limited: after two pauses
+            first, second = FakeAdapter(failures), FakeAdapter([{"answer": "other"}])
+            providers, recorded = self.club(first, second)
+            with patch("core.providers.registry.RETRY_DELAYS_S", (0.0, 0.0)):
+                result = await providers.generate(REQUEST)
+            self.assertEqual((result.data, len(first.calls)), ({"answer": "other"}, len(failures)))
+
+
+TOOLS = (ToolSpec("run", "Run a line.", {"type": "object", "properties": {"command": {"type": "string"}},
+                                            "required": ["command"], "additionalProperties": False}),)
+
+
+class ToolAdapter:
+    """A provider that calls tools: answers in turn, each (text, [(name, arguments)])."""
+
+    supports_tools = True
+
+    def __init__(self, answers):
+        self.answers, self.calls = list(answers), []
+
+    async def complete(self, model, messages, schema, schema_name, effort, max_tokens, timeout_s, images=(),
+                       tools=()):
+        self.calls.append({"messages": messages, "tools": tools, "schema": schema})
+        text, calls = self.answers.pop(0)
+        return AdapterResult(text, 10, 5, tool_calls=tuple(ToolCall(f"c{index}", name, arguments)
+                                                           for index, (name, arguments) in enumerate(calls)),
+                             replay={"reasoning_content": "thought"})
+
+
+class ToolCallTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tool_calls_go_out_as_functions_and_come_back_with_their_replay(self):
+        call = SimpleNamespace(id="call_1", function=SimpleNamespace(name="run", arguments='{"command": "ls"}]'))
+
+        class Client(FakeOpenAIClient):
+            async def create(self, **params):
+                self.calls.append(params)
+                message = SimpleNamespace(content="Looking.", tool_calls=[call], reasoning_content="I should list.")
+                return SimpleNamespace(choices=[SimpleNamespace(finish_reason="tool_calls", message=message)],
+                                       usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+        client = Client()
+        history = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"},
+                   {"role": "assistant", "content": "", "replay": {"reasoning_content": "earlier"},
+                    "tool_calls": [{"id": "call_0", "name": "run", "arguments": {"command": "pwd"}}]},
+                   {"role": "tool", "tool_call_id": "call_0", "content": "/work"}]
+        result = await OpenAICompatible({"schema_mode": "json_object", "inline_history": True}, client).complete(
+            "ds", history, None, "turn", "high", 100, 30, tools=TOOLS)
+        sent = client.calls[0]
+        self.assertEqual((sent["tools"][0]["function"]["name"], sent["tool_choice"]), ("run", "auto"))
+        self.assertNotIn("response_format", sent)
+        self.assertEqual(sent["messages"][2], {"role": "assistant", "content": "", "reasoning_content": "earlier",
+                                               "tool_calls": [{"id": "call_0", "type": "function", "function": {
+                                                   "name": "run", "arguments": '{"command": "pwd"}'}}]})
+        self.assertEqual(sent["messages"][3], {"role": "tool", "tool_call_id": "call_0", "content": "/work"})
+        self.assertEqual(result.tool_calls, (ToolCall("call_1", "run", {"command": "ls"}),))  # stray bracket dropped
+        self.assertEqual((result.text, result.replay, result.schema_mode),
+                         ("Looking.", {"reasoning_content": "I should list."}, "tools"))
+
+    async def test_tool_calls_are_checked_and_adapters_without_them_are_skipped(self):
+        request = ModelRequest([{"role": "user", "content": "go"}], tools=TOOLS)
+        good = ToolAdapter([("", [("run", {"command": "ls"})])])
+        providers = Providers({"plain": {"kind": "openai_compatible"}, "calls": {"kind": "openai_compatible"}},
+                              {"default": [{"provider": "plain", "model": "p"}, {"provider": "calls", "model": "c"}]},
+                              adapters={"plain": FakeAdapter([{"answer": "x"}]), "calls": good})
+        result = await providers.generate(request)
+        self.assertEqual((result.provider, result.tool_calls[0].arguments, result.replay["reasoning_content"]),
+                         ("calls", {"command": "ls"}, "thought"))
+        self.assertIn("plain/p: cannot call tools", result.fallbacks[0])
+        self.assertEqual(good.calls[0]["tools"], TOOLS)
+        for answer, problem in (([("run", {})], "does not match its parameters"), ([("rm", {})], "not one of its tools"),
+                                ([("run", '{"command": ')], "not a JSON object"), ([], "blank answer")):
+            bad = Providers({"calls": {"kind": "openai_compatible"}}, {"default": [{"provider": "calls", "model": "c"}]},
+                            adapters={"calls": ToolAdapter([("", answer)])})
+            with self.assertRaises(ModelError) as caught:
+                await bad.generate(request)
+            self.assertEqual(caught.exception.kind, "invalid_output")
+            self.assertIn(problem, str(caught.exception))
 
 
 class FakeOpenAIClient:
@@ -160,6 +275,45 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(call["messages"][-1]["content"].endswith("(Reply with one JSON object.)"))
         self.assertEqual(REQUEST.messages[0]["content"], "sys")
         self.assertEqual(REQUEST.messages[-1]["content"], "hi")
+
+    async def test_strict_tool_mode_sends_the_schema_as_one_strict_tool_and_reads_its_arguments(self):
+        schema = {"type": "object", "properties": {
+            "note": {"type": "string", "maxLength": 9},
+            "actions": {"type": "array", "maxItems": 6, "items": {"type": "object", "properties": {
+                "tool": {"type": "string", "enum": ["run"]}, "arguments": {"type": "object"}},
+                "required": ["tool", "arguments"], "additionalProperties": False}}},
+            "required": [], "additionalProperties": False}
+        arguments = json.dumps({"note": "", "actions": [{"tool": "run", "arguments": json.dumps({"command": "ls"})}]})
+        call = SimpleNamespace(function=SimpleNamespace(name="turn", arguments=arguments))
+
+        class Client(FakeOpenAIClient):
+            async def create(self, **params):
+                self.calls.append(params)
+                message = SimpleNamespace(content="", tool_calls=[call] if len(self.calls) > 1 else [])
+                return SimpleNamespace(choices=[SimpleNamespace(finish_reason="tool_calls", message=message)],
+                                       usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2))
+        client = Client()
+        result = await OpenAICompatible({"schema_mode": "strict_tool"}, client).complete(
+            "ds", REQUEST.messages, schema, "turn", "high", 100, 30)
+        tool = client.calls[0]["tools"][0]["function"]
+        self.assertEqual((tool["name"], tool["strict"], client.calls[0]["tool_choice"]), ("turn", True, "auto"))
+        sent = tool["parameters"]
+        self.assertEqual(sent["required"], ["note", "actions"])  # every property, as strict mode demands
+        self.assertNotIn("maxLength", sent["properties"]["note"])
+        self.assertNotIn("maxItems", sent["properties"]["actions"])
+        self.assertEqual(sent["properties"]["actions"]["items"]["properties"]["arguments"]["type"], "string")
+        self.assertNotIn("response_format", client.calls[0])
+        self.assertTrue(client.calls[0]["messages"][-1]["content"].endswith("(Answer by calling turn.)"))
+        self.assertEqual(REQUEST.messages[-1]["content"], "hi")
+        self.assertEqual(len(client.calls), 2)  # no tool call and no text: asked once more, as JSON mode is
+        self.assertEqual(json.loads(result.text), {"note": "", "actions": [{"tool": "run", "arguments": {"command": "ls"}}]})
+        self.assertEqual((result.schema_mode, result.output_tokens), ("strict_tool", 4))
+        from core.providers.adapters import from_strict_tool
+        loose = schema["properties"]["actions"]
+        self.assertEqual(from_strict_tool([{"tool": "run", "arguments": '{"command": "ls"}]'}], loose),
+                         [{"tool": "run", "arguments": {"command": "ls"}}])  # a stray bracket after the object
+        self.assertEqual(from_strict_tool([{"tool": "run", "arguments": '["ls"]'}], loose),
+                         [{"tool": "run", "arguments": '["ls"]'}])  # not an object: left for the registry to refuse
 
     async def test_rejected_effort_parameter_is_retried_without_it_once_and_remembered(self):
         client = FakeOpenAIClient(fail_effort=True)

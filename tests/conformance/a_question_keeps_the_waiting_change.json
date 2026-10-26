@@ -1,0 +1,235 @@
+{
+ "name": "a question keeps the waiting change",
+ "config": {
+  "team": {
+   "luna": false,
+   "claude": false,
+   "gemini": false,
+   "grok": false,
+   "deepseek": false,
+   "drafty": {
+    "name": "Drafty",
+    "family": "alpha",
+    "cheap": [
+     "alpha/a-small"
+    ],
+    "strong": [
+     "alpha/a-large"
+    ]
+   },
+   "checky": {
+    "name": "Checky",
+    "family": "beta",
+    "cheap": [
+     "beta/b-small"
+    ],
+    "strong": [
+     "beta/b-large"
+    ]
+   }
+  },
+  "roles": {
+   "router": [
+    "checky"
+   ],
+   "drafter": [
+    "drafty",
+    "checky"
+   ],
+   "judge": [
+    "checky",
+    "drafty"
+   ],
+   "strong": [
+    "checky",
+    "drafty"
+   ],
+   "critic": [
+    "checky",
+    "drafty"
+   ]
+  },
+  "providers": {
+   "alpha": {
+    "kind": "openai_compatible"
+   },
+   "beta": {
+    "kind": "openai_compatible"
+   }
+  }
+ },
+ "inputs": [
+  {
+   "new": "Add MAIN.md."
+  },
+  {
+   "say": "Why is it called MAIN?"
+  },
+  {
+   "check": "all"
+  },
+  {
+   "approve": "workbench.review"
+  },
+  {
+   "approve": "workbench.land"
+  }
+ ],
+ "answers": [
+  {
+   "schema": "workbench_route",
+   "text": "{\"kind\": \"change\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"MAIN.md\", \"content\": \"x\\n\"}}]}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"MAIN.md\", \"actions\": []}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_review",
+   "text": "{\"verdict\": \"approve\", \"say\": \"\", \"summary\": \"Fine.\", \"issues\": []}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_route",
+   "text": "{\"kind\": \"question\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Because it is the main one.\", \"actions\": []}",
+   "truncated": false
+  }
+ ],
+ "expect": {
+  "status": "landed",
+  "workflow": "single",
+  "steps": [
+   [
+    "r1.route",
+    "route",
+    "done"
+   ],
+   [
+    "r1.baseline",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.draft.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.draft.2",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.draft.test",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.draft.diff",
+    "change",
+    "done"
+   ],
+   [
+    "r1.judge",
+    "review",
+    "done"
+   ],
+   [
+    "r1.check",
+    "approval",
+    "skipped"
+   ],
+   [
+    "r2.route",
+    "route",
+    "done"
+   ],
+   [
+    "r2.answer.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r2.check",
+    "approval",
+    "done"
+   ],
+   [
+    "r2.land",
+    "approval",
+    "done"
+   ]
+  ],
+  "said": [
+   [
+    "Checky",
+    "Drafty drafts it; I'll check it and take over only if needed."
+   ],
+   [
+    "Drafty",
+    "MAIN.md"
+   ],
+   [
+    "Checky",
+    "Ready for your review: 1 file (+1 −0). Tests: Ran 6 tests in N.Ns · OK. Checky approved it. Tick every item on the checklist, approve it, then give the final approval to land it. Or tell me what to change."
+   ],
+   [
+    "Checky",
+    "Drafty will look into this one."
+   ],
+   [
+    "Drafty",
+    "Because it is the main one."
+   ],
+   [
+    "Checky",
+    "The change set (1 file (+1 −0)) is still waiting for you: the same checklist (your ticks are kept), then the final approval."
+   ],
+   [
+    "",
+    "☑ 1. MAIN.md · new +1 −0\n☑ 2. Tests: Ran 6 tests in N.Ns · OK\n☑ 3. Checky's notes: approved\n☑ 4. The summary: what changed and why\nEverything is checked: approve the second check."
+   ],
+   [
+    "",
+    "Approved <approval>: workbench.review → success."
+   ],
+   [
+    "",
+    "Approved <approval>: workbench.land → success."
+   ],
+   [
+    "Checky",
+    "Landed as <hash> on main. 1 file (+1 −0)"
+   ]
+  ],
+  "approvals": [
+   "workbench.review",
+   "workbench.review",
+   "workbench.land"
+  ],
+  "outcomes": [
+   "routed",
+   "ready",
+   "routed",
+   "answered",
+   "checked",
+   "landed"
+  ],
+  "commits": 2,
+  "files": [
+   "MAIN.md"
+  ]
+ }
+}

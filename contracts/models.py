@@ -8,14 +8,36 @@ from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 from contracts.messages import FileRef
 
-Effort = Literal["low", "medium", "high"]
+Effort = Literal["low", "medium", "high", "max"]  # "max" added in 1.7: providers that have it think longest
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """A function the model may call (added in 1.7): `parameters` is the JSON schema of its arguments (an object)."""
+
+    name: str
+    description: str
+    parameters: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """One function call in a model's answer (added in 1.7). `arguments` is the parsed JSON object, checked against
+    the tool's `parameters`; `id` pairs the call with its result in later messages."""
+
+    id: str
+    name: str
+    arguments: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
 class ModelRequest:
     """One language-model call.
 
-    `messages` use roles `system`, `user` and `assistant` with plain-text content.
+    `messages` use roles `system`, `user` and `assistant` with plain-text content. With `tools` (1.7), an
+    `assistant` message may also carry `tool_calls` (a list of {id, name, arguments}, as the result gave them) and
+    `replay` (the result's `replay`, sent back as it is), and a `tool` message carries `tool_call_id` and the
+    call's result as `content`.
     `profile` names a configured profile (an ordered list of provider/model candidates);
     `None` uses the session persona's profile, or `default`.
     With `output_schema`, the result's `data` is the parsed, schema-validated JSON object.
@@ -23,6 +45,8 @@ class ModelRequest:
     Candidates that cannot see images are tried last and are told images were attached instead.
     `persona` names the session persona the call is for, so her `$model` choice applies and her message
     can say which model wrote it; without it, the core uses the run's only persona with this profile.
+    With `tools` (1.7), the model answers in words and calls: the result's `tool_calls` are checked against the
+    tools' `parameters`, and `output_schema` is not used. Candidates whose adapter cannot call tools are skipped.
     """
 
     messages: Sequence[Mapping[str, str]]
@@ -34,6 +58,7 @@ class ModelRequest:
     timeout_s: float = 35.0
     images: Sequence[FileRef] = ()
     persona: str | None = None  # added in 1.3; new fields go last
+    tools: Sequence[ToolSpec] = ()  # added in 1.7
 
 
 @dataclass(frozen=True)
@@ -49,6 +74,13 @@ class ModelResult:
     # Added in 1.4 (new fields go last): why each candidate tried before this one did not answer, in order
     # ("deepseek/deepseek-flash: blank answer (not JSON)"); empty when the first one did.
     fallbacks: tuple[str, ...] = ()
+    # Added in 1.7: how many of `input_tokens` the provider read from its prompt cache (billed far cheaper).
+    cached_input_tokens: int = 0
+    # Added in 1.7, for requests with tools: the calls, and what the provider needs back with this answer's
+    # assistant message in later requests (`replay` on that message; DeepSeek's thinking mode refuses requests
+    # without it).
+    tool_calls: tuple[ToolCall, ...] = ()
+    replay: Mapping[str, Any] | None = None
 
 
 class ModelError(RuntimeError):
@@ -68,6 +100,10 @@ class Models(Protocol):
     async def generate(self, request: ModelRequest) -> ModelResult: ...
 
     def profiles(self) -> Sequence[str]: ...
+
+    def ready(self, profile: str | None = None) -> bool:
+        """Whether some candidate of `profile` (default: the run's first persona's) has its provider configured, so
+        a call can be tried (added in 1.6). Engines use it to pick who works before trying; a call can still fail."""
 
 
 # ---- adapters: one provider kind's protocol -------------------------------------------------------------------
@@ -93,6 +129,9 @@ class AdapterResult:
     output_tokens: int = 0
     truncated: bool = False
     schema_mode: str = ""
+    cached_input_tokens: int = 0  # (1.7) of input_tokens, read from the provider's prompt cache
+    tool_calls: tuple[ToolCall, ...] = ()  # (1.7) with tools; unparsable arguments stay a string (refused)
+    replay: Mapping[str, Any] | None = None  # (1.7) sent back with this assistant message
 
 
 class NotConfigured(RuntimeError):
@@ -107,7 +146,11 @@ class ModelAdapter(Protocol):
     (natively if it can, otherwise in the prompt). `images` go with the last user message. Raise
     NotConfigured when the provider cannot be used; any other exception moves on to the next candidate.
     An adapter may also define `async list_models()`, the models its provider offers: IDs, or (ID, release
-    date or datetime) pairs so a provider's `models_since` setting can apply."""
+    date or datetime) pairs so a provider's `models_since` setting can apply.
+
+    One that can call tools sets `supports_tools = True` and takes `tools` (1.7): it offers them as the API's
+    functions, returns the calls in `tool_calls`, and translates `tool_calls`/`replay` on assistant messages and
+    `tool` messages into the API's own form. The core passes `tools` only when a request has some."""
 
     async def complete(self, model: str, messages: Sequence[Mapping[str, str]], schema: Mapping[str, Any] | None,
                        schema_name: str, effort: Effort, max_tokens: int, timeout_s: float,

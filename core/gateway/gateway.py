@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import json
 import datetime as dt
 import secrets
 import time
@@ -87,6 +88,18 @@ class Port:
     def commands(self):
         return self._gateway.manager.commands()
 
+    def models_ready(self, profile: str) -> bool:
+        return self._gateway.manager.providers.profile_ready(str(profile))
+
+    def publish(self, *, link: str | None = None, status=None) -> None:
+        self._gateway.publish(self.name, link, status)
+
+    def directory(self):
+        return self._gateway.directory()
+
+    def approval_status(self, approval_id: str) -> str | None:
+        return self._gateway.approval_status(self.name, str(approval_id))
+
     def log(self, event: str, **fields: Any) -> None:
         self._gateway.audit.record("interface", interface=self.name, detail=event, **fields)
 
@@ -105,6 +118,7 @@ class Gateway:
         self._tick_seconds, self._clock = tick_seconds, clock
         self._admin = GatewayAdmin(self)
         self._ready: dict[str, tuple[bool, str]] = {}
+        self._published: dict[str, dict] = {}  # interface → {"link", "status"}: kept in memory, republished at start
         self._started = False
         self._lock_told: dict[str, float] = {}
         self.forwards = ScopedStore(bottle.db, "kv", "core:forwards")
@@ -332,6 +346,48 @@ class Gateway:
             self.audit.record("interface_ready", interface=interface, ready=bool(ready))
             self._spawn(self.notify(interface, detail, None, "interface_ready" if ready else "interface_not_ready",
                                     {"detail": detail}, ()))
+
+    def publish(self, interface: str, link: str | None, status) -> None:
+        """An interface's link and public status, for the others (InterfacePort.publish, contracts 1.7)."""
+        entry = dict(self._published.get(interface) or {"link": "", "status": {}})
+        if link is not None:
+            if not isinstance(link, str) or len(link) > 2048 or (link and not link.startswith(("http://", "https://"))):
+                raise ValueError("link must be an http(s) URL of at most 2048 characters")
+            entry["link"] = link
+        if status is not None:
+            try:  # JSON only, as browsers read it (no NaN): it goes to other modules and pages as data
+                text = json.dumps(status, ensure_ascii=False, allow_nan=False)
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"status must be plain JSON: {error}") from None
+            if len(text.encode("utf-8")) > 16384 or not isinstance(status, dict):
+                raise ValueError("status must be a JSON object of at most 16 KB")
+            shape = {"place": dict, "people": list, "away": list, "tickets": list}  # contracts.PLACE_STATUS
+            wrong = [name for name, kind in shape.items() if name in status and not isinstance(status[name], kind)]
+            wrong += [name for name in ("people", "tickets") if isinstance(status.get(name), list)
+                      and not all(isinstance(item, dict) for item in status[name])]
+            if wrong:
+                raise ValueError(f"a place's status has the wrong shape for {', '.join(wrong)} (contracts.PLACE_STATUS)")
+            entry["status"] = json.loads(text)
+        self._published[interface] = entry
+
+    def approval_status(self, interface: str, approval_id: str) -> str | None:
+        """pending | approved | denied | expired, for an approval asked in one of `interface`'s conversations (None for
+        any other): a pending one whose run is no longer open counts as expired."""
+        manager = self.manager
+        record = manager.tank.approval(approval_id)
+        if record is None or not str(record.get("address", "")).startswith(f"{interface}:"):
+            return None
+        if record["status"] != "pending":
+            return record["status"]
+        run = manager.tank.run(record["run_id"])
+        return "pending" if run is not None and run.status in ("running", "waiting_input", "waiting_approval") \
+            else "expired"
+
+    def directory(self) -> dict[str, dict]:
+        """Every interface with what it published (copies), and whether it is ready."""
+        return {name: {"link": (self._published.get(name) or {}).get("link", ""),
+                       "status": json.loads(json.dumps((self._published.get(name) or {}).get("status", {}))),
+                       "ready": self._ready.get(name, (True, ""))[0]} for name in self.interfaces}
 
     def ready(self) -> dict[str, tuple[bool, str]]:
         return {name: self._ready.get(name, (True, "")) for name in self.interfaces}

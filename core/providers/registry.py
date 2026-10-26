@@ -15,22 +15,88 @@ from contracts import ModelError, ModelRequest, ModelResult
 from core.providers.adapters import ADAPTERS, NotConfigured, api_key, load_images
 
 FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+RETRY_DELAYS_S = (2.0, 8.0)  # a momentary failure: the same model again after these pauses, then the next candidate
+MAX_RETRY_AFTER_S = 30.0
+
+
+def check_calls(result, tools) -> None:
+    """A tool-calling answer is usable when it says or calls something, and every call names one of the tools
+    with arguments matching its `parameters`."""
+    specs = {tool.name: tool for tool in tools}
+    if not result.tool_calls and not (result.text or "").strip():
+        raise ModelError("invalid_output", "The model gave a blank answer (no words, no calls)", result.text)
+    for call in result.tool_calls:
+        if call.name not in specs:
+            raise ModelError("invalid_output", f"The model called {call.name!r}, which is not one of its tools",
+                             result.text)
+        if not isinstance(call.arguments, Mapping):
+            raise ModelError("invalid_output", f"The call to {call.name} has arguments that are not a JSON object",
+                             result.text)
+        try:
+            jsonschema.validate(dict(call.arguments), specs[call.name].parameters)
+        except jsonschema.ValidationError as error:
+            path = "/".join(str(part) for part in error.absolute_path) or "(arguments)"
+            raise ModelError("invalid_output", f"The call to {call.name} does not match its parameters at {path}: "
+                             f"{error.message}", result.text) from None
+
+
+def transient(error: Exception) -> bool:
+    """A rate limit, a failing or overloaded server, or a dropped connection: worth asking the same model again.
+    Refusals (no balance, a bad request, a wrong key) and timeouts, which already waited their time, are not."""
+    status = getattr(error, "status_code", None)
+    if status is None and isinstance(getattr(error, "code", None), int):
+        status = error.code  # Gemini's errors
+    if isinstance(status, int):
+        return status in (408, 409, 429) or status >= 500
+    return type(error).__name__ in ("APIConnectionError", "RateLimitError", "InternalServerError", "OverloadedError")
+
+
+def retry_after(error: Exception) -> float | None:
+    """The pause the provider asked for (`Retry-After`, in seconds), if it said."""
+    headers = getattr(getattr(error, "response", None), "headers", None) or {}
+    try:
+        return min(float(headers.get("retry-after")), MAX_RETRY_AFTER_S) if headers.get("retry-after") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_json(text: str, schema: Mapping[str, Any]) -> Any:
     match = FENCE.match(text or "")
     body = match.group(1) if match else (text or "").strip()
     try:
-        value = json.loads(body)
+        values = [json.loads(body)]
     except json.JSONDecodeError as error:
-        raise ModelError("invalid_output", f"The model did not return valid JSON: {error.msg}", text) from None
-    try:
-        jsonschema.validate(value, schema)
-    except jsonschema.ValidationError as error:
-        path = "/".join(str(part) for part in error.absolute_path) or "(root)"
-        raise ModelError("invalid_output", f"The model output does not match the schema at {path}: {error.message}",
-                         text) from None
-    return value
+        # A complete object followed by more (a second object, a sentence): every object in it is a candidate, and
+        # the last one that matches the schema is the answer (a model that writes two usually corrects the first).
+        values = _objects(body) if error.msg == "Extra data" else []
+        if not values:
+            raise ModelError("invalid_output", f"The model did not return valid JSON: {error.msg}", text) from None
+    problem = None
+    for value in reversed(values):
+        try:
+            jsonschema.validate(value, schema)
+            return value
+        except jsonschema.ValidationError as error:
+            problem = problem or error
+    path = "/".join(str(part) for part in problem.absolute_path) or "(root)"
+    raise ModelError("invalid_output", f"The model output does not match the schema at {path}: {problem.message}",
+                     text) from None
+
+
+def _objects(body: str) -> list:
+    """The JSON values in `body`, one after another (text between them skipped)."""
+    decoder, found, index = json.JSONDecoder(), [], 0
+    while index < len(body):
+        start = min((position for position in (body.find("{", index), body.find("[", index)) if position >= 0),
+                    default=-1)
+        if start < 0:
+            break
+        try:
+            value, index = decoder.raw_decode(body, start)
+            found.append(value)
+        except json.JSONDecodeError:
+            index = start + 1
+    return found
 
 
 def released_row(item) -> tuple[str, dt.date | None]:
@@ -60,11 +126,17 @@ def matches(patterns, model: str) -> bool:
 
 class Providers:
     def __init__(self, providers: Mapping[str, Mapping[str, Any]], profiles: Mapping[str, list[Mapping[str, Any]]],
-                 adapters: Mapping[str, Any] | None = None, record: Callable[..., None] | None = None):
+                 adapters: Mapping[str, Any] | None = None, record: Callable[..., None] | None = None,
+                 configured: Mapping[str, Mapping[str, Any]] | None = None):
         self._settings = {name: dict(value) for name, value in (providers or {}).items()}
+        # The owner's own settings (core.yml), which a module's suggestion never overrides; the rest of `providers`
+        # (the built-in ones) it does. Without `configured`, all of `providers` counts as the owner's.
+        owners = providers if configured is None else configured
+        self._configured = {name: dict(value) for name, value in (owners or {}).items()}
         self._profiles = {name: [dict(candidate) for candidate in candidates]
                           for name, candidates in (profiles or {}).items()}
         self._adapters = dict(adapters or {})
+        self._given = set(self._adapters)  # adapters handed in (tests): ready by themselves, unlike ones made on use
         self._kinds = dict(ADAPTERS)  # provider kind → adapter factory: the built-in ones, then modules'
         self._record = record or (lambda *args, **kwargs: None)
         self._spacing: dict[str, asyncio.Lock] = {}
@@ -84,8 +156,8 @@ class Providers:
         self._kinds[kind] = factory
 
     def add_provider(self, name: str, settings: Mapping[str, Any]) -> None:
-        """A provider an extension suggests; settings already configured (core.yml) win key by key."""
-        self._settings[name] = {**dict(settings), **self._settings.get(name, {})}
+        """A provider an extension suggests: over the built-in settings, under core.yml's, key by key."""
+        self._settings[name] = {**self._settings.get(name, {}), **dict(settings), **self._configured.get(name, {})}
 
     def key_variables(self) -> set[str]:
         """The environment variables holding the providers' API keys."""
@@ -110,7 +182,7 @@ class Providers:
     def ready(self, name: str) -> bool:
         """Can this provider be called (see configured)?"""
         settings = self._settings.get(name, {})
-        if name in self._adapters:
+        if name in self._given:  # (one made on first use is cached even without a key: it proves nothing)
             return True
         try:
             api_key(settings)  # the same test the built-in adapters make: `disabled` and the like count as unset
@@ -119,6 +191,10 @@ class Providers:
             pass
         kind = settings.get("kind")
         return kind in self._kinds and kind not in ADAPTERS and not settings.get("api_key_env")
+
+    def profile_ready(self, profile: str) -> bool:
+        """Whether some candidate of `profile` can be called (Models.ready, contracts 1.6)."""
+        return any(self.ready(candidate["provider"]) for candidate in self._profiles.get(profile, ()))
 
     def available(self) -> list[str]:
         """Every provider that can be called, used by a profile or not."""
@@ -174,6 +250,21 @@ class Providers:
             self._adapters[name] = self._kinds[kind](settings)
         return self._adapters[name]
 
+    async def _complete(self, provider: str, model: str, call):
+        """`call()`, one request to `provider`, asked again after a pause while it fails transiently (a rate limit
+        hands the work to another model only when it lasts)."""
+        for delay in (*RETRY_DELAYS_S, None):
+            await self._space(provider)
+            try:
+                return await call()
+            except Exception as error:
+                if delay is None or not transient(error):
+                    raise
+                pause = retry_after(error) or delay
+                self._record("provider_retry", provider=provider, model=model, error=type(error).__name__,
+                             delay_s=pause)
+                await asyncio.sleep(pause)
+
     async def generate(self, request: ModelRequest, profile: str | None = None,
                        first: Mapping[str, Any] | None = None) -> ModelResult:
         """`first`: a candidate tried before the profile's own (a model chosen with $model); the profile's
@@ -202,14 +293,19 @@ class Providers:
             started = time.monotonic()
             try:
                 adapter = self._adapter(provider)
-                await self._space(provider)
                 extra = {"images": images} if with_images else {}
-                result = await asyncio.wait_for(
+                if request.tools:
+                    if not getattr(adapter, "supports_tools", False):
+                        skipped.append(f"{provider}/{model}: cannot call tools")
+                        failures.append(f"{provider}/{model}: cannot call tools")
+                        continue
+                    extra["tools"] = tuple(request.tools)
+                result = await self._complete(provider, model, lambda: asyncio.wait_for(
                     adapter.complete(model, messages, request.output_schema,
                                      request.schema_name, candidate.get("effort") or request.effort,
                                      int(candidate.get("max_tokens") or request.max_tokens), request.timeout_s,
                                      **extra),
-                    timeout=request.timeout_s + 5)
+                    timeout=request.timeout_s + 5))
             except NotConfigured as error:
                 failures.append(f"{provider}: not configured ({error})")
                 skipped.append(f"{provider}/{model}: not configured ({error})")
@@ -222,12 +318,20 @@ class Providers:
                 continue
             duration = round(time.monotonic() - started, 3)
             self._record("provider_call", profile=name, provider=provider, model=model, duration_s=duration,
-                         input_tokens=result.input_tokens, output_tokens=result.output_tokens)
+                         input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                         **({"schema_mode": result.schema_mode} if result.schema_mode else {}))
             data, rejected = None, ""
             if result.truncated:
                 invalid = ModelError("invalid_output", "The model output was truncated", result.text)
                 failures.append(f"{provider}/{model}: truncated")
                 rejected = "answer cut off at the token limit"
+            elif request.tools:
+                try:
+                    check_calls(result, request.tools)
+                except ModelError as error:
+                    invalid = error
+                    failures.append(f"{provider}/{model}: invalid output")
+                    rejected = str(error)[:200]
             elif request.output_schema is not None:
                 try:
                     data = parse_json(result.text, request.output_schema)
@@ -243,7 +347,9 @@ class Providers:
                 continue
             return ModelResult(text=result.text, data=data, provider=provider, model=model,
                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
-                               duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped))
+                               duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped),
+                               cached_input_tokens=result.cached_input_tokens,
+                               tool_calls=tuple(result.tool_calls), replay=result.replay)
         if invalid is not None:
             raise invalid
         kind = "not_configured" if failures and all("not configured" in item for item in failures) else "unavailable"

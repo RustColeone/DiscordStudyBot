@@ -133,19 +133,26 @@ naming them.
 
 ## Using it
 
-* **Who answers.** Characters named in the message answer, by name, display name or alias
-  (case-insensitive, as a whole word, ignoring text in quotes or code blocks). "大家", "你们", "各位",
-  "everyone", "everybody", "you all", "you guys", "all of you" and "the team" address everybody, unless
-  a Chinese phrase says they need not ("你们不用...", "不用...大家"). An unaddressed message goes to one
-  character in rotation per conversation. With `chime_in` on, the others may also add something short or
-  stay silent (`pass`); the one in turn always answers, so nobody is left without a reply. A chime-in is
-  one short remark: no tools, questions or hand-offs, and if it fails (or the run's steps are used up) she
-  just stays silent.
+* **Who answers.** Characters the message calls on answer: named at its start ("Luna, ..." or "Hey Luna and
+  Gemini: ..."), at its end ("..., Luna?") or with `@` (by name, display name or alias, case-insensitive,
+  as a whole word, ignoring text in quotes or code blocks). Someone named only in passing ("Luna, what did
+  DeepSeek and I do?") is *mentioned*: once the answer is out she may add her own word, as her choice, or
+  stay silent. A message that names people without calling on anyone ("Can DeepSeek check this?") is for
+  all of them. "大家", "你们", "各位", "everyone", "everybody", "you all", "you guys", "all of you" and "the
+  team" address everybody, unless a Chinese phrase says they need not ("你们不用...", "不用...大家"). An
+  unaddressed message goes to one character in rotation per conversation. With `chime_in` on, the others
+  may also add something short or stay silent (`pass`) after reading her answer; the one in turn always
+  answers, so nobody is left without a reply. A chime-in (or a mentioned character's word) is one short
+  remark: no tools, questions or hand-offs, and if it fails (or the run's steps are used up) she just stays
+  silent.
 * **Long conversations.** Each character reads the last `history_limit` messages word for word. Older
   ones are folded into the conversation's rolling summary, which every character reads, and she can
   look up their exact words with `core.search_history`. `$memory summary` shows the summary.
 * **Replies.** Each character's message appears under her display name. In group conversations it
   quotes the request. The message is sent before her tools run, so people see what she is about to do.
+  Her first message in a job always speaks, and so does her last; the working steps in between may be
+  silent, so a three-step job does not say "good idea" three times (she sees what she already said as
+  `your_messages`).
 * **Work notes.** A character may add a short public reason for a step (at most 480 characters). It
   arrives before her message, labelled `Work note` or `工作说明`.
 * **Teamwork.** A character can give teammates jobs. Their replies follow as they finish, in parallel
@@ -175,15 +182,17 @@ naming them.
 ### The board
 
 The run's state is a board of jobs. A job is
-`{id, character, instruction, after, status, observations, pending, steps, question}`. Its status is
+`{id, character, instruction, after, status, observations, pending, steps, question, said}`. Its status is
 `pending`, `running`, `waiting_approval`, `needs_input`, `complete` or `blocked`. A chime-in job also
-has `optional: true`.
+has `optional: true`; it waits (`after`) for the answering jobs, and starts once they have had their say
+(complete, or waiting for an answer or an approval).
 
 1. **Open** (`run`, `_compact`, `_open`). On the first call the engine first updates the rolling
    summary if enough messages have scrolled out of the window (see below), then records the trigger's
    text as the `goal`, keeps its images and adds one `opening-N` job per character who should answer
    (`participants`, or the next in rotation: the counter `rotation` in `session.store(conversation=True)`).
-   With `chime_in`, the others get optional jobs with the `CHIME` instruction.
+   Mentioned characters get optional jobs with the `MENTION` instruction; with `chime_in`, after an
+   unaddressed message the others get optional jobs with the `CHIME` instruction.
 2. **Absorb events** (`_absorb_events`). Events past `event_cursor` are applied: an `input` (other than
    the trigger itself) answers waiting jobs or opens `reply-N` jobs; a `tool_result` or
    `approval_denied` is matched to the job whose first pending action has that `call_id`, recorded as an
@@ -274,8 +283,9 @@ call; the run goes on either way. The call counts against the run's `budget` lik
 
 ### Speaking and acting
 
-`_say` appends the message to `state["messages"]` and saves before calling
-`session.reply(..., persona=..., label=...)`, so a restart does not repeat it.
+`_say` appends the message to `state["messages"]` (and to the job's `said`) and saves before calling
+`session.reply(..., persona=..., label=...)`, so a restart does not repeat it. A quiet working step says
+nothing, or only its work note.
 
 `_act` runs a batch in order. Every action gets its `call_id` (`c1`, `c2`, ...) first, and the batch is
 saved in the job's `pending` before the first call; each observed result removes its action. So a
@@ -332,8 +342,9 @@ fake model per character. It checks rotation and naming (including the `Haiku` a
 starts one job per character in parallel and each reply names its own model; tools, work notes and
 `after` dependencies on one board; a write that waits for approval across a restart and runs once; two
 approvals resuming the run only when both are done; `$commands` and their answers left out of history;
-chime-in (the one in turn answers, the others may pass, and a `pass` from the one in turn is
-corrected); the rotation kept per conversation across restarts; old messages folded into the summary
+chime-in (the one in turn answers, the others may pass after reading her answer, and a `pass` from the
+one in turn is corrected); working steps that stay quiet while the first and last always speak; someone
+mentioned in passing adding her word after the answer, or passing; the rotation kept per conversation across restarts; old messages folded into the summary
 every character reads, only once `compact_every` have scrolled out; chime-ins limited to one quiet remark;
 a full board still taking plain replies; settings written as strings; messages of the same second kept in
 view; `$commands` never hiding older messages; a failed summary not retried on every message; a question

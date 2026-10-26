@@ -441,13 +441,13 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_waiting_for_a_delivery_does_not_use_an_approved_actions_time(self):
         core = await self.core({"permissions": {"*": {"rules": {"tools.make_file": "ask"}}},
-                                "assignments": {"*": {"budget": {"seconds": 0.2}}},
-                                "extension_config": {"fake": {"interfaces": {"chat": {"delay": 0.3, "progress": True}}}}})
+                                "assignments": {"*": {"budget": {"seconds": 1.0}}},  # room for a busy machine
+                                "extension_config": {"fake": {"interfaces": {"chat": {"delay": 1.5, "progress": True}}}}})
         await iface(core).say("$makefile notes.txt")  # a member's command, waiting for the owner
         await settle(core)
         approval = core.tank.approval(iface(core, "owner").notices("approval_request")[0].data["approval_id"])
         await iface(core, "owner").say(f"$approve {approval['id']}", conversation="dm", sender="boss")
-        await settle(core)  # its progress message takes 0.3 seconds to deliver, longer than the whole budget
+        await settle(core)  # its progress message takes 1.5 seconds to deliver, longer than the whole budget
         self.assertEqual([result["status"] for result in self.reported(core, approval)], ["success"])
         self.assertIn("file ready", iface(core).texts("room", "progress"))
 

@@ -43,7 +43,7 @@ class Core:
         self.tank = Tank(config.data_dir / "tank.db")
         self.bottle = Bottle(config.data_dir / "gateway.db")
         self.providers = Providers(config.providers, {}, adapters=self._provider_adapters,
-                                   record=self.audit.record)
+                                   record=self.audit.record, configured=config.configured_providers)
         self.manager = Manager(self.tank, self.providers, personas=config.personas, assignments=config.assignments,
                                owners=config.owners, control=config.control, data_dir=config.data_dir,
                                audit=self.audit)

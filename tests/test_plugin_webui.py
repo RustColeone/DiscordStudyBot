@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 import aiohttp
+from aiohttp import web
 
 from contracts import Address, Reply, Request, Sender
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
@@ -87,6 +88,28 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
     async def say(self, ws, text, conversation="classroom", **extra):
         await ws.send_json({"type": "send", "conversation": conversation, "text": text, "id": extra.pop("id", None)
                             or f"t{id(text)}{len(text)}", **extra})
+
+    # ---- the mini map -----------------------------------------------------------------------------
+    async def test_the_mini_map_shows_the_places_other_interfaces_publish(self):
+        lab = {"place": {"name": "Lab", "icon": "🧪", "note": "1 at work"},
+               "people": [{"key": "claude", "name": "Claude", "avatar": "claude", "doing": "drafting", "title": "Fix"}],
+               "away": ["claude"], "tickets": [{"key": "deepseek", "by": "DeepSeek", "title": "Add rooms",
+                                                "link": "http://lab.local:4157/#t-2"}]}
+        web_ = await self.start({"places_poll_s": 2})
+        ws, state = await self.socket()
+        self.assertIsNone(state["places"])  # nobody else published a place: no map
+        seen = iface(self.core, "chat").port.directory()["webui"]
+        self.assertEqual((seen["status"]["place"]["name"], seen["link"]), ("Classroom", web_.address_shown))
+        self.assertIn("deepseek", {person["key"] for person in seen["status"]["people"]})  # the classmates, published
+        iface(self.core, "chat").port.publish(link="http://lab.local:4157/", status=lab)  # the lab, next door
+        event, _ = await self.until(ws, lambda item: item["type"] == "places", limit=6)
+        other = event["places"]["others"][0]
+        self.assertEqual((other["interface"], other["tickets"][0]["title"], other["away"]), ("chat", "Add rooms", ["claude"]))
+        self.assertEqual(event["places"]["here"]["place"]["name"], "Classroom")
+        ws2, state2 = await self.socket()
+        self.assertEqual(state2["places"]["others"][0]["link"], "http://lab.local:4157/")  # a page opened later
+        await ws.close()
+        await ws2.close()
 
     # ---- talking --------------------------------------------------------------------------------
     async def test_a_message_reaches_the_engine_as_the_creator_and_the_answer_arrives_live_and_stays(self):

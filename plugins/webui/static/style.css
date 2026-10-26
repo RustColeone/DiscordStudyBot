@@ -354,3 +354,22 @@ body.is-dragging .composer-row { border: 2px dashed var(--accent); }
 .login button { border: 0; background: var(--accent); color: var(--accent-ink); padding: 11px; border-radius: 14px;
                 font-weight: 700; }
 .login-error { color: #b4512d !important; min-height: 1.2em; }
+
+/* the mini map: the classroom (here), the corridor (invitations to the lab), the lab next door */
+.map { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 4px; }
+.map[hidden] { display: none; }
+.place { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; color: var(--ink);
+         text-decoration: none; border: 1px solid var(--line); background: var(--paper); border-radius: 12px; padding: 7px 8px; }
+a.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.place.is-here { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--paper)); }
+.place-name { font-size: .78rem; font-weight: 800; }
+.place-faces { display: flex; flex-wrap: wrap; gap: 2px; min-height: 24px; }
+.place-faces .avatar { width: 22px; height: 22px; font-size: .62rem; }
+/* she has an invitation to the lab for you: a pulsing ring (the corridor holds its ticket) */
+.place-faces .avatar.has-ticket { box-shadow: 0 0 0 2px var(--accent); animation: door 1.6s ease-in-out infinite; }
+.place-note { font-size: .66rem; color: var(--muted); line-height: 1.25; }
+.corridor { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 14px;
+            border-top: 2px dashed var(--line); border-bottom: 2px dashed var(--line); margin: 14px 0; padding: 0 2px; }
+.door { display: flex; align-items: center; gap: 1px; text-decoration: none; font-size: .7rem; animation: door 1.6s ease-in-out infinite; }
+.door .avatar { width: 20px; height: 20px; font-size: .6rem; }
+@keyframes door { 50% { opacity: .45; } }

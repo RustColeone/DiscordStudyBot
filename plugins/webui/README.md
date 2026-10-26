@@ -52,6 +52,9 @@ It loads by default. To change anything, copy [`config.example.yml`](config.exam
 | `classmates` | `[Luna, Gemini, Claude, DeepSeek, Grok]` | Display names of those personas, in the same order (a missing one is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
 | `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget; `options` are merged key by key over the web UI's). |
 | `max_upload_mb` | 50 | Largest upload and largest file the core sends here; also sizes the server's request limit. |
+| `map` | true | The mini map: the classroom and the places other interfaces publish in the core's directory (contracts 1.7), such as the lab, read every `places_poll_s` (5) seconds while a page is open. The classroom publishes itself too (its link and classmates), so other interfaces can draw it. Classmates visiting another place show there instead of in class; one holding an invitation for you stays in class with a pulsing ring, its ticket in the corridor. No other place: no map. `false` turns it off. |
+
+A link to a chat (`http://<page>/#<chat>`, as the lab's "open the classroom" makes) opens that chat.
 
 Keys the code reads that the example file does not list: `interface` (the interface name, default
 `webui`), `passphrase_env` (the env var to read the passphrase from, default `WEBUI_PASSPHRASE`),

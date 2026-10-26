@@ -20,8 +20,11 @@ persona, a model profile and the defaults that make it work as soon as it is dro
 | Permissions | `whale_chan:*` | `tiers: {write: always-ask, critical: always-ask}` |
 | Setting | `token` | `secret`, env `DISCORD_BOT_TOKEN_WHALE_CHAN`, checked by logging in to Discord |
 | Setting | `display_name` | `text`, default `鲸酱` |
+| Capability | `whale_chan.speak` | `prepare`: a short text spoken aloud as a voice message ([`voice.py`](voice.py)); off with `voice: {enabled: false}` |
 
-No capabilities. The assignment, admission and permissions are suggestions: core.yml and runtime edits
+Her memory and mood are kept by [mneme-llm](../../../mneme-llm/README.md), a standalone package (one SQLite file any
+model can use) installed next to the core with `venv/bin/pip install -e ../mneme-llm`; without it she uses the
+core's diary. The assignment, admission and permissions are suggestions: core.yml and runtime edits
 win, setting by setting. Without a token, only the engine, persona and profile load (the log says
 `no_token`), and you can assign them to any conversation:
 
@@ -99,17 +102,46 @@ modules:
   to the core. Images are shown to the model (at most 6 per call); files from tools are sent back.
 * **Limits.** `max_steps` per message, then she answers from what she has and says what remains
   unverified. The run budget is 30 model calls, 24 tool calls and 30 minutes.
+* **Memory.** What she learns about each person (facts, preferences, plans, what happened, her own
+  impressions) is kept in mneme-llm. After each reply, the same decision request that judges her mood asks
+  whether anything was worth keeping; only then does a short call write the notes (at most 8 everyday notes a
+  day), so her own turns carry no note-taking at all. Each message brings up the notes that match it in words or
+  in meaning (OpenAI embeddings, falling back to word centroids learned from them, then to her model unifying
+  the language), important facts and the newest episode, with dates as people say them ("yesterday", "in 2
+  days"). A newer note with the same key ("user.city") replaces the older one, and the history keeps both.
+  Once a day per person she rewrites her short impression of them. The first time she meets someone in
+  mneme-llm, their core-diary notes are brought over. Inspect or fix it with
+  `python -m mneme_llm --db … notes discord:<id>`.
+* **Mood.** After each reply, how it left her feeling is judged, in the same request as the note gate:
+  GPT-6 Luna's decisions when `OPENAI_API_KEY` is set (about 0.3 s and at most $0.0001), else the micro model once it
+  has learned Luna's judgement, else one short call to her own model. Her mood (0–100, settling at 70) and her feelings
+  (开心 踏实 甜蜜 心疼 担心 难过 吃醋) fade by themselves. She hears what moved her once, in her next prompt.
+  It only drops from aching for you, worry or sadness, never from being cross with you.
+* **Speaking up.** With `speak_up: {enabled: true}` she may message her owner first: a local dice roll
+  every 30 minutes, likelier after a long quiet and off-peak, never in quiet hours (1–8), within 20
+  minutes of her own message, or before you answered her last one. Her reason comes from memory (an exam
+  you mentioned for tomorrow), a lingering feeling, or the time of day. It starts as a dry run that only
+  writes down what it would have done. `/speakup status|rehearse|now|on|off|dry` (owner only).
+* **Voice.** `/voice on` makes her short replies voice messages in that chat (`/voice off`, `/voice`
+  shows which); her own speak-ups come as voice messages too. OpenAI speech (`gpt-4o-mini-tts`, voice
+  `coral`, with a style instruction) by default; Piper, a local voice, is an optional backend
+  ([`voice_piper.py`](voice_piper.py)), not installed by default and safe to delete. Code, links and math
+  are never read aloud, and replies over 400 characters stay text.
 
 ## How it works
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`extension.py`](extension.py) | 84 | Declaration, settings, token check, persona prompt; `setup` builds everything from `context.config` |
-| [`engine.py`](engine.py) | 356 | `ChatEngine` (`chat`): the turn loop, thread context, images, diary |
-| [`bot.py`](bot.py) | 341 | `WhaleChanBot`: the Discord interface (incoming messages, slash commands, buttons, delivery) |
+| [`extension.py`](extension.py) | 108 | Declaration, settings, token check, persona prompt; `setup` builds everything from `context.config` |
+| [`engine.py`](engine.py) | 488 | `ChatEngine` (`chat`): the turn loop, thread context, images, memory, speak-up turns, voice and mood after a reply |
+| [`bot.py`](bot.py) | 482 | `WhaleChanBot`: the Discord interface (incoming messages, slash commands, buttons, delivery, voice messages, the speak-up loop) |
+| [`companion.py`](companion.py) | 117 | Her memory and mood in mneme-llm (optional; the engine falls back to the core diary) |
+| [`speakup.py`](speakup.py) | 287 | Speaking up: the dice rules, motives and the ledger of who spoke when |
+| [`voice.py`](voice.py) | 125 | `whale_chan.speak` and the OpenAI speech backend |
+| [`voice_piper.py`](voice_piper.py) | 55 | Optional local Piper backend, loaded only with `voice: {backend: piper}` |
 | [`slash.py`](slash.py) | 117 | Translating the core's `Command` catalog to Discord application commands and back; pending interactions |
 | [`math_render.py`](math_render.py) | 169 | Inline math to Unicode, display math to PNG with Matplotlib |
-| [`config.example.yml`](config.example.yml) | 48 | Documented settings to copy |
+| [`config.example.yml`](config.example.yml) | 109 | Documented settings to copy |
 | `.gitignore` | 2 | Keeps `config.yml` out of git when the folder is its own repository |
 
 **Setup** ([`extension.py:53-75`](extension.py)). `setup` reads `context.config`, builds the persona and
@@ -155,9 +187,18 @@ Design decisions:
   before running tools, `chat` shows it as progress and posts only the answer, like a web chat client.
 * **A thread boundary, not a deletion.** `/new` stores the time in the persona's memory under
   `thread_since:<address>`; history is kept and only filtered.
-* **Model-written diary.** Notes of importance 3 or more are written through `session.diary`; the core
-  enforces the format and limits, and people manage them with `$memory`. The assignment option
-  `diary: false` turns it off.
+* **Memory that outlives the model.** Notes go to mneme-llm, whose file any model or project can read, so
+  switching her model keeps what she knows. They are written after the reply by a note writer
+  (`memory.writer_profile`, her own model by default), not by her turn, so their quality does not depend on
+  the chat model and her prompt carries no note-taking. `memory: {engine: core}` (or no mneme-llm) uses
+  `session.diary` from the turn's `diary` field instead, where the core enforces the format and people manage
+  notes with `$memory`. The assignment option `diary: false` turns both off. The notes and mood news are
+  computed once per run, so every step and a replayed run see the same prompt.
+* **After the reply, not before.** Voice and the mood judgement run once the answer is posted (a replayed
+  run skips them), so she never answers slower; a message that arrives meanwhile starts the next run.
+* **Speak-ups are hers.** Interfaces only submit requests for people, so a speak-up goes in her owner's
+  name, marked in `extra.speak_up`, which only the bot's code sets; the bot strips the mark from anything
+  typed, and the engine shows the turn to her as her own impulse, with no tools.
 * **Per-conversation overrides.** `max_steps`, `history_limit`, `effort`, `new_chat_text`,
   `instructions`, `owner_instructions` and `diary` can be set in an assignment's `options`;
   `max_tokens` and `history_chars` only in the module's config.
@@ -181,7 +222,12 @@ Safety:
   default.)
 * `<data dir>/extensions/whale_chan/math/`: rendered equations, deleted after they are sent.
 * Her interface's bottle: `slash_fingerprint`, the hash of the registered commands.
-* The `whale_chan` persona's memory: `thread_since:<address>` per conversation.
+* The `whale_chan` persona's memory: `thread_since:<address>` and `voice:<address>` per conversation.
+* `<data dir>/extensions/whale_chan/mneme-llm.db`: her notes (with their vectors and glosses), profile cards,
+  mood, mood timeline and the micro models, per person (`python -m mneme_llm --db … export` moves it anywhere).
+* `<data dir>/extensions/whale_chan/speak_up.json`: when she and each person last wrote, unanswered
+  speak-ups, the misses in a row, the last 50 rolls, and the owner's `/speakup` switches.
+* Voice messages are written to the run's workspace (`voice/`), like other tool files.
 * Kept by the core, not the module: conversation history, runs (the engine's state holds the step
   transcript), diary notes (at most 200 per persona and person; `$memory` reads, forgets or clears them).
 
@@ -195,9 +241,20 @@ Safety:
 * `WhaleChanSetupTests`: without a token only the engine, persona and profile load; the token comes
   from the environment or the local config; defaults follow a renamed `interface`; long text splits
   within 2,000 characters; the folder's `.gitignore` lists `config.yml`.
-* `WhaleSlashTests`: her slash commands are `/new` plus the catalog entries named in `slash_commands`
-  (others, such as `call`, are left out); `/new` is submitted as text, and the reply edits the
-  placeholder.
+* `WhaleSlashTests`: her slash commands are `/new`, `/voice` and `/speakup` plus the catalog entries
+  named in `slash_commands` (others, such as `call`, are left out); `/new` is submitted as text, and the
+  reply edits the placeholder.
+* `CompanionTests` (a real core): notes are written after the reply and recalled with dates, with no diary in
+  her turn; dated plans; small talk never reaches the note writer; her impression is rewritten at most daily;
+  the core diary when mneme-llm is off; the mood judged by her own model without Luna and told once; a
+  speak-up is her impulse
+  with no tools, and the mark typed by a person is an ordinary message; `/voice on` sends short replies
+  as voice messages and never reads code aloud.
+* `SpeakUpRuleTests`: the hit line (peak hours, timing, misses and their cap); quiet hours, cooldown and
+  an unanswered message; dry runs only write down; the ledger survives restarts; motives from memory,
+  feelings, silence and the clock.
+* `WhaleBotExtrasTests`: only the owner steers speaking up; a voice message is measured (length and
+  waveform) for Discord.
 
 ```
 venv/bin/python -m unittest tests.test_plugin_whale_chan

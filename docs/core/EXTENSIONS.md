@@ -23,6 +23,7 @@ build:
 | [`host`](../../extensions/host/README.md), [`terminal`](../../extensions/terminal/README.md) | Capabilities (terminal also an engine) | Sensitive actions: owner-only, private data, secret paths, approvals and confirmations |
 | [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
 | [`room`](../../extensions/room/README.md) | Engine, personas, providers | Several personas on one work board, parallel jobs, shipping your own model profiles |
+| [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
 | [`webui`](../../plugins/webui/README.md) | Interface (plugin) | An interface you can drop in: a web page, its protocol and its security |
@@ -138,12 +139,25 @@ personas:
 ```
 
 A profile is an ordered list of candidates; the next is tried when one fails, or when its answer cannot be
-used (blank, not the requested JSON, cut off at the token limit). A switch is never silent: the result's
+used (blank, not the requested JSON, cut off at the token limit). A transient failure (a rate limit, a 5xx, a
+dropped connection) is asked again after 2 and 8 seconds, or after the provider's `Retry-After` (at most 30), before
+the next candidate; each retry is `provider_retry` in the audit log. Refusals such as no balance (402) move on at once. A switch is never silent: the result's
 `fallbacks` say why each earlier candidate did not answer, the audit log records `provider_failed` or
 `provider_rejected` with the reason, and the persona's message carries it (`reply.data["fallback"]`).
 `inline_history: true` (on for DeepSeek) sends a JSON request's earlier turns written into one message,
 because DeepSeek's JSON mode often answers blank after an assistant turn; a blank JSON-mode answer is
-asked once more. An extension may ship default personas in `Contributions.personas`; a configured
+asked once more. `schema_mode` says how an OpenAI-compatible provider is held to the requested JSON: `native`
+(a `json_schema` response format), `json_object` (JSON mode, the schema written into the prompt) or
+`strict_tool` (the answer as the arguments of one strict tool call: every property required, an object without
+properties sent as a JSON string and decoded back, limits checked only here; DeepSeek offers it on
+`base_url: "https://api.deepseek.com/beta"`, and its thinking mode needs `tool_choice: auto`, so a reply that
+comes as text is read as text). A request with `tools` (`ToolSpec`s) gets the model's own function calls
+instead: `ModelResult.tool_calls`, each checked against its tool's `parameters` (a refusal is invalid output, like
+JSON that does not match), and `replay`, which goes back on that answer's assistant message in later requests
+(`tool_calls` and `replay` on assistant messages, `tool` messages with `tool_call_id`). DeepSeek's thinking mode
+refuses a tool request whose earlier assistant messages lack their `reasoning_content`, which `replay` carries.
+Only adapters with `supports_tools` take them (the OpenAI-compatible one); other candidates are skipped. An
+extension may ship default personas in `Contributions.personas`; a configured
 persona with the same name wins.
 
 ### Model providers
@@ -256,7 +270,7 @@ Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, sec
   (`token: …`) is supported for people who would rather not edit the environment; then
   `chmod 600 config.yml`, and never share or copy the folder together with its `config.yml`.
 * **Defaults that make a drop-in work on its own:** `Contributions` may also carry model `providers`
-  (name → settings, as in core.yml; settings core.yml gives the same provider win key by key), model
+  (name → settings, as in core.yml; over the built-in settings, and under those core.yml gives, key by key), model
   `profiles` (name → ordered candidates, as in core.yml; they may use the module's own providers), and
   `assignments` / `admission` for the extension's own interfaces only (`<interface>:*` or
   `<interface>:<conversation>`; anything else refuses to load), and
@@ -305,8 +319,13 @@ needs) and [`extensions/discord`](../../extensions/discord/interface.py) (a full
 | `bottle` | Your private persistent store (below). |
 | `commands()` | The command catalog (`Command` declarations: built-ins, capability and operation commands) for a native command menu or your own help. Translate a menu selection into its `$` text with `command.render(values)` and submit that as the request's text. |
 | `log(event, **fields)` | Audit log entry (no message text, please). |
+| `models_ready(profile) -> bool` | (contracts 1.7) Whether some candidate of a model profile can be called (its provider has a key), so a page can show who can answer before anyone asks. Engines and capabilities have `models.ready(profile)`. |
+| `publish(link=None, status=None)` | (contracts 1.7) Tell the other interfaces where people reach you (`link`, an http(s) URL) and a small public status (a JSON object, at most 16 KB), so they can link to you and show what happens here. Each call replaces what it names. A status that describes a place follows `contracts.PLACE_STATUS`: `{"place": {"name", "icon", "note"}, "people": [{"key", "name", "avatar", "doing", "title"}], "away": [keys of people from elsewhere who are here now], "tickets": [{"key", "by", "title", "link"}]}`; any interface can then draw any other place (the web UI's mini map draws the lab this way, and the lab draws the classroom). A key is the name lowercased with only its letters and digits kept, in any script ("Flash-chan" → "flashchan"); an empty key matches nobody. The status must be plain JSON (no NaN or Infinity) and a place's lists must have that shape, else `ValueError`. Kept in memory while the core runs; publish again at start. |
+| `directory()` | (contracts 1.7) What every interface has published: name → `{"link", "status", "ready"}` (copies). |
+| `approval_status(approval_id) -> str \| None` | (contracts 1.7) `pending`, `approved`, `denied` or `expired` for an approval asked in one of your conversations (None for any other). A pending one whose run is no longer open counts as expired. Ask it before offering an approval card's buttons: a card may have been decided elsewhere (typed, in another interface) or have expired with its run. |
 
-All port methods act only on your own interface's addresses; anything else raises `ValueError`.
+All port methods act only on your own interface's addresses (except `directory`, which only reads); anything else
+raises `ValueError`.
 
 ### Submitting requests
 
@@ -501,6 +520,9 @@ for members and every conversation's items for admins. Describe the admin behavi
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
+`history` (contracts 1.6: the calling conversation's history to read, `recent`, `search` and `summary`, as engines see
+it; for capabilities that carry a conversation elsewhere or work from it, such as the workbench's invitation to the
+lab; a capability cannot change it);
 `files` (files people attached to the run's requests; `own_files`: only those of the person who started the run, which is what anything writing them somewhere should use); `storage` (your extension's private store, shared by your capabilities, the same as `store()`; `store(conversation=, persona=, person=)` scopes it, see [Storing data](#storing-data); committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a
 directory for this run's output files); `await progress(text)`; `await schedule(at, text)`
@@ -529,6 +551,11 @@ class MyEngine(Engine):
         return RunYield.DONE
 ```
 
+A run that is cancelled raises `asyncio.CancelledError` in your `run`. When the core is only stopping (it will
+replay the run on the next start), the error carries `contracts.SHUTDOWN` in its `args` (contracts 1.7): an engine
+that keeps state of its own (a task board, say) should leave it as it is then, and record a cancellation only for
+any other one (`$cancel`, a conversation cancelled).
+
 `session` gives you:
 
 | Handle | Use |
@@ -549,7 +576,7 @@ class MyEngine(Engine):
 | `history.summary()`, `history.summarize(text, upto)` | The conversation's rolling summary (`HistorySummary`: `text`, `upto`, `updated_at`), shared by every engine and persona in it. An engine compacting older history writes it (1 to 8000 characters; secrets are scrubbed and what is stored is kept within 8000) covering messages up to `upto`, a finite time (otherwise `ValueError`); people read and clear it with `$memory`. |
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
-| `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). |
+| `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). `result.cached_input_tokens` (contracts 1.7) is how many of `input_tokens` the provider read from its prompt cache, which it bills far cheaper; `effort` may be `max` (1.7) for providers that think longest at it. Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). `models.ready(profile)` (contracts 1.6) says whether some candidate of a profile has its provider configured, so an engine can pick who works before trying. |
 | `tools.list()`, `await tools.call(name, args, call_id)` | Capabilities allowed here, and calling them under policy. Never raises for policy; check `result.status` (`success`, `failed`, `needs_input`, `needs_approval`). |
 | `await reply(text, quote=None, persona=None, label="")`, `await send_file(file)`, `await progress(text)` | Output; returns the interface's `Delivery` (or a refusal such as `run_closed`, `conversation_disabled`, `too_large`). `persona` (one of the session's) makes the persona's display name the reply's `speaker` and the sender name in history; `label` qualifies it (for example a work note, recorded with kind `note`). |
 
@@ -562,6 +589,10 @@ Return one of:
   run with a `tool_result` or `approval_denied` event.
 
 Exceptions fail the run: the conversation receives a `run_failed` notice and the owner the detail.
+
+A running run that is cancelled (`$cancel`) gets `asyncio.CancelledError` inside `run`. A run that is waiting
+(for input or an approval) has nothing running to receive it, so the core calls `stopped(session, reason)` instead:
+optional, with the run's last saved `state`, for putting right what still shows the work as going.
 
 ### Writing a resumable engine
 

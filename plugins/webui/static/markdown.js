@@ -8,17 +8,24 @@
   const escape = (text) => String(text).replace(/[&<>"']/g, (c) => ESCAPES[c]);
   const BLOCK = /^\u0001(\d+)\u0001$/;
 
+  const emphasis = (text) => text
+    .replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<strong>$1</strong>")
+    .replace(/__(?=\S)([\s\S]*?\S)__/g, "<strong>$1</strong>")
+    .replace(/(^|[^*\w])\*(?=[^\s*])([^*]*?[^\s*])\*(?!\w)/g, "$1<em>$2</em>")
+    .replace(/(^|[^_\w])_(?=[^\s_])([^_]*?[^\s_])_(?!\w)/g, "$1<em>$2</em>")
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>");
+
+  // Each finished link is set aside before the next pass, so no pass ever runs inside a tag it made (an autolink
+  // inside a link's href would open the attribute), and emphasis never reaches into a URL.
   function inline(text) {
-    return text
-      .replace(/\*\*(?=\S)([\s\S]*?\S)\*\*/g, "<strong>$1</strong>")
-      .replace(/__(?=\S)([\s\S]*?\S)__/g, "<strong>$1</strong>")
-      .replace(/(^|[^*\w])\*(?=[^\s*])([^*]*?[^\s*])\*(?!\w)/g, "$1<em>$2</em>")
-      .replace(/(^|[^_\w])_(?=[^\s_])([^_]*?[^\s_])_(?!\w)/g, "$1<em>$2</em>")
-      .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "<del>$1</del>")
-      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)\u0000]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-      .replace(/(^|[\s(])(https?:\/\/[^\s<\u0000]*[^\s<.,;:!?)\]'"&\u0000])/g,
-        '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+    const links = [];
+    const hold = (url, label) => "\u0002" + (links.push(
+      `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`) - 1) + "\u0002";
+    text = text
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)\u0000-\u0002]+)\)/g, (match, label, url) => hold(url, emphasis(label)))
+      .replace(/(^|[\s(])(https?:\/\/[^\s<\u0000-\u0002]*[^\s<.,;:!?)\]'"&\u0000-\u0002])/g,
+        (match, before, url) => before + hold(url, url));
+    return emphasis(text).replace(/\u0002(\d+)\u0002/g, (match, index) => links[Number(index)] ?? "");
   }
 
   function cells(line) {
@@ -37,7 +44,7 @@
       const html = `<span class="math${display ? " math-display" : ""}" data-math="${maths.length - 1}"></span>`;
       return display ? block(html) : keep(html);
     };
-    let text = String(source || "").replace(/\r\n?/g, "\n").replace(/[\u0000\u0001]/g, "");
+    let text = String(source || "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0002]/g, "");
 
     text = text.replace(/(^|\n)[ \t]*```([\w+#.-]*)[^\n]*\n([\s\S]*?)(?:\n[ \t]*```[ \t]*(?=\n|$)|$)/g,
       (match, before, lang, code) => before + block(

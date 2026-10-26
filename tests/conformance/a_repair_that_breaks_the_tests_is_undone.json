@@ -1,0 +1,222 @@
+{
+ "name": "a repair that breaks the tests is undone",
+ "config": {
+  "team": {
+   "luna": false,
+   "claude": false,
+   "gemini": false,
+   "grok": false,
+   "deepseek": false,
+   "drafty": {
+    "name": "Drafty",
+    "family": "alpha",
+    "cheap": [
+     "alpha/a-small"
+    ],
+    "strong": [
+     "alpha/a-large"
+    ]
+   },
+   "checky": {
+    "name": "Checky",
+    "family": "beta",
+    "cheap": [
+     "beta/b-small"
+    ],
+    "strong": [
+     "beta/b-large"
+    ]
+   }
+  },
+  "roles": {
+   "router": [
+    "checky"
+   ],
+   "drafter": [
+    "drafty",
+    "checky"
+   ],
+   "judge": [
+    "checky",
+    "drafty"
+   ],
+   "strong": [
+    "checky",
+    "drafty"
+   ],
+   "critic": [
+    "checky",
+    "drafty"
+   ]
+  },
+  "providers": {
+   "alpha": {
+    "kind": "openai_compatible"
+   },
+   "beta": {
+    "kind": "openai_compatible"
+   }
+  },
+  "verify": {
+   "requirements": true,
+   "probe": true,
+   "repairs": 1
+  }
+ },
+ "inputs": [
+  {
+   "new": "Add greet() in clubnotes/greet.py that returns 'hello'. Keep the list output unchanged.",
+   "workflow": "single"
+  }
+ ],
+ "answers": [
+  {
+   "schema": "workbench_route",
+   "text": "{\"kind\": \"change\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_requirements",
+   "text": "{\"requirements\": [{\"text\": \"greet() returns 'hello'\", \"kind\": \"behavior\"}, {\"text\": \"The list output stays the same\", \"kind\": \"keep\"}]}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"clubnotes/greet.py\", \"content\": \"def greet():\\n    return 'hi'\\n\"}}]}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"greet() added.\", \"actions\": []}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Probed.\", \"actions\": [], \"findings\": [{\"criterion\": \"R1\", \"problem\": \"greet() says hi\", \"evidence\": \"printed hi\"}]}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\", \"content\": \"broken(\\n\"}}]}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Fixed it, I think.\", \"actions\": []}",
+   "truncated": false
+  }
+ ],
+ "expect": {
+  "status": "review",
+  "workflow": "single",
+  "steps": [
+   [
+    "r1.route",
+    "route",
+    "done"
+   ],
+   [
+    "r1.baseline",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.requirements",
+    "requirements",
+    "done"
+   ],
+   [
+    "r1.single.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.single.2",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.single.test",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.single.diff",
+    "change",
+    "done"
+   ],
+   [
+    "r1.probe.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.repair1.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.repair1.2",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.repair1.test",
+    "validate",
+    "failed"
+   ],
+   [
+    "r1.repair1.diff",
+    "change",
+    "done"
+   ],
+   [
+    "r1.repair1.undo",
+    "change",
+    "done"
+   ],
+   [
+    "r1.check",
+    "approval",
+    "running"
+   ]
+  ],
+  "said": [
+   [
+    "Checky",
+    "Drafty will do this one on her own."
+   ],
+   [
+    "Checky",
+    "I'll try to break it before it comes to you."
+   ],
+   [
+    "Checky",
+    "I found 1 problem(s): greet() says hi. Drafty fixes them."
+   ],
+   [
+    "Drafty",
+    "greet() added."
+   ],
+   [
+    "Checky",
+    "The fix for what Checky found didn't pass (the tests fail (Ran 1 test in N.Ns · FAILED (errors=1))), so the change is back as it was before it, with her findings left for you: greet() says hi."
+   ],
+   [
+    "Checky",
+    "Ready for your review: 1 file (+2 −0). Tests: Ran 6 tests in N.Ns · OK. Tick every item on the checklist, approve it, then give the final approval to land it. Or tell me what to change."
+   ]
+  ],
+  "approvals": [
+   "workbench.review"
+  ],
+  "outcomes": [
+   "routed",
+   "ready"
+  ],
+  "commits": 1,
+  "files": [
+   "clubnotes/greet.py"
+  ]
+ }
+}
