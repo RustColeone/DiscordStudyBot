@@ -42,6 +42,13 @@ async def main(arguments: argparse.Namespace) -> int:
                   f"engines={[e.spec.name for e in contributions.engines]} "
                   f"capabilities={[c.name for c in contributions.capabilities]}")
         print("core capabilities:", sorted(name for name in core.manager.capabilities if name.startswith("core.")))
+        for persona in core.manager.personas.values():
+            if persona.parts:
+                print(f"persona {persona.name}: prompt parts {[part.name for part in persona.parts]}")
+        if core.manager.prompt_parts:
+            print("module prompt parts:", [part.name for part in core.manager.prompt_parts])
+        for warning in core.manager.prompt_part_warnings():
+            print("warning:", warning)
         describe(core)
         core.tank.close()
         core.bottle.close()

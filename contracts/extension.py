@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from contracts.capability import Capability
-from contracts.engine import Engine, Persona
+from contracts.engine import Engine, Persona, PromptPart
 from contracts.interface import Interface
 from contracts.models import AdapterFactory
 
@@ -52,6 +52,7 @@ class Contributions:
     # Added later, so they go last: plugins may pass the fields above positionally.
     providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     adapters: Mapping[str, AdapterFactory] = field(default_factory=dict)
+    prompt_parts: Sequence[PromptPart] = ()  # parts for every persona, or for those each part names
 
 
 @dataclass(frozen=True)

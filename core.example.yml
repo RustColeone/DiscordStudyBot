@@ -64,6 +64,14 @@
 #     profile: default
 #     prompt: |
 #       You are a helpful, concise assistant for a small private server.
+#     # Prompt parts: its personality, house rules... (docs/core/EXTENSIONS.md, "Prompt parts"). A file is
+#     # relative to this file's folder and re-read every turn; `place: turn` puts a part after the history.
+#     parts:
+#       - {name: personality, file: personas/assistant.md}
+#   luna:            # a module's persona (the room's): no `prompt`, so these parts are added to hers
+#     parts:
+#       - {name: personality, file: personas/luna.md}
+#       - {name: season, text: "It is exam season.", place: turn}
 
 # Which engine and personas handle a conversation, and its budget.
 # Most specific pattern wins: "interface:conversation", then "interface:*", then "*".

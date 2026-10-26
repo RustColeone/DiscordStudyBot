@@ -46,7 +46,7 @@ class Core:
                                    record=self.audit.record)
         self.manager = Manager(self.tank, self.providers, personas=config.personas, assignments=config.assignments,
                                owners=config.owners, control=config.control, data_dir=config.data_dir,
-                               audit=self.audit)
+                               audit=self.audit, persona_parts=config.persona_parts)
         options = {"tick_seconds": self._tick_seconds}
         if self._clock is not None:
             options["clock"] = self._clock
@@ -68,6 +68,8 @@ class Core:
                 self.manager.register_capability(capability, name)
             for persona in loaded.contributions.personas:
                 self.manager.register_persona(persona, name)
+            for part in loaded.contributions.prompt_parts:
+                self.manager.register_prompt_part(part, name)
             self._register_defaults(loaded)
             self.extensions.append(loaded)
             self.audit.record("extension_loaded", extension=name, path=str(path), builtin=config.builtin(path),
@@ -87,6 +89,8 @@ class Core:
             problems.append(f"control route {config.control} uses an interface that is not loaded")
         if problems:
             raise ConfigError("; ".join(problems))
+        for warning in self.manager.prompt_part_warnings():
+            self.audit.record("prompt_part_problem", problem=warning)
 
     def _permissions(self) -> Permissions:
         """Built-in defaults, extension defaults (code, then the module's config.yml), then core.yml, setting by
@@ -121,8 +125,12 @@ class Core:
         paths += [str(self.config.data_dir / pattern) for pattern in ("*.db", "*.db-wal", "*.db-shm",
                                                                        "extensions/*/*.db*", "extensions/*/keys.json",
                                                                        "extensions/*/session.key")]
+        # A relative `secrets:` entry is under the home folder (as it always was) and, since prompt part files are
+        # relative to core.yml's folder, under that folder too.
+        relative = [str(self.config.path(item)) for item in self.config.secret_paths
+                    if not item.startswith(("*", "/", "~"))]
         return Secrets.collect(env_files=self.config.env_files, names=names,
-                               paths=[*paths, *self.config.secret_paths])
+                               paths=[*paths, *self.config.secret_paths, *relative])
 
     def _register_defaults(self, loaded: LoadedExtension) -> None:
         """Provider kinds an extension adds; providers, profiles, assignments and admission it suggests (core.yml

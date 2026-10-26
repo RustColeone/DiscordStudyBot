@@ -391,12 +391,17 @@ class AssistantEngine(Engine):
                  for tool in session.tools.list()]
         instructions = str(session.options.get("instructions") or "").strip()
         now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
+        parts = session.prompt(persona.name)  # the persona's prompt parts (its personality, say)
         system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}.\n\n"
+                  + (f"{parts}\n\n" if parts else "")
                   + (f"Instructions for this conversation:\n{instructions}\n\n" if instructions else "")
                   + owner_instructions(session)
                   + (NATIVE_CONTRACT.format(display=layout) if native else
                      CONTRACT.format(display=layout, tools=json.dumps(tools, ensure_ascii=False) if tools else "(none)")))
         context = [f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."]
+        turn_parts = session.prompt(persona.name, "turn")
+        if turn_parts:
+            context.append(turn_parts)
         diary = self._diary_prompt(session, native)
         if diary:
             context.append(diary)

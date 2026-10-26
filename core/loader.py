@@ -18,7 +18,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping
 
-from contracts import CONTRACTS_VERSION, Capability, Contributions, Engine, Extension, Interface, Persona
+from contracts import CONTRACTS_VERSION, Capability, Contributions, Engine, Extension, Interface, Persona, PromptPart
 
 
 class ExtensionError(RuntimeError):
@@ -123,4 +123,9 @@ async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[s
     for item in contributions.personas:
         if not isinstance(item, Persona):
             raise ExtensionError(f"{extension.name}: {item!r} is not a contracts.Persona")
+    if not isinstance(contributions.prompt_parts, (list, tuple)):
+        raise ExtensionError(f"{extension.name}: prompt_parts is a list of contracts.PromptPart")
+    for item in contributions.prompt_parts:
+        if not isinstance(item, PromptPart):
+            raise ExtensionError(f"{extension.name}: {item!r} is not a contracts.PromptPart")
     return LoadedExtension(extension, Path(path).resolve(), module, contributions, config)

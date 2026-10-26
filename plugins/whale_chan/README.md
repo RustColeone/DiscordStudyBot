@@ -51,7 +51,7 @@ cp plugins/whale_chan/config.example.yml plugins/whale_chan/config.yml && chmod 
 | `token` | none | The token itself, instead of `.env` (then keep `config.yml` at `chmod 600` and never share the folder with it) |
 | `interface` | `whale_chan` | Interface name; conversations become `<interface>:dm:<user id>` or `<interface>:<channel id>` |
 | `display_name` | `鲸酱` | Her name |
-| `prompt` | the whale-girl prompt | Replaces the personality ([`extension.py:40-49`](extension.py)) |
+| `prompt` | the whale-girl prompt | Replaces the personality ([`extension.py:43-52`](extension.py)); to add to it instead, give her [prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts) in core.yml (`personas: whale_chan: parts:`) |
 | `new_chat_text` | `🐳 好的主人，新的对话开始啦～` | The reply to `/new` |
 | `effort` | `high` | Model effort: `low`, `medium` or `high` |
 | `max_steps` | `10` | Model steps (tool rounds) per message |
@@ -157,14 +157,14 @@ IDs, so resubmits are dropped as duplicates. Slash commands are deferred at once
 rendered to `$` text with `Command.render` and submitted the same way
 ([`bot.py:198-231`](bot.py)); `/new` becomes the plain text `/new` for the engine.
 
-**The engine** ([`engine.py:199-243`](engine.py)). Each step asks the model for one JSON object matching
+**The engine** ([`engine.py:228-272`](engine.py)). Each step asks the model for one JSON object matching
 `TURN_SCHEMA`: `message`, `status` (`continue`, `complete`, `needs_input`, `blocked`), up to 5
 `actions` and up to 2 `diary` notes. Invalid output or an invalid step (unknown tool, `continue`
-without actions, actions with another status) gets up to two corrections ([`engine.py:468-529`](engine.py)).
+without actions, actions with another status) gets up to two corrections ([`engine.py:522-563`](engine.py)).
 On `continue` it saves the actions with call IDs `c1`, `c2`, … before calling them through
 `session.tools.call`, shows `message` as progress, runs them in order, and stops the batch at the first
 failure. `needs_approval` returns `WAIT_APPROVAL`; after the owner decides, `_absorb_events` reads the
-`tool_result` or `approval_denied` event by index and continues ([`engine.py:351-445`](engine.py)).
+`tool_result` or `approval_denied` event by index and continues ([`engine.py:380-435`](engine.py)).
 `complete` and `blocked` reply and finish; `needs_input` waits for the next message.
 Where her model can call tools itself (DeepSeek, OpenAI; `tool_calls: true`, the default), a step is her
 words and function calls instead: the calls are the actions, `ask` waits for an answer, and with the core
@@ -172,10 +172,12 @@ diary `remember` keeps a note; each result goes back as its call's `tool` messag
 cannot call tools is asked as JSON. Her final answer at the step limit and her speak-ups are always JSON.
 The assistant engine's README ("Function calls") gives the details; this engine does the same.
 
-**Context** ([`engine.py:531-629`](engine.py)). The system prompt is what stays the same from turn to
-turn: the persona prompt, her display name, the assignment's `instructions`, `owner_instructions` (only
+**Context** ([`engine.py:565-638`](engine.py)). The system prompt is what stays the same from turn to
+turn: the persona prompt, her display name, her stable
+[prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts), the assignment's `instructions`, `owner_instructions` (only
 when an owner is speaking) and the turn contract with the allowed tools. What changes every turn (the
-current time, her notes about the sender, her mood and who they are to her) comes in one message after
+current time, her turn prompt parts, her notes about the sender, her mood and who they are to her) comes in
+one message after
 the thread, before the turn's own message, so the system prompt and the thread stay a prefix the
 provider's prompt cache serves (DeepSeek, six turns three minutes apart: 75-79% of her input cached,
 against 4% before). The thread
@@ -281,10 +283,10 @@ and her own folder.
 * **Suggest defaults for your own addresses only**: `<interface>:*` assignments, admission and
   permissions ([`extension.py:69-75`](extension.py)). Anything else refuses to load.
 * **A resumable engine**: state saved after each step, call IDs saved before calling, events tracked by
-  index ([`engine.py:209-214`](engine.py), [`engine.py:351-445`](engine.py)). Compare with the built-in
+  index ([`engine.py:262-263`](engine.py), [`engine.py:472-478`](engine.py), [`engine.py:380-435`](engine.py)). Compare with the built-in
   [`assistant`](../../extensions/assistant/README.md) engine.
 * **Validate model output and correct it** instead of failing on the first bad step
-  ([`engine.py:468-529`](engine.py)).
+  ([`engine.py:522-563`](engine.py)).
 * **An interface that only translates**: platform facts in `Request` ([`bot.py:147-154`](bot.py)),
   owners from the platform ([`bot.py:111-121`](bot.py)), readiness ([`bot.py:87-102`](bot.py)), the
   command catalog as native commands ([`bot.py:181-196`](bot.py), [`slash.py:29-51`](slash.py)) and

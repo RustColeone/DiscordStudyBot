@@ -10,6 +10,7 @@ import yaml
 
 from contracts import Address, Persona
 from core.manager.policy import Assignment, Owners, Permissions
+from core.prompts import parts_from_config
 
 
 class ConfigError(ValueError):
@@ -69,10 +70,23 @@ class CoreConfig:
         if isinstance(secrets, str) or not all(isinstance(item, str) for item in secrets):
             raise ConfigError("`secrets:` must be a list of file paths or patterns")
         self.secret_paths = list(secrets)
+        # A persona entry with a `prompt` is a persona; one without adds its `parts` to a module's persona.
+        self.personas: dict[str, Persona] = {}
+        self.persona_parts: dict[str, tuple] = {}
         try:
-            self.personas = {name: Persona(name, value.get("display_name", name), value["prompt"],
-                                           value.get("profile", "default"))
-                             for name, value in (raw.get("personas") or {}).items()}
+            for name, value in (raw.get("personas") or {}).items():
+                if not isinstance(value, dict):
+                    raise ConfigError(f"persona {name!r} is a mapping (prompt, display_name, profile, parts)")
+                parts = parts_from_config(name, value.get("parts"), self.path)
+                if "prompt" in value:
+                    self.personas[name] = Persona(name, value.get("display_name", name), value["prompt"],
+                                                  value.get("profile", "default"), parts)
+                elif set(value) - {"parts"}:
+                    raise ConfigError(f"persona {name!r} has no `prompt`: such an entry only adds `parts` to a "
+                                      f"module's persona; to change {sorted(set(value) - {'parts'})}, give the "
+                                      "whole persona, prompt included")
+                else:
+                    self.persona_parts[name] = parts
             self.assignments = {pattern: Assignment.from_config(pattern, value)
                                 for pattern, value in (raw.get("assignments") or {}).items()}
         except (KeyError, TypeError, ValueError) as error:

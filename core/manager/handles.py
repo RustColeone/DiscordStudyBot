@@ -11,7 +11,7 @@ import math
 import time
 
 from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, HistorySummary, ModelError,
-                       ModelRequest, ModelResult, Persona, Request, Sender, ToolResult)
+                       ModelRequest, ModelResult, PART_PLACES, PartContext, Persona, Request, Sender, ToolResult)
 from core.manager.diary import DiaryHandle
 from core.serialize import request_from_dict
 from core.storage.tank import RunRecord
@@ -155,6 +155,14 @@ class SessionHandle:
         subject = self.trigger.sender.id
         return DiaryHandle(self._manager, record, persona, self.trigger.text, subject,
                            chats=self._manager.diary_chats(record.address, self.options, subject))
+
+    def prompt(self, persona: str, place: str = "stable") -> str:
+        match = next((item for item in self.personas if item.name == persona), None)
+        if match is None:
+            raise ValueError("A session can only render the prompt of its own personas")
+        if place not in PART_PLACES:
+            raise ValueError(f"place is one of {', '.join(PART_PLACES)}")
+        return self._manager.render_prompt(match, place, PartContext(match, self.address, self.trigger, self.owner))
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)

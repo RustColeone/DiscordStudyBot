@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, Mapping, Protocol, Sequence
+from typing import Any, Callable, Literal, Mapping, Protocol, Sequence, Union
 
 from contracts.capability import ToolResult
 from contracts.messages import Address, Delivery, Display, FileRef, Origin, Request
@@ -33,14 +33,68 @@ class EngineSpec:
     personas: Literal["one", "many"] = "one"
 
 
+PART_PLACES = ("stable", "turn")
+
+
+@dataclass(frozen=True)
+class PartContext:
+    """What a computed prompt part may look at: the persona it is written for, and the run's address and trigger."""
+
+    persona: "Persona"
+    address: Address
+    trigger: Request
+    owner: bool = False
+
+
+@dataclass(frozen=True)
+class PromptPart:
+    """A piece of a persona's prompt that engines place for it: its personality, house rules, memory, anything.
+
+    `text` is the text, or a function of a `PartContext` returning it ("" adds nothing). `place` says where an
+    engine puts it: `stable` in the system prompt (the same every turn, so the provider's prompt cache keeps
+    serving it), `turn` in the turn's context after the history (it may change every turn). Parts come in `order`
+    (lower first). A module's part is for the personas it names (`personas`), or for every persona when it names
+    none; a persona's own parts are its own. Engines get them rendered with `Session.prompt`."""
+
+    name: str
+    text: Union[str, Callable[[PartContext], str]]
+    place: str = "stable"
+    order: int = 100
+    personas: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if not self.name or not isinstance(self.name, str):
+            raise ValueError("a prompt part needs a name")
+        if self.place not in PART_PLACES:
+            raise ValueError(f"prompt part {self.name!r}: place is one of {', '.join(PART_PLACES)}")
+        if not isinstance(self.text, str) and not callable(self.text):
+            raise ValueError(f"prompt part {self.name!r}: text is a string or a function of a PartContext")
+        if isinstance(self.order, bool) or not isinstance(self.order, int):
+            raise ValueError(f"prompt part {self.name!r}: order is a whole number")
+        personas = (self.personas,) if isinstance(self.personas, str) else self.personas
+        if not isinstance(personas, (tuple, list)) or not all(isinstance(name, str) and name for name in personas):
+            raise ValueError(f"prompt part {self.name!r}: personas is a list of persona names")
+        object.__setattr__(self, "personas", tuple(personas))
+
+
 @dataclass(frozen=True)
 class Persona:
-    """Who speaks: data, not behaviour. Any engine can use any persona."""
+    """Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its
+    personality, say), which engines place beside `prompt` (see PromptPart)."""
 
     name: str
     display_name: str
     prompt: str
     profile: str = "default"
+    parts: tuple[PromptPart, ...] = ()  # added later: new fields go last
+
+    def __post_init__(self):
+        if not isinstance(self.parts, (tuple, list)) or not all(isinstance(part, PromptPart) for part in self.parts):
+            raise ValueError(f"persona {self.name!r}: parts is a list of PromptPart")
+        names = [part.name for part in self.parts]
+        if len(set(names)) != len(names):
+            raise ValueError(f"persona {self.name!r}: two parts have the same name")
+        object.__setattr__(self, "parts", tuple(self.parts))
 
 
 @dataclass(frozen=True)
@@ -199,6 +253,12 @@ class Session(Protocol):
         """The persona's notes about the trigger's sender. Notes are filed in the conversation they were written
         in; with the assignment's `diary_scope` option, those of every conversation (same interface) sharing
         that name are read and corrected together."""
+
+    def prompt(self, persona: str, place: str = "stable") -> str:
+        """The prompt parts for one of the run's personas at `place` ("stable" or "turn"), rendered in order and
+        joined ("" when there are none): its own parts and the modules' parts for it. A part that fails to render
+        is left out (and logged); none can fail the run."""
+        ...
 
     def inbox(self) -> list[Request]:
         """Requests for this run's lane that arrived while this run was thinking. Each is returned once.

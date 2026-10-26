@@ -2,8 +2,8 @@
 
 from contracts.capability import TIER_ORDER, Capability, Handler, Risk, ToolContext, ToolResult
 from contracts.commands import Command, Option
-from contracts.engine import (DIARY_KINDS, Activity, Diary, DiaryNote, Engine, EngineSpec, Event, History,
-                              HistoryItem, HistorySummary, Persona, RunYield, Session, Tools)
+from contracts.engine import (DIARY_KINDS, PART_PLACES, Activity, Diary, DiaryNote, Engine, EngineSpec, Event, History,
+                              HistoryItem, HistorySummary, PartContext, Persona, PromptPart, RunYield, Session, Tools)
 from contracts.extension import Contributions, Extension, ExtensionContext, Setting
 from contracts.interface import Interface, InterfacePort, Operation
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
@@ -11,7 +11,8 @@ from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter
                               ModelResult, Models, NotConfigured, ToolCall, ToolSpec)
 from contracts.stores import Store
 
-# 1.5, plus the tool calls of 1.7 (ToolSpec, ToolCall, ModelRequest.tools), ported ahead from the clone. The
+# 1.5, plus the tool calls of 1.7 (ToolSpec, ToolCall, ModelRequest.tools), ported ahead from the clone, and prompt
+# parts (PromptPart, PartContext, Persona.parts, Contributions.prompt_parts, Session.prompt), new in this line. The
 # rest of 1.6 and 1.7 is not here yet, so the minor version stays.
 CONTRACTS_VERSION = "1.5"
 
@@ -22,6 +23,6 @@ __all__ = [
     "EngineSpec", "Event", "Extension", "ExtensionContext", "FileRef", "Handler", "History", "HistoryItem",
     "HistorySummary",
     "Interface", "InterfacePort", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
-    "Persona", "Reply", "Request", "Risk", "TIER_ORDER", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
+    "PART_PLACES", "PartContext", "Persona", "PromptPart", "Reply", "Request", "Risk", "TIER_ORDER", "RunYield", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolCall", "ToolResult", "ToolSpec", "Tools",
 ]

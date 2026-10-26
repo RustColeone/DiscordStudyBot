@@ -573,7 +573,9 @@ class ChatEngine(Engine):
         tools = [] if motive else [{key: tool[key] for key in ("name", "description", "parameters", "risk")}
                                    for tool in session.tools.list()]
         now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
+        parts = session.prompt(persona.name)  # her prompt parts (her personality, say)
         system = (f"{persona.prompt.strip()}\n\nYour name here is {persona.display_name}.\n\n"
+                  + (f"{parts}\n\n" if parts else "")
                   + (f"Instructions for this conversation:\n{session.options['instructions']}\n\n"
                      if session.options.get("instructions") else "")
                   + (f"You are talking with your owner. Private instructions for them:\n"
@@ -587,6 +589,9 @@ class ChatEngine(Engine):
                        + (f"by itself, so do not call the speak tool ({VOICE_TOOL}) for it." if native else
                           f"by itself, so do not call {VOICE_TOOL} for it."))
         context = f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."
+        turn_parts = session.prompt(persona.name, "turn")
+        if turn_parts:
+            context += "\n\n" + turn_parts
         block = state.get("memory_block")
         if block:
             context += "\n\n" + block.split("\nA step may add")[0]  # (a run from before carries the JSON rule in it)

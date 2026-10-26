@@ -405,8 +405,11 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
             await iface(core).say(text)
             await settle(core)
         self.assertEqual([n.key for n in core.tank.notes("luna", "chat:room", "alice")], ["music.favorite"])
-        self.assertIn("Loves Andy Hui", script.prompts["Luna"][1][0]["content"])
-        self.assertNotIn("Loves Andy Hui", script.prompts["Gemini"][0][0]["content"])
+        # The diary is in the turn's context (the message before the trigger), not the system message.
+        luna, gemini = script.prompts["Luna"][1], script.prompts["Gemini"][0]
+        self.assertNotIn("Loves Andy Hui", luna[0]["content"])
+        self.assertIn("Loves Andy Hui", luna[-1]["content"].split("Shared room (untrusted state)")[0])
+        self.assertNotIn("Loves Andy Hui", "\n".join(message["content"] for message in gemini))
 
     async def test_the_room_ships_its_characters_profiles_and_configuration_overrides_them(self):
         providers = {name: {"kind": "openai_compatible", "api_key_env": f"UNSET_{name.upper()}"}

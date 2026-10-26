@@ -158,6 +158,51 @@ a later candidate answer in its place, so the engine can ask that step in its JS
 no provider for its own sake and does not count against the run's `model_calls`. An extension may ship default
 personas in `Contributions.personas`; a configured persona with the same name wins.
 
+### Prompt parts
+
+A persona can carry prompt parts beside its prompt: its personality, house rules, anything an engine should
+place for it. Each persona has its own, set in core.yml or by its module; changing them is an edit of core.yml
+or of the part's file, not a command.
+
+```yaml
+personas:
+  assistant:                      # the built-in persona: its prompt stays, the parts are added
+    parts:
+      - {name: personality, file: personas/assistant.md}       # relative to core.yml's folder
+      - {name: house, text: "Answer in the person's language."}
+  luna:                           # a module's persona (the room's): without a `prompt`, only parts are added
+    parts:
+      - {name: personality, file: personas/luna.md}
+      - {name: season, text: "It is exam season at school.", place: turn, order: 50}
+```
+
+* A part is a `text` or a `file`. A file is read each time the part is used, so an edit applies from the next
+  turn without a restart; HTML comments (`<!-- ... -->`) in it are notes for whoever edits it and are left out.
+  A missing file is not an error: the part is left out until the file exists (the audit says so at start, and
+  `python -m core --check` lists it). A file may not be a protected secret path (an env file, a `secrets:`
+  entry; a relative entry protects both the path under the home folder and the one beside core.yml): that is
+  an error at start, and a part whose file becomes one later is left out.
+* `place: stable` (the default) puts the part in the system prompt, after the persona prompt and its name;
+  `place: turn` puts it in the turn's context, after the history. Stable parts are the same every turn, so the
+  provider's prompt cache keeps serving them; use `turn` only for what changes. Parts come in `order` (100 by
+  default, lower first), then as listed.
+* `name` defaults to the file's stem, or `part <n>`. A core.yml entry without a `prompt` only adds `parts` to
+  the module's persona of that name (to change anything else, give the whole persona, `prompt` included); a
+  part named like one the persona already has replaces it, and `text: ""` switches it off. Parts for a persona
+  no loaded module has are an error at start.
+* At one place, a persona's parts keep to 40,000 characters: the part crossing it is cut, those after it are
+  left out. Secrets are scrubbed from parts as from everything else.
+
+A module gives its own personas parts (`Persona(..., parts=(...))`), and may add parts for others with
+`Contributions.prompt_parts`: `PromptPart(name, text, place="stable", order=100, personas=())`, for every
+persona, or for those in `personas`. Two modules may not add parts of the same name (the second fails to
+load). A part's `text` may be a function of a `PartContext` (`persona`, `address`, `trigger`, `owner`), called
+(never awaited) each time the part is used, so it should be quick. A persona's own part shadows a module's part
+of the same name. A part that raises or returns something other than text is left out and audited
+(`prompt_part_problem`, with the module that added it), once until it renders again; it never fails the run.
+Engines get the rendered parts with `session.prompt(persona, place)`; the assistant, room and whale_chan
+engines place them as above. An engine that never calls it ignores parts.
+
 ### Model providers
 
 A module may bring the models it needs. A vendor with an OpenAI-compatible API (most of them) needs only
@@ -555,6 +600,7 @@ class MyEngine(Engine):
 | `personas` | Personas of this conversation. |
 | `store(conversation=, persona=, person=)` | Your module's key-value store, scoped by any combination of this conversation, one of these personas (across conversations) and the trigger's sender (across conversations); no arguments: the module's store everywhere. See [Storing data](#storing-data). |
 | `memory(name)` | Older: a persona's store shared by every module running it; prefer `store(persona=name)`. |
+| `prompt(name, place="stable")` | That persona's [prompt parts](#prompt-parts) at `stable` or `turn`, rendered in order and joined ("" when it has none). |
 | `diary(name)` | That persona's notes about the trigger's sender, in this conversation or across those sharing its `diary_scope` (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
 | `history.search(text, limit)` | This conversation's messages containing `text` (any case), newest first, at most 100: further back than `recent` reaches (200). |
@@ -592,15 +638,16 @@ Exceptions fail the run: the conversation receives a `run_failed` notice and the
 [`extensions/assistant`](../../extensions/assistant/engine.py) is a reference engine you may assign
 to any conversation:
 
-* One persona. The system prompt is the persona prompt, its display name, `options.instructions`,
-  then a turn contract. Each step the model returns `{message, status, actions}` (`continue` with
+* One persona. The system prompt is the persona prompt, its display name, its stable prompt parts,
+  `options.instructions`, then a turn contract; the turn's context, after the history, holds the time, its
+  turn parts, the diary and the other open runs. Each step the model returns `{message, status, actions}` (`continue` with
   actions, or `complete` / `needs_input` / `blocked` without), validated with up to two corrections.
 * It speaks `message` before running actions, runs them in order with saved `call_id`s, stops a batch
   at the first failure, and sends files from successful results itself. It tells the model never to
   announce an outcome before the result arrives.
 * `needs_approval` → `WAIT_APPROVAL`; `needs_input` from the model → `WAIT_INPUT`. New inbox messages
   are added before each step. Other open runs in the conversation (`activity()`) are listed in the
-  system prompt so the model does not repeat work in progress.
+  turn's context so the model does not repeat work in progress.
 * In non-direct conversations it prefixes speakers' names and quotes the latest request (where
   `display.quotes`). `options.history_scope: sender` limits history to that sender's messages and
   the replies to them.
@@ -619,7 +666,7 @@ to any conversation:
   before the request (`history_image_minutes`, default 30; WeChat sends a picture and its question as
   separate messages) are shown to the model on every turn (latest 6). History lines carry the time,
   the speaker, what they replied to and their attachments.
-* Diary: the system prompt includes the persona's notes about the sender (matching ones first), and a
+* Diary: the turn's context includes the persona's notes about the sender (matching ones first), and a
   turn may add `diary: [{key, kind, note, importance}]` (at most 2; importance 3+ is kept). Turn it
   off with the assignment option `diary: false`.
 
@@ -662,6 +709,10 @@ to Luna's chain) and Grok's provider. The room's `config.yml` overrides them, an
   (`speaker` set) before tools run; `work_note` is a short public explanation sent with label
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
+* Each character's system prompt is her prompt, display name and stable prompt parts, then the room's
+  rules; the time, her turn parts and her diary come in the turn's context, before the request, so for one
+  speaker the system prompt stays the same from turn to turn. Give a character more personality in core.yml (`personas: luna:
+  parts:`, see [Prompt parts](#prompt-parts)) rather than by editing the module.
 * Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
   left out), the board, recent room messages, shared tool results, images (attached to the run's messages,
   sent in the conversation within `history_image_minutes`, 30, before the request, or returned by tools),

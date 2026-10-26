@@ -21,14 +21,15 @@ from typing import Any, Mapping, Protocol
 import jsonschema
 
 from contracts import (Action, Address, Capability, Command, Delivery, Display, Engine, FileRef, ModelError,
-                       ModelRequest, ModelResult, Operation, Option, Persona, Reply, Request, Risk, RunYield, Sender,
-                       ToolResult)
+                       ModelRequest, ModelResult, Operation, Option, PartContext, Persona, PromptPart, Reply, Request,
+                       Risk, RunYield, Sender, ToolResult)
 from core.audit import Audit
 from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, local_time
 from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
 from core.manager.secrets import Secrets
+from core.prompts import FileText, parts_for, render, with_parts
 from core.providers.registry import Providers
 from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
@@ -123,9 +124,14 @@ def signature(name: str, arguments: Mapping[str, Any]) -> str:
 class Manager:
     def __init__(self, tank: Tank, providers: Providers, *, personas: Mapping[str, Persona],
                  assignments: Mapping[str, Assignment], owners: Owners, control: Address | None,
-                 data_dir: str | Path, audit: Audit | None = None):
+                 data_dir: str | Path, audit: Audit | None = None,
+                 persona_parts: Mapping[str, tuple[PromptPart, ...]] | None = None):
         self.tank, self.providers = tank, providers
         self.personas = dict(personas)
+        self._persona_parts = dict(persona_parts or {})  # core.yml's parts for modules' personas, by name
+        self.prompt_parts: list[PromptPart] = []  # modules' parts, for every persona or those they name
+        self._part_origin: dict[int, str] = {}  # id(part) → the module that contributed it
+        self._part_problems: set[tuple] = set()  # (persona, part, place, kind) audited and not yet recovered
         self._config_assignments = dict(assignments)
         self._overrides = tank.store("core:assignments")
         self.admins = tank.store("core:admins")
@@ -202,8 +208,51 @@ class Manager:
         self._config_assignments.setdefault(pattern, Assignment.from_config(pattern, dict(value)))
 
     def register_persona(self, persona: Persona, extension: str) -> None:
-        # Configuration wins over an extension's default persona of the same name.
+        # Configuration wins over an extension's default persona of the same name; parts core.yml gives that name
+        # (an entry without a prompt) are added to the extension's persona.
+        if persona.name not in self.personas and persona.name in self._persona_parts:
+            persona = with_parts(persona, self._persona_parts[persona.name])
         self.personas.setdefault(persona.name, persona)
+
+    def register_prompt_part(self, part: PromptPart, extension: str) -> None:
+        other = next((item for item in self.prompt_parts if item.name == part.name), None)
+        if other is not None:
+            raise ValueError(f"Prompt part {part.name!r} is already registered by {self._part_origin[id(other)]!r}")
+        self.prompt_parts.append(part)
+        self._part_origin[id(part)] = extension
+
+    def render_prompt(self, persona: Persona, place: str, context: PartContext) -> str:
+        """Session.prompt: the persona's parts and the modules' parts for it at `place`, rendered, secrets scrubbed.
+        A part that cannot be rendered is left out, and audited once until it renders again."""
+        reported: set[tuple] = set()
+
+        def report(part: PromptPart, kind: str, problem: str) -> None:
+            key = (persona.name, part.name, place, kind)
+            reported.add(key)
+            if key not in self._part_problems:
+                self._part_problems.add(key)
+                self.audit.record("prompt_part_problem", persona=persona.name, part=part.name, place=place,
+                                  source=self._part_origin.get(id(part), "persona"), problem=problem)
+
+        parts = []
+        for part in parts_for(persona, self.prompt_parts):
+            if part.place != place:
+                continue
+            if isinstance(part.text, FileText) and self.secrets.is_secret_path(str(part.text.path)):
+                report(part, "secret", f"left out: {part.text.path} is a protected secret path")
+                continue
+            parts.append(part)
+        text = self.secrets.scrub(render(parts, context, place, report))
+        # A part that rendered without its problem this time is reported anew if it breaks again.
+        self._part_problems = {key for key in self._part_problems
+                               if (key[0], key[2]) != (persona.name, place) or key in reported}
+        return text
+
+    def prompt_part_warnings(self) -> list[str]:
+        """Parts whose file is missing: not an error (it is left out until it exists), but worth saying at start."""
+        return [f"persona {persona.name!r}, part {part.name!r}: no file {part.text.path} (left out until it exists)"
+                for persona in self.personas.values() for part in persona.parts
+                if isinstance(part.text, FileText) and not part.text.path.is_file()]
 
     def set_assignment(self, pattern: str, value: Mapping[str, Any]) -> Assignment:
         if pattern != "*" and ":" not in pattern:
@@ -341,6 +390,15 @@ class Manager:
                 problems.append(f"assignment {pattern!r}: engine {engine.spec.name!r} needs exactly one persona")
             if engine is not None and engine.spec.personas == "many" and not assignment.personas:
                 problems.append(f"assignment {pattern!r}: engine {engine.spec.name!r} needs personas")
+        for name in self._persona_parts:
+            if name not in self.personas:
+                problems.append(f"persona {name!r} has no `prompt` in core.yml, and no loaded module has a persona "
+                                "of that name to add its parts to")
+        for persona in self.personas.values():
+            for part in persona.parts:
+                if isinstance(part.text, FileText) and self.secrets.is_secret_path(str(part.text.path)):
+                    problems.append(f"persona {persona.name!r}, part {part.name!r}: {part.text.path} is a protected "
+                                    "secret path")
         return problems
 
     # ---- lifecycle --------------------------------------------------------------------------------

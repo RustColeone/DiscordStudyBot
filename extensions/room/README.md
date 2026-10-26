@@ -49,7 +49,17 @@ Grok, a blonde vampire and the mischievous troublemaker. Luna and Claude are the
 ends with the same shared rules: speak directly with no reasoning summaries or stage directions, never
 start with your own name (the core adds the speaker), answer in the person's latest language, write
 math as LaTeX (`$...$`, `$$...$$`), and keep ordinary chat to one useful thought, usually one to three
-sentences.
+sentences. To give a character more (a personality of your own, a running joke, house rules) without editing
+`personas.py`, give her prompt parts in core.yml:
+
+```yaml
+personas:
+  luna:
+    parts:
+      - {name: personality, file: personas/luna.md}    # relative to core.yml's folder, re-read every turn
+```
+
+See [Prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts).
 
 ## Setup
 
@@ -239,9 +249,12 @@ limit ends without a word.
 
 The messages for a turn (`_messages`):
 
-* **System**: the persona prompt, her display name and the current time, `options.instructions`,
-  `owner_instructions` when an owner is speaking, the room rules (`INSTRUCTION`, with the roster and the
-  tool catalog: name, description, parameters, risk) and her diary.
+* **System**: the persona prompt, her display name, her stable
+  [prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts), `options.instructions`, `owner_instructions`
+  when an owner is speaking, and the room rules (`INSTRUCTION`, with the roster and the tool catalog: name,
+  description, parameters, risk). For one speaker it stays the same from turn to turn, so the provider's
+  prompt cache serves it; what changes comes in the turn's context (below). (An owner's turns differ from
+  others': `owner_instructions`, and the tools only owners may use.)
 * **Summary**: the conversation's rolling summary, if there is one, as a `user` message labelled untrusted
   data (a model wrote it from what people said, so it is never part of the system prompt).
 * **History** (`_history`): the last `history_limit` messages from before the request, "before" meaning
@@ -251,7 +264,11 @@ The messages for a turn (`_messages`):
   replies are `assistant` messages; everyone else's (people and other characters) are `user` lines with
   time, speaker, the quoted text and attachments. `$commands` and the replies that answered them are
   left out: `$model` lists and `$help` text are for the person who typed them, not the room's topic.
-* **Last user message**: the request (and what it quotes), then `Shared room (untrusted state): ` and a
+* **The turn's context**: a block marked as the system's, with the current time, her turn prompt parts and
+  her diary. Consecutive messages of one role are merged, so it shares the last user message: after the last
+  history line when that is someone else's, and before the request.
+* **Last user message**: (after the turn's context) the request and what it quotes, then
+  `Shared room (untrusted state): ` and a
   JSON object with `goal`, the last 8 `answers`, `your_job`, `your_instruction`, `your_results`,
   `pending_question`, the `board`, the last 16 `room_messages` and the last 16 `shared_results`.
 
@@ -347,20 +364,20 @@ venv/bin/python -m unittest tests.test_core_room
 
 ## Building something similar
 
-* **Declare persona mode `many`** ([`engine.py:165`](engine.py)) and pass `persona=` on every model
-  call ([`engine.py:474`](engine.py)), or `$model` choices and model labels will be wrong.
-* **Initialise state once and replay events by index** ([`engine.py:183`](engine.py),
-  [`engine.py:261`](engine.py)). Skip the trigger's own `input` event if you already took it from
+* **Declare persona mode `many`** ([`engine.py:198`](engine.py)) and pass `persona=` on every model
+  call ([`engine.py:512`](engine.py)), or `$model` choices and model labels will be wrong.
+* **Initialise state once and replay events by index** ([`engine.py:216`](engine.py),
+  [`engine.py:294`](engine.py)). Skip the trigger's own `input` event if you already took it from
   `session.trigger`.
-* **Save, then speak** ([`engine.py:387`](engine.py)); **give the whole batch its `call_id`s, keep it in
-  the job, save, then call** ([`engine.py:400`](engine.py)), so a restart replays the same calls.
+* **Save, then speak** ([`engine.py:425`](engine.py)); **give the whole batch its `call_id`s, keep it in
+  the job, save, then call** ([`engine.py:438`](engine.py)), so a restart replays the same calls.
 * **Keep the unfinished part of a batch** when a call needs approval, and match the later
-  `tool_result` by `call_key` ([`engine.py:416`](engine.py), [`engine.py:273`](engine.py)).
+  `tool_result` by `call_key` ([`engine.py:454`](engine.py), [`engine.py:306`](engine.py)).
 * **Concurrency**: one task per job and an event to wake the scheduler; cancel and gather the tasks in
-  `finally` ([`engine.py:289`](engine.py)). Catch `CancelledError` separately so cancellation is not
-  reported as a failure ([`engine.py:373`](engine.py)).
+  `finally` ([`engine.py:353`](engine.py)). Catch `CancelledError` separately so cancellation is not
+  reported as a failure ([`engine.py:409`](engine.py)).
 * **Validate beyond the schema** and send the problem back as a correction
-  ([`engine.py:489`](engine.py)), with a bounded number of retries.
+  ([`engine.py:528`](engine.py)), with a bounded number of retries.
 * **Ship models with the module**: providers and profiles in `Contributions`, with the module's
   `config.yml` merged over them ([`extension.py:13`](extension.py), [`extension.py:40`](extension.py)).
 * Pitfalls: a run returns only when no job can start, so a waiting job does not stop others; budgets
