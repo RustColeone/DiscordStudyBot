@@ -60,10 +60,12 @@ class Companion:
 
     # ---- before a reply ---------------------------------------------------------------------------------
     async def block(self, subject: str, query: str, person: str, complete=None) -> str:
-        """Her notes for this message (marked as data, not instructions) and her mood's news, told once."""
+        """Who they are to her (when they have a role: `mneme-llm relate`), her notes for this message (marked as
+        data, not instructions) and her mood's news, told once."""
+        relation = self.m.relations.line(subject, person)
         notes = await self.m.memory.acontext(subject, query, user_name=person, complete=complete)
         news = self.m.mood.news(subject) if self.judge_mood else None
-        return "\n\n".join(part for part in (notes or f"Notes about {person}: (none yet)", news) if part)
+        return "\n\n".join(part for part in (relation, notes or f"Notes about {person}: (none yet)", news) if part)
 
     def adopt(self, subject: str, notes) -> int:
         """Bring the core diary's notes of a person over, once (later calls do nothing). `notes` may be a

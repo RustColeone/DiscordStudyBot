@@ -251,6 +251,15 @@ class CompanionTests(ChatEngineTests):
         self.assertTrue(any("Notes about 主人" in text for text in prompts))  # not "Alice", her Discord name
         self.assertTrue(any("主人 is talking to 大肥鱼" in text for text in prompts))  # what the judges read
 
+    async def test_her_prompt_says_who_someone_is_to_her(self):
+        chat = await self.start([], plugin={**QUIET, "memory": {**OFFLINE, "capture": False}},
+                                handler=self.scripted([step("在呢")]))
+        self.core.manager.engines["chat"].companion.m.relate("discord:alice", "creator")
+        await chat.say("你好")
+        await settle(self.core)
+        system = [call for call in self.adapter.calls if call["effort"] == "high"][0]["messages"][0]["content"]
+        self.assertIn("(Alice is your creator; you are very close.)", system)
+
     async def test_a_dated_plan_is_kept_for_its_day_so_speaking_up_can_ask_about_it(self):
         from datetime import datetime, timedelta
         day = (datetime.now() + timedelta(days=3)).strftime("%Y-%m-%d")
