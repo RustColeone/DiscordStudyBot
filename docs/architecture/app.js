@@ -11,7 +11,7 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot" };
+  const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot", personas: "Persona slot" };
   const files = A.files;
 
   // ---- the index: every symbol by file, and who calls it (inside its file) -----------------------------
@@ -73,6 +73,7 @@
     }, { kind: "core" });
     slots.engines = chart.group(SLOT.engines, () => inSlot("engines").forEach(module), { kind: "engines", pack: true });
     slots.capabilities = chart.group(SLOT.capabilities, () => inSlot("capabilities").forEach(module), { kind: "capabilities", pack: true });
+    slots.personas = chart.group(SLOT.personas, () => inSlot("personas").forEach(module), { kind: "personas", pack: true });
     chart.node("How a mod goes in", { kind: "guide", sub: "add a module of your own", target: link(GUIDE) });
     chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
                               tip: firstLine(files["contracts/__init__.py"]?.doc) });
@@ -85,6 +86,8 @@
     chart.edge(parts.GW, parts.MG, { arrow: "both" });
     chart.edge(parts.MG, slots.engines, { arrow: "both", label: "Session" });
     chart.edge(parts.MG, slots.capabilities, { arrow: "both", label: "ToolContext" });
+    chart.edge(slots.personas, parts.MG, { label: "Persona" });
+    chart.edge(slots.personas, parts.PR, { dashed: true, label: "profiles · providers" });
     chart.edge(parts.MG, parts.PR, { arrow: "none" });
     chart.edge(parts.MG, parts.TANK, { arrow: "none" });
     return chart;
@@ -97,7 +100,10 @@
     chart.group(`${path}/`, () => {
       for (const child of A.folders[path].children) {
         const short = child.split("/").pop();
-        if (files[child]) {
+        if (files[child]?.data) {
+          ids.set(child, chart.node(short, { kind: "data", target: link(child), tip: firstLine(files[child].doc),
+                                             sub: plural(files[child].lines, "line") }));
+        } else if (files[child]) {
           const items = files[child].symbols.filter((symbol) => !symbol.parent).length;
           ids.set(child, chart.node(short, { kind: "file", target: link(child), tip: firstLine(files[child].doc),
                                              sub: `${plural(items, "item")} · ${plural(files[child].lines, "line")}` }));
@@ -182,6 +188,25 @@
     return chart;
   }
 
+  // A data file (settings, a student's prompt): the files it names, in their order, and the files that name it.
+  const namedBy = (path) => Object.keys(files).filter((other) => other !== path && files[other].imports.some((item) => item.path === path));
+  const near = (path, from) => {  // a path as short as it can be next to another, with its folder: shared/school.md
+    const [a, b] = [path.split("/"), from.split("/")];
+    let shared = 0;
+    while (shared < a.length - 1 && a[shared] === b[shared]) shared += 1;
+    return a.slice(Math.min(shared, a.length - 2)).join("/");
+  };
+  function dataChart(path) {
+    const chart = new Chart("RIGHT");
+    const box = (other, current = false) => chart.node(current ? other.split("/").pop() : near(other, path), {
+      kind: files[other]?.data ? "data" : "file", target: link(other), current, tip: firstLine(files[other]?.doc),
+      sub: plural(files[other]?.lines || 0, "line") });
+    const here = box(path, true);
+    files[path].imports.filter((item) => item.path).forEach((item, index) => chart.edge(here, box(item.path), { label: `${index + 1}` }));
+    for (const other of namedBy(path)) chart.edge(box(other), here);
+    return chart;
+  }
+
   // ---- the guide: how a mod (a module) goes in ------------------------------------------------------------
   const GUIDE = "guide/mods";
   const fileLink = (path) => (files[path] ? link(path) : "");
@@ -255,6 +280,9 @@
         "and commit docs/architecture/data.js: the module shows up on this page by itself, in the slots it fills."],
       ["Turning one off", "In core.yml: modules: {exclude: [whale_chan]} (a folder name or a path ending). An " +
         "excluded module is never imported."],
+      ["A new student needs no code", "Add a folder to extensions/students/ with a student.yml (name, display_name, " +
+        "models, the prompt files in order) and her prompt.md. The students module reads every such folder at startup; " +
+        "her prompt is the files' lines joined with nothing between them. See extensions/students/README.md."],
     ];
     for (const [title, text] of steps) pane.push(make("h3", "", title), make("div", "doc", text));
     pane.push(make("h3", "", "Examples to copy, smallest first"));
@@ -339,11 +367,14 @@
   }
   function code(path, start, end) {
     const lines = files[path].text.split("\n").slice(start - 1, end);
+    const data = files[path].data;
     const block = make("div", "code");
     const numbers = make("pre", "gutter", lines.map((_, index) => start + index).join("\n"));
     const body = make("pre", "source");
     const inner = make("code");
-    inner.innerHTML = highlight(lines.join("\n"));  // escaped above: only our own spans are HTML
+    if (data && path.endsWith(".md")) inner.textContent = lines.join("\n");
+    else if (data) inner.innerHTML = escapeHtml(lines.join("\n")).replace(/(^|\s)(#[^\n]*)/g, '$1<span class="com">$2</span>');
+    else inner.innerHTML = highlight(lines.join("\n"));  // escaped above: only our own spans are HTML
     body.append(inner);
     block.append(numbers, body);
     return block;
@@ -391,6 +422,18 @@
     pane.push(linkList(A.folders[path].children.map((child) => files[child]
       ? [child.split("/").pop(), link(child), firstLine(files[child].doc).slice(0, 90)]
       : [`${child.split("/").pop()}/`, link(child), A.modules[child]?.description || plural(filesUnder(child).length, "file")])));
+    return pane;
+  }
+
+  function paneData(path) {
+    const file = files[path];
+    const pane = [...heading("Data file", path), make("p", "meta", plural(file.lines, "line")), source(path)];
+    if (file.doc) pane.push(make("div", "doc", file.doc));
+    const named = file.imports.filter((item) => item.path);
+    if (named.length) pane.push(make("h3", "", "Names, in this order"), linkList(named.map((item) => [item.module, link(item.path), item.path])));
+    const by = namedBy(path);
+    if (by.length) pane.push(make("h3", "", "Named by"), linkList(by.map((other) => [near(other, path), link(other), firstLine(files[other].doc).slice(0, 70)])));
+    pane.push(make("h3", "", "Contents"), code(path, 1, file.lines));
     return pane;
   }
 
@@ -476,10 +519,13 @@
     hideResults();
     let chart, pane, title, hint, symbol = null;
     if (!path) {
-      [chart, pane, title, hint] = [topChart(), paneTop(), "The whole system", "The core in the middle, the modules in its three slots. Click a box to go in."];
+      [chart, pane, title, hint] = [topChart(), paneTop(), "The whole system", "The core in the middle, the modules around it in the slots they fill. Click a box to go in."];
     } else if (path === GUIDE) {
       [chart, pane, title, hint] = [guideChart(), paneGuide(), "How a mod goes in",
                                     "From one folder to the core's slots. Click a box for the real code; the steps are on the right."];
+    } else if (files[path]?.data) {
+      [chart, pane, title, hint] = [dataChart(path), paneData(path), path.split("/").pop(),
+                                    "A data file: the files it names, numbered in their order, and the files that name it."];
     } else if (files[path]) {
       symbol = name ? symbolOf.get(`${path}::${name.split("@")[0]}`) || null : null;  // (an old section link: its class)
       const where = path.split("/").pop();

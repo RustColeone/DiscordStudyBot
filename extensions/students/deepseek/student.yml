@@ -1,0 +1,14 @@
+# DeepSeek: one student. extension.py reads every folder with a student.yml (see ../README.md).
+name: deepseek
+display_name: DeepSeek
+order: 4
+models:
+  - {provider: deepseek, model: deepseek-flash}
+fallback: 1
+prompt:
+  - whale.md                 # who she is (Whale-chan's character)
+  - prompt.md                # her part in the club
+  - ../shared/school.md        # the club and the five members
+  - ../shared/public.md        # speak directly, no visible reasoning
+  - ../shared/math.md          # LaTeX delimiters
+  - ../shared/conversation.md  # chatting with someone she knows

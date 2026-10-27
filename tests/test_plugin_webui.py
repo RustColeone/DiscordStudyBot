@@ -446,7 +446,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             speaker = re.search(r"Your name here is (\w+)", messages[0]["content"]).group(1)
             spoke.append(speaker)
             return {"status": "complete", "message": f"Hi from {speaker}", "work_note": "", "actions": [], "jobs": []}
-        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(PLUGIN)]
+        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(ROOT / "extensions" / "students"), str(PLUGIN)]
         self.core = await start_core(self.tmp, {
             "extensions": paths,
             "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo"}},

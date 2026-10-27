@@ -2,8 +2,9 @@
 
 The room is an engine in which several personas share every request in a conversation. Each character
 speaks in her own voice, uses tools and hands focused jobs to the others on a shared work board. Jobs
-that do not depend on each other run in parallel. The module also ships five default characters (Luna,
-Gemini, Claude, DeepSeek and Grok), a model profile for each, and the provider for Grok's model.
+that do not depend on each other run in parallel. Its usual characters are the students (Luna, Gemini, Claude,
+DeepSeek and Grok), who live in their own module, [`extensions/students`](../students), with their prompts and
+models. The room only runs them.
 
 Use it when you want a group chat with several characters instead of one assistant. Study it if your
 engine has more than one persona (`EngineSpec(..., "many")`), runs model turns concurrently, or must
@@ -15,51 +16,14 @@ contract, read [`extensions/assistant`](../assistant) first; it is shorter.
 | Kind | Name | Details |
 | --- | --- | --- |
 | Engine | `room` | Persona mode `many`. "Several personas share one work board: they talk, use tools and hand each other jobs, in parallel where independent." |
-| Persona | `luna` | Display name `Luna`, profile `luna` |
-| Persona | `gemini` | Display name `Gemini`, profile `gemini` |
-| Persona | `claude` | Display name `Claude`, profile `claude` |
-| Persona | `deepseek` | Display name `DeepSeek`, profile `deepseek` |
-| Persona | `grok` | Display name `Grok`, profile `grok` |
-| Provider | `grok` | `openai_compatible` at `https://api.x.ai/v1`, key in `GROK_API_KEY`, `schema_mode: native`, `effort_param: true`; `$model` offers models released since 2026-06-01, excluding IDs matching `imagine` |
 | Setting | `max_steps` | `number`, default 24: "Most work-board steps per request" |
 | Setting | `history_limit` | `number`, default 30: "Earlier messages every character reads word for word" |
 | Setting | `chime_in` | `boolean`, default false: "A group message naming no one: whose turn it is answers, the others may join in" |
 | Setting | `compact` | `boolean`, default true: "Fold messages older than history_limit into the chat's rolling summary" |
-| Setting | `grok_api_key` | `secret`, env `GROK_API_KEY`: "xAI API key for Grok (without it, Luna's model answers for her)" |
 
-The model profiles, each tried in order (a candidate whose provider has no key is skipped):
-
-| Profile | Candidates |
-| --- | --- |
-| `luna` | `openai/gpt-6-luna`, `deepseek/deepseek-flash`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
-| `gemini` | `gemini/gemini-3.8-flash`, `gemini/gemini-3.6-flash`, `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `claude/claude-haiku-5-5` |
-| `claude` | `claude/claude-haiku-5-5`, `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `gemini/gemini-3.8-flash` |
-| `deepseek` | `deepseek/deepseek-flash`, `openai/gpt-6-luna`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
-| `grok` | `grok/grok-4-fast`, then Luna's chain: `openai/gpt-6-luna`, `deepseek/deepseek-flash`, `gemini/gemini-3.8-flash`, `claude/claude-haiku-5-5` |
-
-Each character prefers her own model and then falls back to the others' first models; Grok falls back
-to Luna's model first, then to the others', so any one key is enough for every character. The `deepseek`, `openai`, `gemini` and `claude` providers are built into the core
-([`core/defaults.py`](../../core/defaults.py)); only `grok` comes from this module.
-
-The characters' prompts are in Chinese, in [`personas.py`](personas.py). They are classmates in a school
-club: Luna, a white-haired dragon girl and calm student council president; Claude, an orange-haired
-young lady and sharp-eyed discipline committee member; DeepSeek, a blue-haired whale girl, clever and
-lazy, who calls herself 人家 or 本鲸; Gemini, a purple-haired cat girl, curious and fond of technology;
-Grok, a blonde vampire and the mischievous troublemaker. Luna and Claude are the seniors. Every prompt
-ends with the same shared rules: speak directly with no reasoning summaries or stage directions, never
-start with your own name (the core adds the speaker), answer in the person's latest language, write
-math as LaTeX (`$...$`, `$$...$$`), and keep ordinary chat to one useful thought, usually one to three
-sentences. To give a character more (a personality of your own, a running joke, house rules) without editing
-`personas.py`, give her prompt parts in core.yml:
-
-```yaml
-personas:
-  luna:
-    parts:
-      - {name: personality, file: personas/luna.md}    # relative to core.yml's folder, re-read every turn
-```
-
-See [Prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts).
+The characters, their prompts, their model profiles and Grok's provider are the students module's: see
+[`extensions/students`](../students). To give a character more (a personality of your own, a running joke, house
+rules), give her prompt parts in core.yml ([Prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts)).
 
 ## Setup
 
@@ -75,8 +39,6 @@ compact_every: 20
 compact_profile: default
 max_tokens: 1500
 aliases: {claude: [Haiku]}      # other names people call a persona by
-# providers: {...}              # optional: change Grok's provider or add one
-# profiles: {...}               # optional: change a character's model list
 ```
 
 | Key | Default | Meaning |
@@ -93,19 +55,10 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 On/off settings accept `true`/`false`, `yes`/`no`, `on`/`off` and `1`/`0`, so `chime_in: "false"` is off. A
 number that is not a number (`history_limit: abc`) falls back to its default instead of failing the run; the
 same goes for these keys in an assignment's `options`.
-| `providers` | none | Merged key by key over the module's `grok` provider (or adds a new one). |
-| `profiles` | none | Replaces whole profiles by name (`luna`, `grok`, ...). |
 
-Precedence for providers and profiles: the code in [`extension.py`](extension.py), then this
-`config.yml`, then `core.yml`. `core.yml`'s `providers:` win key by key; a profile of the same name in
-`core.yml`'s `profiles:` replaces the room's. `extension_config.room` in `core.yml` is merged over this
-file like any module setting.
-
-Environment variables (in `.env`): `GROK_API_KEY` for Grok. The other characters use the core's
-providers and their keys (`DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_API_KEY`).
-Through the fallbacks any one of those four keys lets every character answer, Grok included; with
-`GROK_API_KEY` too, Grok answers with her own model. `python -m core setup` can set `grok_api_key`; it writes it
-to `.env`.
+The characters' `providers:` and `profiles:` used to be set here; they are the students module's settings now
+(see [Moved from the room](../students/README.md#setup)). If this file still has them, the room ignores them and
+records `settings_moved` in the audit log.
 
 Assign the engine to a conversation in `core.yml`. The persona order is also the rotation order:
 
@@ -137,9 +90,8 @@ assignments:
 ```
 
 To turn it off for one conversation, assign that conversation another engine or set `enabled: false`.
-To turn the module off entirely, add it to `modules: {exclude: [room]}` in `core.yml`; then the five
-personas and their profiles are gone too, and `python -m core --check` reports any assignment still
-naming them.
+To turn the module off entirely, add it to `modules: {exclude: [room]}` in `core.yml`; the students stay, for
+other engines to use, and `python -m core --check` reports any assignment still naming the `room` engine.
 
 ## Using it
 
@@ -184,9 +136,8 @@ naming them.
 
 | File | Role |
 | --- | --- |
-| [`extension.py`](extension.py) | `EXTENSION` with its settings; `PROVIDERS` and `PROFILES`; `setup` builds `RoomEngine` and merges `config.yml`'s `providers` and `profiles` over the defaults. |
+| [`extension.py`](extension.py) | `EXTENSION` with its settings; `setup` builds `RoomEngine` from them. |
 | [`engine.py`](engine.py) | `RoomEngine`: who answers, the board, scheduling, model turns, tool calls, diaries. |
-| [`personas.py`](personas.py) | The five `Persona`s and their prompts (`SHARED` rules appended to each). |
 | [`config.example.yml`](config.example.yml) | The documented settings. |
 
 ### The board

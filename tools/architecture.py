@@ -4,8 +4,9 @@
     python tools/architecture.py --check    # exit 1 when it is out of date (tests/test_architecture.py runs this)
 
 Everything comes from the code itself: git's list of Python files, and Python's `ast` for each file's docstring,
-imports, classes, functions, which of them call which, and the source. Which modules fill which slot (interfaces,
-engines, capabilities) is read from their `extension.py`. Only the top map's boxes are named here (CORE_PARTS), after
+imports, classes, functions, which of them call which, and the source. A module's data files (its `.yml` and `.md`
+files other than READMEs: settings, a student's prompt) are listed too, with their text and the files they name.
+Which modules fill which slot (interfaces, engines, capabilities, personas) is read from their `extension.py`. Only the top map's boxes are named here (CORE_PARTS), after
 docs/core/ARCHITECTURE.md; change them when the architecture changes. The output has no dates or commit IDs, so it
 changes only when the code does.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import json
+import posixpath
 import re
 import subprocess
 import sys
@@ -24,7 +26,8 @@ OUT = ROOT / "docs" / "architecture" / "data.js"
 REPO = "https://github.com/RustColeone/DiscordStudyBot"
 BRANCH = "master"
 ROOTS = ("contracts", "core", "extensions", "plugins", "tools", "tests")  # the folders the page shows, in order
-SLOTS = ("interfaces", "engines", "capabilities")
+SLOTS = ("interfaces", "engines", "capabilities", "personas")
+DATA = ("yml", "yaml", "md")  # a module's data files: settings, prompts (READMEs are the folders' own text)
 # The core's blocks on the top map (docs/core/ARCHITECTURE.md): id, label, what it owns or does, where it lives.
 CORE_PARTS = [
     ("GW", "Gateway", "admission · order · dedupe · routes · routines", "core/gateway"),
@@ -34,13 +37,15 @@ CORE_PARTS = [
     ("TANK", "Tank", "tank.db", "core/storage/tank.py"),
     ("START", "Startup", "config · loader · app · setup", "core"),
 ]
+LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")  # a Markdown link, [text](target): the pane shows its text
 SECTION = re.compile(r"^\s*# -{2,}\s*(.+?)\s*-{2,}\s*$")  # "# ---- pages and files ------" groups methods
 
 
 def tracked_files() -> list[str]:
-    listed = subprocess.run(["git", "ls-files", "--", *(f"{root}/*.py" for root in ROOTS)], cwd=ROOT,
-                            capture_output=True, text=True, check=True).stdout.split()
-    return sorted(path for path in listed if (ROOT / path).is_file())
+    listed = subprocess.run(["git", "ls-files", "--", *(f"{root}/*.py" for root in ROOTS),
+                             *(f"{root}/*.{suffix}" for root in ("extensions", "plugins") for suffix in DATA)],
+                            cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    return sorted(path for path in listed if (ROOT / path).is_file() and not path.endswith("/README.md"))
 
 
 def module_path(module: str, known: set[str]) -> str | None:
@@ -177,6 +182,31 @@ class FileReader:
         return symbol
 
 
+class DataReader:
+    """One data file: its text, its first comment (or line) as its doc, and the files it names by a relative path
+    (a student's `prompt:` files, say)."""
+
+    NAME = re.compile(r"[\w./-]+\.(?:md|ya?ml|py)\b")
+
+    def __init__(self, path: str, known: set[str]):
+        self.path, self.known = path, known
+        self.text = (ROOT / path).read_text(encoding="utf-8")
+
+    def read(self) -> dict:
+        lines = self.text.splitlines()
+        if self.path.endswith(".md"):
+            doc = next((line.lstrip("# ").strip() for line in lines if line.strip()), "")
+        else:
+            doc = next((line.lstrip("# ").strip() for line in lines if line.startswith("#")), "")
+        imports, folder = [], Path(self.path).parent
+        if not self.path.endswith(".md"):
+            for name in dict.fromkeys(self.NAME.findall(self.text)):
+                target = posixpath.normpath(f"{folder.as_posix()}/{name}")
+                if target in self.known and target != self.path:
+                    imports.append({"module": name, "path": target})
+        return {"doc": doc, "lines": len(lines), "imports": imports, "symbols": [], "text": self.text, "data": True}
+
+
 def slots(files: dict[str, dict]) -> dict[str, dict]:
     """Each module (a folder with extension.py): its description and the slots it fills, read from that file."""
     modules = {}
@@ -230,13 +260,13 @@ def first_paragraph(text: str) -> str:
                 break
             continue
         paragraph.append(line.strip())
-    return " ".join(paragraph)[:1200]
+    return LINK.sub(r"\1", " ".join(paragraph))[:1200]
 
 
 def build() -> str:
     paths = tracked_files()
     known = set(paths)
-    files = {path: FileReader(path, known).read() for path in paths}
+    files = {path: (FileReader if path.endswith(".py") else DataReader)(path, known).read() for path in paths}
     data = {"repo": REPO, "branch": BRANCH, "roots": [root for root in ROOTS if any(p.startswith(root + "/") for p in paths)],
             "core": [{"id": part, "label": label, "note": note, "target": target} for part, label, note, target in CORE_PARTS],
             "modules": slots(files), "folders": folders(files), "files": files}

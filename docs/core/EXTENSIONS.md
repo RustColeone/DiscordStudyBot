@@ -22,7 +22,8 @@ build:
 | [`images`](../../extensions/images/README.md), [`web`](../../extensions/web/README.md), [`media`](../../extensions/media/README.md) | Capabilities | Outside services with keys, fallbacks, files and sources in results, long work with progress |
 | [`host`](../../extensions/host/README.md), [`terminal`](../../extensions/terminal/README.md) | Capabilities (terminal also an engine) | Sensitive actions: owner-only, private data, secret paths, approvals and confirmations |
 | [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
-| [`room`](../../extensions/room/README.md) | Engine, personas, providers | Several personas on one work board, parallel jobs, shipping your own model profiles |
+| [`room`](../../extensions/room/README.md) | Engine | Several personas on one work board, parallel jobs |
+| [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, shipping your own model profiles and a provider |
 | [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
@@ -178,7 +179,7 @@ personas:
     parts:
       - {name: personality, file: personas/assistant.md}       # relative to core.yml's folder
       - {name: house, text: "Answer in the person's language."}
-  luna:                           # a module's persona (the room's): without a `prompt`, only parts are added
+  luna:                           # a module's persona (a student): without a `prompt`, only parts are added
     parts:
       - {name: personality, file: personas/luna.md}
       - {name: season, text: "It is exam season at school.", place: turn, order: 50}
@@ -719,10 +720,10 @@ commands of their own for this.
 ### The built-in `room` engine
 
 [`extensions/room`](../../extensions/room/engine.py) is the shared room: several personas own one
-request together on a work board. It also contributes the
-five default characters `luna`, `gemini`, `claude`, `deepseek` and `grok`, with a model profile of the
-same name for each (her own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back
-to Luna's chain) and Grok's provider. The room's `config.yml` overrides them, and core.yml overrides both.
+request together on a work board. Its usual characters, `luna`, `gemini`, `claude`, `deepseek` and `grok`, come from
+the [`students`](../../extensions/students/README.md) module, with a model profile of the same name for each (her
+own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back to Luna's chain) and Grok's
+provider. The students' `config.yml` overrides them, and core.yml overrides both.
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
   "大家", "everyone" and similar, otherwise one persona in rotation per conversation. With `chime_in`,

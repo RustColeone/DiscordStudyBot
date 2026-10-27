@@ -10,7 +10,7 @@
   // The letter on each kind of box.
   const BADGE = { module: "M", folder: "D", file: "F", class: "C", function: "ƒ", method: "ƒ", section: "§",
                   external: "↗", gateway: "G", manager: "M", providers: "P", store: "DB", startup: "S",
-                  supervisor: "S", contracts: "K", guide: "?" };
+                  supervisor: "S", contracts: "K", guide: "?", data: "≡" };
 
   // ---- describing a chart ---------------------------------------------------------------------------------
   class Chart {

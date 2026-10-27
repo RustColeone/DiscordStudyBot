@@ -1,0 +1,14 @@
+# Gemini: one student. extension.py reads every folder with a student.yml (see ../README.md).
+name: gemini
+display_name: Gemini
+order: 2
+models:
+  - {provider: gemini, model: gemini-3.8-flash}
+  - {provider: gemini, model: gemini-3.6-flash}
+fallback: 3
+prompt:
+  - prompt.md
+  - ../shared/school.md        # the club and the five members
+  - ../shared/public.md        # speak directly, no visible reasoning
+  - ../shared/math.md          # LaTeX delimiters
+  - ../shared/conversation.md  # chatting with someone she knows

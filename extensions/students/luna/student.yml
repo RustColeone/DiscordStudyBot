@@ -1,0 +1,13 @@
+# Luna: one student. extension.py reads every folder with a student.yml (see ../README.md).
+name: luna                  # the folder's name; engines and assignments use it
+display_name: Luna
+order: 1                    # where she stands in lists (and the room's default rotation)
+models:                     # her own models, preferred in this order
+  - {provider: openai, model: gpt-6-luna}
+fallback: 2                 # her first model is everyone else's 2nd fallback
+prompt:                     # her prompt: these files in order
+  - prompt.md
+  - ../shared/school.md        # the club and the five members
+  - ../shared/public.md        # speak directly, no visible reasoning
+  - ../shared/math.md          # LaTeX delimiters
+  - ../shared/conversation.md  # chatting with someone she knows

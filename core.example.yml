@@ -14,7 +14,8 @@
 # Modules: every folder with an extension.py loads, the built-in ones in extensions/ first, then the
 # external ones in plugins/. Turn one off by folder (extensions/terminal) or by name (terminal), and
 # add module folders that live elsewhere (they count as external). Built-in modules:
-#   discord, assistant, basic, cli (stdin chat, for local testing), room (luna, gemini, claude, deepseek, grok),
+#   discord, assistant, basic, cli (stdin chat, for local testing), room (the shared room's engine),
+#   students (luna, gemini, claude, deepseek, grok: the characters, one folder each),
 #   media ($video, $clip; yt-dlp + ffmpeg), images ($draw), system ($status), reminders ($remind),
 #   web ($search, $read, image search, maps, $wolfram with WOLFRAM_APPID), terminal (creator-only shell:
 #   $t <line>, a terminal channel, or the assistant with your approval; docs/core/EXTENSIONS.md),
@@ -68,7 +69,7 @@
 #     # relative to this file's folder and re-read every turn; `place: turn` puts a part after the history.
 #     parts:
 #       - {name: personality, file: personas/assistant.md}
-#   luna:            # a module's persona (the room's): no `prompt`, so these parts are added to hers
+#   luna:            # a module's persona (a student): no `prompt`, so these parts are added to hers
 #     parts:
 #       - {name: personality, file: personas/luna.md}
 #       - {name: season, text: "It is exam season.", place: turn}

@@ -428,7 +428,7 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def start(self, script, personas=None):
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room")]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(ROOT / "extensions" / "students")]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "personas": personas or {},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},

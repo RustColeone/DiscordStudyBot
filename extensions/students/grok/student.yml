@@ -1,0 +1,24 @@
+# Grok: one student. extension.py reads every folder with a student.yml (see ../README.md).
+name: grok
+display_name: Grok
+order: 5
+models:
+  - {provider: grok, model: grok-4-fast}
+# No `fallback`: her model needs its own key, so it is no one else's fallback. Without the key, Luna's list answers.
+falls_back_to: luna
+providers:                   # a provider she brings (the others are built into the core)
+  grok:
+    kind: openai_compatible  # xAI speaks the OpenAI API
+    base_url: https://api.x.ai/v1
+    api_key_env: GROK_API_KEY   # in .env; `python -m core setup` asks for it
+    schema_mode: native
+    effort_param: true
+    # $model offers her recent language models (not grok-imagine's pictures and videos).
+    models_since: '2026-06-01'
+    models_exclude: [imagine]
+prompt:
+  - prompt.md
+  - ../shared/school.md        # the club and the five members
+  - ../shared/public.md        # speak directly, no visible reasoning
+  - ../shared/math.md          # LaTeX delimiters
+  - ../shared/conversation.md  # chatting with someone she knows

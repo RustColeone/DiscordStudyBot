@@ -1,0 +1,10 @@
+# Students settings. Copy to config.yml (git-ignored); extension_config.students in core.yml overrides it.
+#
+# The students ship their models and Grok's provider (each folder's student.yml); set one here only to change it,
+# and core.yml `providers:` / `profiles:` override this file. Each profile is tried in order; candidates whose key
+# is missing are skipped. Grok's key goes in .env as GROK_API_KEY (`python -m core setup` asks for it).
+# providers:
+#   grok:
+#     models_exclude: [imagine, 'grok-4\.7']    # a list replaces hers, so repeat `imagine`
+# profiles:
+#   luna: [{provider: openai, model: gpt-6-luna}, {provider: deepseek, model: deepseek-flash}]
