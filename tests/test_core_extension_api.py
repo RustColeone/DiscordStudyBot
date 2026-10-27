@@ -95,6 +95,27 @@ class ExtensionApiTests(CoreCase):
         codes = [(r.code, r.data.get("detail")) for r in owner.delivered if r.kind == "event"]
         self.assertEqual(codes, [("interface_not_ready", "Confirm on phone"), ("interface_ready", "logged in")])
 
+    async def test_interfaces_publish_links_and_status_and_ask_which_models_can_answer(self):
+        core = await self.core({"providers": {"keyless": {"kind": "openai_compatible", "api_key_env": "NO_SUCH_KEY_17"}},
+                                "profiles": {"nokey": [{"provider": "keyless", "model": "m"}]}})
+        chat, owner = iface(core), iface(core, "owner")
+        self.assertTrue(chat.port.models_ready("default"))      # the fake provider answers
+        self.assertFalse(chat.port.models_ready("nokey"))       # no key
+        self.assertFalse(chat.port.models_ready("missing"))     # no such profile
+        place = {"place": {"name": "Lab", "icon": "🧪"}, "people": [{"key": "flash", "name": "Flash"}], "away": ["flash"]}
+        chat.port.publish(link="http://lab.local:4157/", status=place)
+        chat.port.set_ready(False, "reconnecting")
+        seen = owner.port.directory()
+        self.assertEqual(seen["chat"], {"link": "http://lab.local:4157/", "status": place, "ready": False})
+        self.assertEqual(seen["owner"], {"link": "", "status": {}, "ready": True})
+        seen["chat"]["status"]["away"].append("someone")        # a copy: nobody changes another's status
+        self.assertEqual(owner.port.directory()["chat"]["status"]["away"], ["flash"])
+        chat.port.publish(status={"place": {"name": "Lab"}})     # replaces only what it names
+        self.assertEqual(owner.port.directory()["chat"]["link"], "http://lab.local:4157/")
+        for bad in ({"link": "not a url"}, {"status": ["not", "an", "object"]}, {"status": {"big": "x" * 20000}}):
+            with self.assertRaises(ValueError):
+                chat.port.publish(**bad)
+
     # ---- lanes, live assignments, rechecks ---------------------------------------------------------
     async def test_sender_lanes_keep_group_members_requests_and_answers_apart(self):
         core = await self.core({"assignments": {"chat:group": {"engine": "probe", "personas": ["p"], "lane": "sender"}}})

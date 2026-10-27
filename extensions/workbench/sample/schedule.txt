@@ -1,0 +1,4 @@
+# day time name
+Mon 15:30 Chess
+Sun 10:00 Hiking
+Wed 16:00 Robotics

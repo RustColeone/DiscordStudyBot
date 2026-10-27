@@ -84,6 +84,62 @@ def function_names(tools) -> dict[str, str]:
     return names
 
 
+STRICT_UNSUPPORTED = {"maxItems", "minItems", "uniqueItems", "minimum", "maximum", "exclusiveMinimum",
+                      "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "pattern", "format"}
+
+
+def strict_tool_schema(schema: Any) -> Any:
+    """A schema as strict tool calls take it (`schema_mode: strict_tool`; DeepSeek's beta): every property
+    required, an object without properties sent as a JSON string (`from_strict_tool` decodes it), limits dropped.
+    The registry still validates the reply against the full schema."""
+    if not isinstance(schema, Mapping):
+        return schema
+    if schema.get("type") == "object" and not schema.get("properties"):
+        return {"type": "string", "description": "a JSON object, written as a string"}
+    result = {key: value for key, value in schema.items() if key not in STRICT_UNSUPPORTED}
+    if isinstance(schema.get("items"), Mapping):
+        result["items"] = strict_tool_schema(schema["items"])
+    for key in ("anyOf", "oneOf"):
+        if key in schema:
+            result[key] = [strict_tool_schema(item) for item in schema[key]]
+    if "properties" in schema:
+        result["properties"] = {name: strict_tool_schema(value) for name, value in schema["properties"].items()}
+        result["required"] = list(schema["properties"])
+        result["additionalProperties"] = False
+    return result
+
+
+def from_strict_tool(value: Any, schema: Any) -> Any:
+    """A strict tool call's arguments as the schema wants them: the strings standing for objects decoded again."""
+    if not isinstance(schema, Mapping):
+        return value
+    if schema.get("type") == "object" and not schema.get("properties"):
+        if not isinstance(value, str):
+            return value
+        try:  # the first JSON value in it: models sometimes leave a stray bracket after the object
+            decoded, _ = json.JSONDecoder().raw_decode(value.strip())
+        except ValueError:
+            return value  # left as it is: the registry reports it, and the caller asks again
+        return decoded if isinstance(decoded, dict) else value
+    if isinstance(value, dict) and isinstance(schema.get("properties"), Mapping):
+        return {key: from_strict_tool(item, schema["properties"].get(key)) for key, item in value.items()}
+    if isinstance(value, list) and isinstance(schema.get("items"), Mapping):
+        return [from_strict_tool(item, schema["items"]) for item in value]
+    return value
+
+
+def tool_answer(message: Any, name: str, schema: Mapping[str, Any]) -> str:
+    """The JSON text of a strict tool call named `name`, else the message's own text (some replies come as text)."""
+    for call in getattr(message, "tool_calls", None) or ():
+        function = getattr(call, "function", None)
+        if getattr(function, "name", "") == name:
+            try:
+                return json.dumps(from_strict_tool(json.loads(function.arguments), schema), ensure_ascii=False)
+            except (TypeError, ValueError):
+                return str(getattr(function, "arguments", "") or "")
+    return getattr(message, "content", None) or ""
+
+
 def openai_messages(messages: Sequence[Mapping[str, Any]], names: Mapping[str, str] | None = None) -> list[dict]:
     """The core's tool-call messages in OpenAI's form: an assistant message's `tool_calls` as function calls (under
     their API `names`), with its `replay` keys (DeepSeek's reasoning_content) beside them, and `tool` messages
@@ -138,6 +194,18 @@ def api_key(settings: Mapping[str, Any]) -> str:
     return value
 
 
+def cached_tokens(usage) -> int:
+    """Prompt tokens read from the provider's cache: OpenAI's `prompt_tokens_details.cached_tokens`, DeepSeek's
+    `prompt_cache_hit_tokens` (they bill these far cheaper)."""
+    details = getattr(usage, "prompt_tokens_details", None)
+    value = getattr(details, "cached_tokens", None) if details is not None else None
+    if value is None and isinstance(details, dict):
+        value = details.get("cached_tokens")
+    if value is None:
+        value = getattr(usage, "prompt_cache_hit_tokens", None)
+    return int(value or 0)
+
+
 class OpenAICompatible:
     """OpenAI Chat Completions and compatible APIs (DeepSeek, OpenRouter)."""
 
@@ -173,6 +241,14 @@ class OpenAICompatible:
         elif schema and mode == "native":
             params["response_format"] = {"type": "json_schema", "json_schema": {
                 "name": schema_name, "strict": bool(self.settings.get("strict_schema", False)), "schema": schema}}
+        elif schema and mode == "strict_tool":  # the answer as the arguments of one tool, held to the schema
+            params["tools"] = [{"type": "function", "function": {
+                "name": schema_name, "strict": True, "parameters": strict_tool_schema(schema),
+                "description": "Your answer: call this exactly once, with every field."}}]
+            params["tool_choice"] = "auto"  # thinking models refuse a forced choice (DeepSeek: 400)
+            params["messages"] = [dict(message) for message in params["messages"]]
+            if params["messages"][-1].get("role") == "user":
+                params["messages"][-1]["content"] += f"\n\n(Answer by calling {schema_name}.)"
         elif schema:
             params["messages"] = with_schema_instruction(messages, schema)
             params["response_format"] = {"type": "json_object"}
@@ -202,20 +278,24 @@ class OpenAICompatible:
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "prompt_tokens", 0) or 0
         output_tokens = getattr(usage, "completion_tokens", 0) or 0
-        blank = lambda reply: not (reply.choices[0].message.content or "").strip() and not (
+        cached = cached_tokens(usage)
+        text = lambda reply: tool_answer(reply.choices[0].message, schema_name, schema) if mode == "strict_tool" \
+            else reply.choices[0].message.content or ""
+        blank = lambda reply: not text(reply).strip() and not (
             mode == "tools" and openai_calls(reply.choices[0].message, back))
-        if mode in ("json_object", "tools") and blank(response):
+        if mode in ("json_object", "strict_tool", "tools") and blank(response):
             # JSON mode sometimes answers only whitespace (DeepSeek); a blank answer is never usable, so ask once more.
             response = await client.chat.completions.create(**params)
             usage = getattr(response, "usage", None)
             input_tokens += getattr(usage, "prompt_tokens", 0) or 0
             output_tokens += getattr(usage, "completion_tokens", 0) or 0
+            cached += cached_tokens(usage)
         choice = response.choices[0]
         reason = str(getattr(choice, "finish_reason", "") or "").lower()
         if mode != "tools":
-            return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode)
+            return AdapterResult(text(response), input_tokens, output_tokens, reason == "length", mode, cached)
         reasoning = getattr(choice.message, "reasoning_content", None)  # DeepSeek's thinking: wanted back with tools
-        return AdapterResult(choice.message.content or "", input_tokens, output_tokens, reason == "length", mode,
+        return AdapterResult(text(response), input_tokens, output_tokens, reason == "length", mode, cached,
                              tool_calls=openai_calls(choice.message, back),
                              replay={"reasoning_content": reasoning} if reasoning is not None else None)
 
@@ -262,7 +342,8 @@ class Gemini:
         usage = getattr(response, "usage_metadata", None)
         return AdapterResult(response.text or "", getattr(usage, "prompt_token_count", 0) or 0,
                              getattr(usage, "candidates_token_count", 0) or 0, reason == "MAX_TOKENS",
-                             "native" if schema else "")
+                             "native" if schema else "",
+                             cached_input_tokens=getattr(usage, "cached_content_token_count", 0) or 0)
 
 
     async def list_models(self) -> list[str]:
@@ -340,9 +421,11 @@ class Anthropic:
         response = await self.client().with_options(timeout=timeout_s).messages.create(**params)
         text = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
         usage = getattr(response, "usage", None)
-        return AdapterResult(text, getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0,
+        read = getattr(usage, "cache_read_input_tokens", 0) or 0  # (Anthropic counts cache reads apart from input)
+        return AdapterResult(text, (getattr(usage, "input_tokens", 0) or 0) + read,
+                             getattr(usage, "output_tokens", 0) or 0,
                              str(getattr(response, "stop_reason", "")) == "max_tokens",
-                             "native" if native else "instruction" if schema else "")
+                             "native" if native else "instruction" if schema else "", read)
 
 
     async def list_models(self) -> list[tuple[str, dt.datetime | None]]:

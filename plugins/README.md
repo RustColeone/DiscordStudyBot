@@ -46,13 +46,20 @@ whale-girl personality, on DeepSeek Flash:
 * she asks before every write or critical action (`always-ask`, no exceptions), in case she misread a
   request or a page tried to trick her; when you asked in your DM with her, the question comes from her,
   in that DM;
-* her own diary about each person (`$memory`);
-* slash commands: `/new` plus a short list from the core (`slash_commands` in her config:
-  help, memory, remind, reminders, routine, draw, search, read, video by default).
+* her memory of each person in [mneme-llm](../../mneme-llm/README.md), one file any model can read, so switching
+  her model keeps what she knows (without mneme-llm installed: the core's diary, `$memory`);
+* a mood: after each reply, how it left her feeling (GPT-6 Luna's decisions with `OPENAI_API_KEY`, else
+  her own model), told to her once, fading by itself;
+* speaking up first now and then (off until you turn it on with `/speakup`; it starts as a dry run);
+* her voice: `/voice on` turns her short replies into Discord voice messages (OpenAI speech; Piper, a
+  local voice, is optional);
+* slash commands: `/new`, `/voice`, `/speakup` plus a short list from the core (`slash_commands` in her
+  config: help, memory, remind, reminders, routine, draw, search, read, video by default).
 
 To run it:
 
 1. Create a Discord application with a bot, enable **Message Content Intent**, invite it to a server.
+   For her memory and mood: `venv/bin/pip install -e ../mneme-llm`.
 2. Put `DISCORD_BOT_TOKEN_WHALE_CHAN=...` in `.env` (or `token:` in her `config.yml`, see above).
 3. Optional: `cp plugins/whale_chan/config.example.yml plugins/whale_chan/config.yml` to change models,
    effort or the personality.

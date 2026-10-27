@@ -1,0 +1,200 @@
+{
+ "name": "second check is enforced",
+ "config": {},
+ "inputs": [
+  {
+   "new": "Meetings on Sunday are listed first instead of last. Fix it and add a test."
+  },
+  {
+   "approve": "workbench.review"
+  },
+  {
+   "check": "1 2"
+  },
+  {
+   "check": "all"
+  },
+  {
+   "approve": "workbench.review"
+  }
+ ],
+ "answers": [
+  {
+   "schema": "workbench_route",
+   "text": "{\"kind\": \"change\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"Meetings on Sunday are listed first instead\", \"reason\": \"the demo sorts every change as small\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"Leave it to me~ looking at how the week is sorted.\", \"note\": \"Finding the sort key.\", \"plan\": [{\"step\": \"Find the sort key\", \"done\": false}, {\"step\": \"Fix Sunday\", \"done\": false}, {\"step\": \"Add a test\", \"done\": false}], \"actions\": [{\"tool\": \"search\", \"arguments\": {\"pattern\": \"def key\"}}, {\"tool\": \"read_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\"}}], \"status\": \"continue\", \"summary\": \"\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"Shifting the modulus so Sunday is no longer 0, and adding tests.\", \"plan\": [{\"step\": \"Find the sort key\", \"done\": true}, {\"step\": \"Fix Sunday\", \"done\": false}, {\"step\": \"Add a test\", \"done\": false}], \"actions\": [{\"tool\": \"edit_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\", \"old\": \"        return ((DAYS.index(self.day) + 1) % 7, self.time)\", \"new\": \"        return ((DAYS.index(self.day) + 1) % 8, self.time)\"}}, {\"tool\": \"write_file\", \"arguments\": {\"path\": \"tests/test_sunday.py\", \"content\": \"import unittest\\n\\nfrom clubnotes.schedule import parse, sort_week\\n\\n\\nclass SundayTests(unittest.TestCase):\\n    def test_sunday_comes_last(self):\\n        meetings = parse(\\\"Sun 10:00 Hiking\\\\nMon 15:30 Chess\\\\nWed 16:00 Robotics\\\")\\n        self.assertEqual([m.day for m in sort_week(meetings)], [\\\"Mon\\\", \\\"Wed\\\", \\\"Sun\\\"])\\n\\n    def test_monday_is_first(self):\\n        self.assertEqual(parse(\\\"Mon 09:00 A\\\")[0].key()[0], 0)\\n\"}}, {\"tool\": \"run\", \"arguments\": {\"command\": \"python3 -m unittest discover -s tests -t .\"}}], \"status\": \"continue\", \"summary\": \"\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"Done... mostly. One test is being difficult.\", \"note\": \"\", \"plan\": [{\"step\": \"Find the sort key\", \"done\": true}, {\"step\": \"Fix Sunday\", \"done\": true}, {\"step\": \"Add a test\", \"done\": true}], \"actions\": [], \"status\": \"done\", \"summary\": \"Changed the sort key so Sunday is no longer day 0, and added tests for Sunday. One test still fails; I think it expects too much.\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"Let me see what went wrong.\", \"note\": \"Reading the key and the new test.\", \"plan\": [{\"step\": \"Find why the tests fail\", \"done\": false}, {\"step\": \"Make Monday 0 and Sunday 6\", \"done\": false}], \"actions\": [{\"tool\": \"read_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\"}}, {\"tool\": \"read_file\", \"arguments\": {\"path\": \"tests/test_sunday.py\"}}], \"status\": \"continue\", \"summary\": \"\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"Monday should be 0 and Sunday 6: index into DAYS directly.\", \"plan\": [{\"step\": \"Find why the tests fail\", \"done\": true}, {\"step\": \"Make Monday 0 and Sunday 6\", \"done\": false}], \"actions\": [{\"tool\": \"edit_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\", \"old\": \"        return ((DAYS.index(self.day) + 1) % 8, self.time)\", \"new\": \"        return (DAYS.index(self.day), self.time)\"}}, {\"tool\": \"edit_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\", \"old\": \"        # Python's isoweekday() counts Monday as 1 and Sunday as 7; this uses % 7, so Sunday sorts as day 0.\\n\", \"new\": \"        # Monday is 0 and Sunday 6, the order of DAYS.\\n\"}}, {\"tool\": \"run\", \"arguments\": {\"command\": \"python3 -m unittest discover -s tests -t .\"}}], \"status\": \"continue\", \"summary\": \"\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"\", \"plan\": [{\"step\": \"Find why the tests fail\", \"done\": true}, {\"step\": \"Make Monday 0 and Sunday 6\", \"done\": true}], \"actions\": [], \"status\": \"done\", \"summary\": \"Sunday now sorts last: `Meeting.key` uses the day's position in `DAYS` (Monday 0 ... Sunday 6) instead of the `% 7` shift that put Sunday first. DeepSeek's draft used `% 8`, which moved Sunday but made Monday 1; her new tests caught it. All tests pass now.\"}",
+   "truncated": false
+  }
+ ],
+ "expect": {
+  "status": "approved",
+  "workflow": "cascade",
+  "steps": [
+   [
+    "r1.route",
+    "route",
+    "done"
+   ],
+   [
+    "r1.baseline",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.draft.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.draft.2",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.draft.3",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.draft.test",
+    "validate",
+    "failed"
+   ],
+   [
+    "r1.draft.diff",
+    "change",
+    "done"
+   ],
+   [
+    "r1.escalate.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.escalate.2",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.escalate.3",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.escalate.test",
+    "validate",
+    "done"
+   ],
+   [
+    "r1.escalate.diff",
+    "change",
+    "done"
+   ],
+   [
+    "r1.check",
+    "approval",
+    "done"
+   ],
+   [
+    "r1.land",
+    "approval",
+    "running"
+   ]
+  ],
+  "said": [
+   [
+    "Luna",
+    "DeepSeek drafts it, Gemini checks it, and Claude steps in only if needed."
+   ],
+   [
+    "DeepSeek",
+    "Leave it to me~ looking at how the week is sorted."
+   ],
+   [
+    "DeepSeek",
+    "Done... mostly. One test is being difficult."
+   ],
+   [
+    "Luna",
+    "Claude is taking over from DeepSeek: the tests fail (Ran 8 tests in N.Ns · FAILED (failures=1))"
+   ],
+   [
+    "Claude",
+    "Let me see what went wrong."
+   ],
+   [
+    "Claude",
+    "Sunday now sorts last: `Meeting.key` uses the day's position in `DAYS` (Monday 0 ... Sunday 6) instead of the `% 7` shift that put Sunday first. DeepSeek's draft used `% 8`, which moved Sunday but made Monday 1; her new tests caught it. All tests pass now."
+   ],
+   [
+    "Luna",
+    "Ready for your review: 2 files (+14 −2). Tests: Ran 8 tests in N.Ns · OK. Tick every item on the checklist, approve it, then give the final approval to land it. Or tell me what to change."
+   ],
+   [
+    "",
+    "Approved <approval>: workbench.review → failed."
+   ],
+   [
+    "Luna",
+    "Not yet: 5 item(s) on the checklist are not ticked. Look at each one, tick it (the boxes in the lab, or `$check <task> all` once you have), and approve the new request."
+   ],
+   [
+    "",
+    "☑ 1. clubnotes/schedule.py · changed +2 −2\n☑ 2. tests/test_sunday.py · new +12 −0\n☐ 3. Tests: Ran 8 tests in N.Ns · OK\n☐ 4. Commands that ran: python3 -m unittest discover -s tests -t .\n☐ 5. The summary: what changed and why\n3 left: `$check <task> <numbers>` or `all` once you have looked at them."
+   ],
+   [
+    "",
+    "☑ 1. clubnotes/schedule.py · changed +2 −2\n☑ 2. tests/test_sunday.py · new +12 −0\n☑ 3. Tests: Ran 8 tests in N.Ns · OK\n☑ 4. Commands that ran: python3 -m unittest discover -s tests -t .\n☑ 5. The summary: what changed and why\nEverything is checked: approve the second check."
+   ],
+   [
+    "",
+    "Approved <approval>: workbench.review → success."
+   ]
+  ],
+  "approvals": [
+   "workbench.review",
+   "workbench.review",
+   "workbench.land"
+  ],
+  "outcomes": [
+   "routed",
+   "escalated",
+   "ready",
+   "checked"
+  ],
+  "commits": 1,
+  "files": [
+   "clubnotes/schedule.py",
+   "tests/test_sunday.py"
+  ]
+ }
+}

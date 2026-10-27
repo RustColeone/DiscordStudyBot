@@ -26,6 +26,12 @@ class RunYield(str, Enum):
     WAIT_APPROVAL = "waiting_approval"
 
 
+# The message a run's task is cancelled with when the core stops (added in 1.7): the run stays open and is replayed
+# on the next start, so an engine that keeps state elsewhere must not record it as cancelled. Any other cancellation
+# (`$cancel`, a conversation cancelled) is final.
+SHUTDOWN = "core-shutdown"
+
+
 @dataclass(frozen=True)
 class EngineSpec:
     name: str
@@ -286,3 +292,8 @@ class Engine(ABC):
     @abstractmethod
     async def run(self, session: Session) -> RunYield:
         """Handle the trigger (and any resumed events). Must be safe to call again after a restart."""
+
+    async def stopped(self, session: Session, reason: str) -> None:
+        """A run of yours that was waiting (for input or an approval) was cancelled. Nothing of yours was running,
+        so no CancelledError reached `run`: put right what still shows the work as going (`session.state` is the
+        run's last saved state; it does not resume). Optional; by default nothing happens."""

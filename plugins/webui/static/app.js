@@ -41,6 +41,8 @@
 
   // ---- people --------------------------------------------------------------------------------------
   const keyOf = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
+  // A name as places compare them (contracts.PLACE_STATUS): its letters and digits in any script; "" matches nobody.
+  const placeKey = (name) => String(name || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "").slice(0, 40);
   function look(key) {
     if (PEOPLE[key]) return PEOPLE[key];
     let hash = 0;
@@ -170,8 +172,14 @@
     const chat = chatOf(state.current);
     const members = membersOf(chat);
     $("#members-title").textContent = isDirect(chat) ? "Direct message" : `In this chat — ${members.length}`;
+    const visiting = new Map((state.places?.others || []).flatMap((place) => (place.away || [])
+      .map((key) => [key, place.place?.name || "another place"])));  // visiting another place (the lab, say)
+    const tickets = ticketsHere(state.places);
     for (const name of members) {
       const spoke = (state.spoke.get(name) || 0) > Date.now() - 4000;
+      const key = placeKey(name);
+      const where = key && visiting.has(key) ? `in the ${visiting.get(key).toLowerCase()}`
+        : key && tickets.has(key) ? `in class · has an invitation to the ${tickets.get(key).place.toLowerCase()}` : "in class";
       const card = paint(make("div", "member-card"), keyOf(name));
       const member = paint(make("button", "member"), keyOf(name));
       member.type = "button";
@@ -182,7 +190,7 @@
       face.append(avatar(name), make("span", "presence"));
       const text = make("div", "member-text");
       text.append(make("div", "member-name", name),
-        make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : "in class"));
+        make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : where));
       member.append(face, text);
       member.onclick = () => { mention(name); if (level() === "narrow") setPanel("members", false); };
       const row = make("div", "member-row");
@@ -650,6 +658,52 @@
     $("#connection").classList.toggle("is-off", Boolean(text));
   }
 
+  // The mini map: the classroom (here) and the lab next door, who is in each, and who waits at the lab's door
+  // with an invitation. The lab says who is there (the server asks it); without a lab there is no map.
+  // The places other interfaces publish in the core's directory (contracts 1.7), and this classroom.
+  const awayKeys = (places) => new Set((places?.others || []).flatMap((place) => place.away || []));
+  const ticketsHere = (places) => new Map((places?.others || []).flatMap((place) => (place.tickets || [])
+    .filter((ticket) => ticket.key).map((ticket) => [ticket.key, { ...ticket, place: place.place?.name || "there" }])));
+
+  function renderMap() {
+    const map = $("#map");
+    const places = state.places;
+    if (!map) return;
+    map.hidden = !places;
+    if (!places) return;
+    const away = awayKeys(places);       // classmates visiting another place show there, not here
+    const tickets = ticketsHere(places); // invitations to another place, held by classmates here
+    const tile = (place, here) => {
+      const node = make(here ? "div" : "a", `place${here ? " is-here" : ""}`);
+      if (!here && place.link) { node.href = place.link; node.title = `Go to ${place.place.name}`; }
+      node.append(make("span", "place-name", `${place.place.icon || "📍"} ${place.place.name}`));
+      const faces = make("span", "place-faces");
+      const people = here ? (place.people || []).filter((person) => !away.has(person.key)) : place.people || [];
+      for (const person of people.slice(0, 6)) {
+        const face = avatar(person.name, person.avatar || keyOf(person.name));
+        face.title = person.title ? `${person.name} · ${person.doing || "working"} on “${person.title}”` : person.name;
+        const ticket = here ? tickets.get(person.key) : null;
+        if (ticket) {  // she has an invitation for you
+          face.classList.add("has-ticket");
+          face.title = `${person.name} invites you to the ${ticket.place.toLowerCase()}: “${ticket.title}”`;
+        }
+        faces.append(face);
+      }
+      const note = place.place.note || "";
+      node.append(faces, make("span", "place-note", here ? `You are here${note ? ` · ${note}` : ""}` : note));
+      return node;
+    };
+    const corridor = make("div", "corridor");
+    for (const ticket of [...tickets.values()].slice(0, 3)) {
+      const door = make("a", "door");
+      door.href = ticket.link || "";
+      door.title = `Follow ${ticket.by || "a classmate"} to the ${ticket.place.toLowerCase()}: “${ticket.title}”`;
+      door.append(make("span", "", "🎟️"), make("span", "", "🚪"));
+      corridor.append(door);
+    }
+    map.replaceChildren(tile(places.here, true), corridor, ...(places.others || []).slice(0, 1).map((place) => tile(place, false)));
+  }
+
   function receive(event) {
     if (event.type === "hello") {
       const s = event.state;
@@ -662,6 +716,15 @@
       const me = $("#me");
       me.replaceChildren(avatar(s.user.name, "you"), make("span", "", s.user.name));
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
+      state.places = s.places;
+      renderMap();
+      // A link to a chat (#<chat>, from the lab's "open the classroom", say) opens it.
+      const linked = decodeURIComponent(location.hash.slice(1));
+      if (linked) history.replaceState(null, "", location.pathname + location.search);
+      if (linked && linked !== state.current && state.conversations.some((chat) => chat.id === linked)) {
+        open(linked);
+        return;
+      }
       if (!state.conversations.some((chat) => chat.id === state.current)) {
         open(s.default);
         return;
@@ -670,6 +733,12 @@
       renderTyping();
       loadHistory();
       askModels();
+    } else if (event.type === "places") {
+      const where = (places) => JSON.stringify([[...awayKeys(places)], [...ticketsHere(places).keys()]]);
+      const moved = where(state.places) !== where(event.places);
+      state.places = event.places;
+      renderMap();
+      if (moved) renderMembers();  // "in the lab" in the member list too
     } else if (event.type === "models") {
       receiveModels(event);
     } else if (event.type === "message") {

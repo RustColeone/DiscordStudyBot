@@ -95,6 +95,11 @@ def avatar_key(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (name or "").lower())[:40]
 
 
+def place_key(name: str) -> str:
+    """A name as places compare them (contracts.PLACE_STATUS): its letters and digits in any script, lowercased."""
+    return re.sub(r"[\W_]", "", (name or "").lower())[:40]
+
+
 def lan_address() -> str:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -144,6 +149,11 @@ class WebUI(Interface):
         self._stopping = False
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
+        # The mini map: the classroom and the other places interfaces publish in the core's directory (the lab next
+        # door, say; contracts 1.7). `map: false` turns it off; with no other place there is simply no map.
+        self.map = config.get("map", True) is not False
+        self.places_poll_s = max(2.0, float(config.get("places_poll_s", 5)))
+        self.places: dict | None = None
 
     # ---- lifecycle -------------------------------------------------------------------------------
     async def start(self, port) -> None:
@@ -179,6 +189,39 @@ class WebUI(Interface):
               + (" (passphrase required)." if self.passphrase else "."), flush=True)
         port.log("listening", address=self.address_shown, passphrase=bool(self.passphrase))
         self._spawn(self._tidy(delay=TIDY_AFTER_START_S))
+        if self.map and callable(getattr(port, "publish", None)):  # a core before 1.7 has no directory: no map
+            port.publish(link=self.address_shown, status=self.place())
+            self._spawn(self._watch_places())
+
+    def place(self) -> dict:
+        """The classroom as a place (contracts.PLACE_STATUS): the classmates, for any interface's map."""
+        return {"place": {"name": "Classroom", "icon": "🏫", "note": ""},
+                "people": [{"key": place_key(item["name"]), "name": item["display"],
+                            "avatar": avatar_key(item["name"])} for item in self.roster]}
+
+    def _places(self) -> dict | None:
+        """The classroom and the other places in the directory; None when no other place is published."""
+        directory = self.port.directory() if self.port is not None else {}
+        others = [{"interface": name, "link": entry.get("link", ""), **entry.get("status", {})}
+                  for name, entry in directory.items()
+                  if name != self.name and isinstance(entry.get("status"), dict) and entry["status"].get("place")]
+        if not others:
+            return None
+        return {"here": {"interface": self.name, "link": self.address_shown, **self.place()}, "others": others}
+
+    async def _watch_places(self) -> None:
+        """While a page is open, read who is where from the directory, and tell the pages when it changes."""
+        while not self._stopping:
+            if self._sockets:
+                try:
+                    found = self._places()
+                except Exception as error:  # the map is a nicety: it never stops the classroom
+                    self.port.log("places_failed", error=type(error).__name__)
+                    found = None
+                if found != self.places:
+                    self.places = found
+                    await self._broadcast({"type": "places", "places": found})
+            await asyncio.sleep(self.places_poll_s)
 
     def _spawn(self, coroutine) -> None:
         task = asyncio.create_task(coroutine)
@@ -432,7 +475,9 @@ class WebUI(Interface):
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
                 "classmates": self.classmates, "roster": self.roster, "avatars": self.avatars(), "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
-                "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb}
+                "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb,
+                "places": self._places() if self.map and self.port is not None and
+                callable(getattr(self.port, "directory", None)) else None}
 
     async def _socket(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30, max_msg_size=1 << 20)

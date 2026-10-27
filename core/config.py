@@ -59,6 +59,7 @@ class CoreConfig:
         self.exclude = [str(item).strip().strip("/") for item in modules.get("exclude", []) if str(item).strip()]
         self.extension_config = dict(raw.get("extension_config") or {})
         self.providers = dict(raw.get("providers") or {})
+        self.configured_providers = self.providers  # what the owner wrote: a module's suggestions never override it
         self.profiles = dict(raw.get("profiles") or {})
         self.owners = Owners(raw.get("owners"))
         self.control = Address.parse(raw["control"]) if raw.get("control") else None
@@ -170,6 +171,8 @@ class CoreConfig:
         # Permissions layer setting by setting (built-in, then modules, then core.yml), so keep them apart.
         config.builtin_permissions = dict(defaults.get("permissions") or {})
         config.permissions = dict(raw.get("permissions") or {})
+        # Providers likewise: a module's suggestions override the built-in settings, core.yml overrides both.
+        config.configured_providers = dict(raw.get("providers") or {})
         return config
 
     @staticmethod

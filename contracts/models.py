@@ -8,7 +8,7 @@ from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 from contracts.messages import FileRef
 
-Effort = Literal["low", "medium", "high"]
+Effort = Literal["low", "medium", "high", "max"]  # "max" added in 1.7: providers that have it think longest
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,8 @@ class ModelResult:
     # Added in 1.4 (new fields go last): why each candidate tried before this one did not answer, in order
     # ("deepseek/deepseek-flash: blank answer (not JSON)"); empty when the first one did.
     fallbacks: tuple[str, ...] = ()
+    # Added in 1.7: how many of `input_tokens` the provider read from its prompt cache (billed far cheaper).
+    cached_input_tokens: int = 0
     # Added in 1.7, for requests with tools: the calls, and what the provider needs back with this answer's
     # assistant message in later requests (`replay` on that message, as it is: the core gives it back only to the
     # provider that wrote it; DeepSeek's thinking travels this way).
@@ -103,6 +105,10 @@ class Models(Protocol):
 
     def profiles(self) -> Sequence[str]: ...
 
+    def ready(self, profile: str | None = None) -> bool:
+        """Whether some candidate of `profile` (default: the run's first persona's) has its provider configured, so
+        a call can be tried (added in 1.6). Engines use it to pick who works before trying; a call can still fail."""
+
 
 # ---- adapters: one provider kind's protocol -------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -127,6 +133,7 @@ class AdapterResult:
     output_tokens: int = 0
     truncated: bool = False
     schema_mode: str = ""
+    cached_input_tokens: int = 0  # (1.7) of input_tokens, read from the provider's prompt cache
     tool_calls: tuple[ToolCall, ...] = ()  # (1.7) with tools; unparsable arguments stay a string (refused)
     replay: Mapping[str, Any] | None = None  # (1.7) sent back with this assistant message
 

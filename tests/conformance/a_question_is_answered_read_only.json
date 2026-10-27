@@ -1,0 +1,64 @@
+{
+ "name": "a question is answered read only",
+ "config": {},
+ "inputs": [
+  {
+   "new": "What does next_meeting do with an empty schedule?"
+  }
+ ],
+ "answers": [
+  {
+   "schema": "workbench_route",
+   "text": "{\"kind\": \"question\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"What does next_meeting do with an empty\", \"reason\": \"the demo sorts every change as small\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"Reading the schedule code.\", \"plan\": [], \"actions\": [{\"tool\": \"read_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\"}}], \"status\": \"continue\", \"summary\": \"\"}",
+   "truncated": false
+  },
+  {
+   "schema": "workbench_turn",
+   "text": "{\"say\": \"\", \"note\": \"\", \"plan\": [], \"actions\": [], \"status\": \"done\", \"summary\": \"`next_meeting` calls `min()` over the meetings (clubnotes/schedule.py:47), so with an empty schedule it raises `ValueError: min() arg is an empty sequence`. Nothing checks for that today; returning `None` or raising a clearer error would be the fix.\"}",
+   "truncated": false
+  }
+ ],
+ "expect": {
+  "status": "answered",
+  "workflow": "single",
+  "steps": [
+   [
+    "r1.route",
+    "route",
+    "done"
+   ],
+   [
+    "r1.answer.1",
+    "turn",
+    "done"
+   ],
+   [
+    "r1.answer.2",
+    "turn",
+    "done"
+   ]
+  ],
+  "said": [
+   [
+    "Luna",
+    "DeepSeek will look into this one."
+   ],
+   [
+    "DeepSeek",
+    "`next_meeting` calls `min()` over the meetings (clubnotes/schedule.py:47), so with an empty schedule it raises `ValueError: min() arg is an empty sequence`. Nothing checks for that today; returning `None` or raising a clearer error would be the fix."
+   ]
+  ],
+  "approvals": [],
+  "outcomes": [
+   "routed",
+   "answered"
+  ],
+  "commits": 1,
+  "files": []
+ }
+}

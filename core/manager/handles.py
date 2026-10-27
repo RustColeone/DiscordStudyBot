@@ -30,6 +30,9 @@ class ModelsHandle:
     def profiles(self) -> Sequence[str]:
         return self._manager.providers.profiles()
 
+    def ready(self, profile: str | None = None) -> bool:
+        return self._manager.providers.profile_ready(profile or self._default_profile)
+
 
 class ToolsHandle:
     def __init__(self, manager: "Manager", run_id: str):
@@ -78,6 +81,25 @@ class HistoryHandle:
 
 
 SUMMARIES = "core:summaries"  # conversation address → its rolling summary (History.summarize)
+
+
+class ReadingHistory:
+    """A capability's view of its conversation's history (contracts 1.6): it reads; only engines write the summary."""
+
+    def __init__(self, history: HistoryHandle):
+        self._history = history
+
+    def recent(self, limit: int = 30) -> list[HistoryItem]:
+        return self._history.recent(limit)
+
+    def search(self, text: str, limit: int = 20) -> list[HistoryItem]:
+        return self._history.search(text, limit)
+
+    def summary(self) -> HistorySummary | None:
+        return self._history.summary()
+
+    def summarize(self, text: str, upto: float) -> None:
+        raise ValueError("A capability reads the conversation's history; only engines write its summary")
 
 
 def local_time(at: float) -> str:
@@ -218,6 +240,7 @@ class ToolContextHandle:
         self.models = ModelsHandle(manager, record.id, profile)
         self.workspace = workspace
         self.access = manager.caller_access(record)
+        self.history = ReadingHistory(HistoryHandle(manager, self.address))
 
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)

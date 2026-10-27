@@ -296,7 +296,12 @@ Besides `submit`, an interface's port can `notify` the owner (a `Reply(kind="eve
 owner's platform reply to it is relayed back to the origin conversation), `observe` activity into
 history (idempotent per message ID), `cancel` / `cancel_all` open runs, `set_ready` (transitions notify
 the owner; deliveries are refused while not ready), `check` a reply right before committing it, and read
-`policy` for its conversations. `submit` returns a `SubmitResult` with the admission reason.
+`policy` for its conversations. `submit` returns a `SubmitResult` with the admission reason. Since contracts 1.7
+an interface can also ask whether a model profile can answer (`models_ready`), whether an approval is still
+pending (`approval_status`), and `publish` its link and a small public status (a place on the club's map, say)
+that the other interfaces read from the `directory`: modules learn about each other through the core this way,
+never by calling each other. When the core stops, it cancels runs with `contracts.SHUTDOWN`, so an engine can tell a
+stop (the run resumes) from a cancel.
 
 Revocation is immediate: a rule that stops admitting a conversation, or an assignment that is disabled
 or removed, cancels the conversation's open runs and expires their approvals. Run output is delivered
@@ -366,7 +371,7 @@ to the unit to keep a core that keeps crashing down until it is fixed.
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
 | [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `webui` the example interface (a chat page on the local network, the room by default), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
-| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's five personas), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
+| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines (with the room's five personas), `workbench` (coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; its own page), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 | [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |
 | [`core/setup.py`](../../core/setup.py), [`core/wizard.py`](../../core/wizard.py) | Setting up: module settings, file edits (one key at a time), `$setup`, and the guided `python -m core setup` |

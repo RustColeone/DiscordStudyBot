@@ -113,7 +113,8 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         await settle(core)
         self.assertEqual(sorted(self.spoken(core)), [("Gemini", "", "Hello there."), ("Luna", "", "Hi!")])
         board = json.loads(script.prompts["Gemini"][0][-1]["content"].split("Shared room (untrusted state): ", 1)[1])
-        self.assertIn("Luna answers them", json.dumps(board, ensure_ascii=False))
+        self.assertIn("Luna answered them", json.dumps(board, ensure_ascii=False))
+        self.assertEqual(board["room_messages"][0]["message"], "Hi!")  # she joins in once she has read it
         # Next time Gemini leads, so her pass is refused once; Luna may pass now.
         await iface(core).say("lunch at noon?")
         await settle(core)
@@ -268,6 +269,36 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(board["your_instruction"], "verify the value Luna read")
         self.assertEqual(board["shared_results"][0]["action"]["tool"], "tools.read_value")
         self.assertNotIn("signature", board["shared_results"][0])
+
+    async def test_later_steps_of_a_job_may_work_quietly_but_the_first_and_last_always_speak(self):
+        script = Script(Luna=[turn("", "continue", [("tools.read_value", {"key": "k"})]),
+                              turn("Reading k first.", "continue", [("tools.read_value", {"key": "k"})]),
+                              turn("", "continue", [("tools.read_value", {"key": "j"})]),
+                              turn("", "complete"), turn("Both are there.")])
+        core = await self.core(script)
+        await iface(core).say("Luna, check k and j please")
+        await settle(core)
+        self.assertEqual(self.spoken(core), [("Luna", "", "Reading k first."), ("Luna", "", "Both are there.")])
+        prompts = [prompt[-1]["content"] for prompt in script.prompts["Luna"]]
+        self.assertIn("Say something to the person before doing work.", prompts[1])
+        self.assertIn("a final turn always says something", prompts[4])
+        board = json.loads(prompts[2].split("Shared room (untrusted state): ", 1)[1])
+        self.assertEqual(board["your_messages"], ["Reading k first."])  # what she must not say again
+
+    async def test_someone_mentioned_in_passing_may_add_her_word_after_the_answer_or_stay_silent(self):
+        script = Script(Luna=[turn("You two fixed the Sunday sort."), turn("Yes, all seven tests pass.")],
+                        DeepSeek=[turn("And I guessed the cause first, hmph."), turn("", "pass")])
+        core = await self.core(script)
+        await iface(core).say("Luna, what did DeepSeek and I just get done?")
+        await settle(core)
+        self.assertEqual(self.spoken(core), [("Luna", "", "You two fixed the Sunday sort."),
+                                             ("DeepSeek", "", "And I guessed the cause first, hmph.")])
+        board = json.loads(script.prompts["DeepSeek"][0][-1]["content"].split("Shared room (untrusted state): ", 1)[1])
+        self.assertIn("mentioned you in passing; nobody asked you", board["your_instruction"])
+        self.assertEqual(board["room_messages"][0]["message"], "You two fixed the Sunday sort.")  # heard it first
+        await iface(core).say("Luna, did DeepSeek's tests pass?")
+        await settle(core)
+        self.assertEqual(self.spoken(core)[2:], [("Luna", "", "Yes, all seven tests pass.")])  # she passed
 
     async def test_write_waits_for_owner_approval_across_a_restart(self):
         script = Script(Luna=[turn("Saving it.", "continue", [("tools.write_value", {"key": "k", "value": "v"})])])

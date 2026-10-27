@@ -20,9 +20,9 @@ from typing import Any, Mapping, Protocol
 
 import jsonschema
 
-from contracts import (Action, Address, Capability, Command, Delivery, Display, Engine, FileRef, ModelError,
-                       ModelRequest, ModelResult, Operation, Option, PartContext, Persona, PromptPart, Reply, Request,
-                       Risk, RunYield, Sender, ToolResult)
+from contracts import (SHUTDOWN, Action, Address, Capability, Command, Delivery, Display, Engine, FileRef,
+                       ModelError, ModelRequest, ModelResult, Operation, Option, PartContext, Persona, PromptPart,
+                       Reply, Request, Risk, RunYield, Sender, ToolResult)
 from core.audit import Audit
 from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, local_time
 from core.manager.model_choice import ModelChoices
@@ -492,7 +492,7 @@ class Manager:
         await asyncio.gather(*self._side_tasks, return_exceptions=True)
         tasks = list(self._tasks.values())
         for task in tasks:
-            task.cancel()
+            task.cancel(SHUTDOWN)  # (the runs stay open and resume on the next start: engines can tell)
         await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.clear()
 
@@ -743,7 +743,7 @@ class Manager:
                     return task.result()
         finally:
             if not task.done():
-                task.cancel()
+                task.cancel(SHUTDOWN if self._stopping else None)  # (an engine can tell a stop from a cancel)
                 await asyncio.gather(task, return_exceptions=True)
 
     async def _fail(self, record: RunRecord, code: str, detail: str) -> None:
@@ -1742,6 +1742,18 @@ class Manager:
         self.tank.update_run(record.id, status="done")
         await self._deliver_result(record, result)
 
+    async def _tell_stopped(self, record: RunRecord, reason: str) -> None:
+        """A waiting run was cancelled: its engine hears it (`Engine.stopped`), so it can put its own records right."""
+        engine = self.engines.get(record.engine)
+        if engine is None:
+            return
+        session = SessionHandle(self, record, self.tank.events(record.id, ("input", "tool_result", "approval_denied",
+                                                                            "resumed")), True)
+        try:
+            await asyncio.wait_for(engine.stopped(session, reason), 30)
+        except Exception as error:  # the cancel stands whatever the engine does with the news
+            self.audit.record("engine_stopped_failed", run=record.id, error=f"{type(error).__name__}: {error}"[:300])
+
     async def cancel(self, target: str | None, request: Request) -> tuple[str, str | None]:
         """The answer for `$cancel`, and the ID of the run it cancelled (if exactly one)."""
         if target and ":" in target:
@@ -1774,6 +1786,8 @@ class Manager:
             for approval in self.tank.approvals("pending", record.id):
                 self._expire(approval, reason[:100])
         task = self._tasks.get(record.id)
+        if task is None and current.status != "running":
+            await self._tell_stopped(current, reason)
         if task is not None and DRIVING.get() == record.id:
             # Cancelled from inside its own work (an interface cancelling during delivery): waiting for
             # the task would wait for ourselves, so cancel it once the current step returns.

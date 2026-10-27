@@ -1,0 +1,2436 @@
+{
+ "version": "1.8",
+ "constants": {
+  "CONTRACTS_VERSION": "1.8",
+  "DIARY_KINDS": [
+   "fact",
+   "episode",
+   "reflection"
+  ],
+  "PART_PLACES": [
+   "stable",
+   "turn"
+  ],
+  "PLACE_STATUS": [
+   "place",
+   "people",
+   "away",
+   "tickets"
+  ],
+  "SHUTDOWN": "core-shutdown",
+  "TIER_ORDER": [
+   "read",
+   "prepare",
+   "write",
+   "critical"
+  ]
+ },
+ "enums": {
+  "Risk": {
+   "doc": "The capability's tier: what running it can change. READ: observes only; may be repeated. PREPARE: creates local artifacts (downloads, renders) but changes nothing shared; never repeated within a run. WRITE: changes something reversible inside the bot (reminders, notes, routines, music); never repeated within a run. CRITICAL: affects the machine, other people or permissions (shell, files, services, sending as the owner, changing policy); never repeated within a run and never approved by a wildcard. Whether a call runs at once or waits for the owner is decided per conversation (see docs/core/ARCHITECTURE.md, Permissions); by default reads and prepares run, writes and critical actions ask.",
+   "values": [
+    "read",
+    "prepare",
+    "write",
+    "critical"
+   ]
+  },
+  "RunYield": {
+   "doc": "How an engine's `run` ends. DONE: the request is handled. New inbox messages left unread start a new run. WAIT_INPUT: the engine asked a question; the next message in the run's lane resumes this run. WAIT_APPROVAL: a tool call returned `needs_approval`; the owner's decision resumes this run.",
+   "values": [
+    "done",
+    "waiting_input",
+    "waiting_approval"
+   ]
+  }
+ },
+ "types": {
+  "Action": {
+   "doc": "A button: `label` shown, `command` (`$approve ea947b`) run as whoever presses it.",
+   "fields": [
+    {
+     "name": "label",
+     "type": "str"
+    },
+    {
+     "name": "command",
+     "type": "str"
+    },
+    {
+     "name": "style",
+     "type": "\"primary\" | \"secondary\" | \"success\" | \"danger\"",
+     "default": "secondary"
+    }
+   ]
+  },
+  "Activity": {
+   "doc": "Another open run in the same conversation. status: `working` (waiting on a capability or a file delivery, e.g. a video conversion), `running` (thinking), `waiting_input` or `waiting_approval`. `doing` names the capability while working.",
+   "fields": [
+    {
+     "name": "run_id",
+     "type": "str"
+    },
+    {
+     "name": "status",
+     "type": "str"
+    },
+    {
+     "name": "sender_id",
+     "type": "str"
+    },
+    {
+     "name": "sender_name",
+     "type": "str"
+    },
+    {
+     "name": "request",
+     "type": "str"
+    },
+    {
+     "name": "doing",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "since",
+     "type": "float",
+     "default": 0.0
+    },
+    {
+     "name": "started_at",
+     "type": "float",
+     "default": 0.0
+    }
+   ]
+  },
+  "AdapterResult": {
+   "doc": "One API call's raw answer. `truncated`: the output hit the token limit. `schema_mode`: how the schema was enforced (for example `native`), for the audit log.",
+   "fields": [
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "input_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "output_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "truncated",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "schema_mode",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "cached_input_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "tool_calls",
+     "type": "list[ToolCall]",
+     "default": "()"
+    },
+    {
+     "name": "replay",
+     "type": "Mapping | none",
+     "default": null
+    }
+   ]
+  },
+  "Address": {
+   "doc": "One conversation: an interface name plus that interface's own conversation ID.",
+   "fields": [
+    {
+     "name": "interface",
+     "type": "str"
+    },
+    {
+     "name": "conversation",
+     "type": "str"
+    }
+   ]
+  },
+  "Capability": {
+   "doc": "One action. `name` is `<extension>.<action>`. `parameters` are JSON-schema properties; `required` lists mandatory ones. `needs` lists Display features the conversation must support (for example `files`). `internal` capabilities are callable by engines but not offered to models as tools. `access` is the lowest level that may call it (`member`, `admin`, `creator`; `owner_only` means `creator`). The caller's level is `ToolContext.access`, so a capability may also do more for higher levels (an admin sees every conversation's items, a member only their own). `command`, when set, makes the capability available as `$<command> <text>`, with the text passed as `command_argument`. It may be a name or a `Command` declaring options and a template for interfaces with native command menus; a name becomes a `Command` with one option for `command_argument`. `risk` is the tier (see Risk). Attributes refine it; the core enforces them and configuration can only make them stricter: * `private`: shows the owner's private data (messages, screen, clipboard, files). Offered only in conversations private to the owner; its run's output goes nowhere else. * `subject`: the parameter that permission rules and saved grants match on (a unit, a chat, a path); `subject_kind=\"path\"` also makes the core refuse secret paths (`.env`, keys) to models. * `escalate(arguments)`: may return a higher tier for a call (never a lower one). * `never_auto`: a model's call always asks the owner; no rule or grant changes that. * `grantable`: the owner may answer an approval with \"always allow\" for that exact subject in that conversation (needs `subject`). * `confirm`: even the owner's own typed command asks for a one-tap confirmation. * `describe(arguments)`: one plain line for approval prompts (\"Restart navidrome.service\").",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str"
+    },
+    {
+     "name": "run",
+     "type": "Callable"
+    },
+    {
+     "name": "parameters",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "required",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "risk",
+     "type": "Risk",
+     "default": "read"
+    },
+    {
+     "name": "internal",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "owner_only",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "needs",
+     "type": "list[str]",
+     "default": "frozenset()"
+    },
+    {
+     "name": "command",
+     "type": "Command | str | none",
+     "default": null
+    },
+    {
+     "name": "command_argument",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "timeout_s",
+     "type": "float",
+     "default": 600.0
+    },
+    {
+     "name": "access",
+     "type": "\"member\" | \"admin\" | \"creator\"",
+     "default": "member"
+    },
+    {
+     "name": "private",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "subject",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "subject_kind",
+     "type": "\"value\" | \"path\"",
+     "default": "value"
+    },
+    {
+     "name": "escalate",
+     "type": "Callable | none",
+     "default": null
+    },
+    {
+     "name": "never_auto",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "grantable",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "confirm",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "describe",
+     "type": "Callable | none",
+     "default": null
+    }
+   ]
+  },
+  "Command": {
+   "doc": "A command declaration. `template` renders option values into the text after `$name`: `{option}` is replaced by its value and `[...]` sections are dropped when an option inside them has no value, e.g. `-u {url}[ -s {start}][ -e {end}]`. Without a template, values are joined with spaces in option order. `examples` are argument texts shown in help (`10m drink water`). `access` is the lowest level that may run it; `admin_help` is extra help shown to admins and the creator only. `message_action`, when set, is a label for acting on an existing message (its text fills the first option).",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "options",
+     "type": "list[Option]",
+     "default": "()"
+    },
+    {
+     "name": "template",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "examples",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "access",
+     "type": "\"member\" | \"admin\" | \"creator\"",
+     "default": "member"
+    },
+    {
+     "name": "admin_help",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "message_action",
+     "type": "str",
+     "default": ""
+    }
+   ]
+  },
+  "Contributions": {
+   "doc": "What an extension adds. Besides interfaces, engines, capabilities and personas, an extension may suggest defaults so it works when dropped in: model `providers` (name → settings, as in core.yml; configured settings win key by key) and `profiles` (name → ordered candidates, as in core.yml), and `assignments` and `admission` rules for its own interfaces' addresses (`<interface>:*` or `<interface>:<conversation>`). core.yml and runtime edits always win. `permissions` suggests permission defaults in the core.yml `permissions:` form (`{pattern: {use, tiers, rules}}`): `use` and `tiers` only for its own interfaces' addresses, `rules` only for its own capabilities. The module's config.yml `permissions:` overrides these, and core.yml overrides both, setting by setting. `adapters` adds provider kinds (kind → AdapterFactory) for APIs the built-in kinds do not speak; its providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused.",
+   "fields": [
+    {
+     "name": "interfaces",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "engines",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "capabilities",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "personas",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "profiles",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "assignments",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "admission",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "permissions",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "providers",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "adapters",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "prompt_parts",
+     "type": "Sequence",
+     "default": "()"
+    }
+   ]
+  },
+  "Delivery": {
+   "doc": "The interface's result for one reply. `uncertain=True` means it may have been sent; never retry it.",
+   "fields": [
+    {
+     "name": "ok",
+     "type": "bool"
+    },
+    {
+     "name": "message_id",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "detail",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "uncertain",
+     "type": "bool",
+     "default": false
+    }
+   ]
+  },
+  "DiaryNote": {
+   "doc": "One note a persona keeps about one person in one conversation. Times are Unix seconds.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "int"
+    },
+    {
+     "name": "key",
+     "type": "str"
+    },
+    {
+     "name": "kind",
+     "type": "str"
+    },
+    {
+     "name": "note",
+     "type": "str"
+    },
+    {
+     "name": "importance",
+     "type": "int"
+    },
+    {
+     "name": "created_at",
+     "type": "float"
+    },
+    {
+     "name": "updated_at",
+     "type": "float"
+    }
+   ]
+  },
+  "Display": {
+   "doc": "What a conversation can show. Engines adapt their output; interfaces render the rest.",
+   "fields": [
+    {
+     "name": "markdown",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "edits",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "progress",
+     "type": "bool",
+     "default": true
+    },
+    {
+     "name": "quotes",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "files",
+     "type": "bool",
+     "default": true
+    },
+    {
+     "name": "max_upload_mb",
+     "type": "float",
+     "default": 8.0
+    },
+    {
+     "name": "max_text_chars",
+     "type": "int",
+     "default": 2000
+    }
+   ]
+  },
+  "EngineSpec": {
+   "doc": "EngineSpec(name: 'str', description: 'str' = '', personas: \"Literal['one', 'many']\" = 'one')",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "personas",
+     "type": "\"one\" | \"many\"",
+     "default": "one"
+    }
+   ]
+  },
+  "Event": {
+   "doc": "One entry of a run's durable event log. kind: `input` a request for this run (`data[\"request\"]` is the Request as a dict) `tool_result` the result of an approved action (`data`: call_key, name, arguments, result); call_key is \"call:\" + the call_id the engine passed to tools.call `approval_denied` the owner denied an action (`data`: call_key, name, arguments) `resumed` the core restarted while the run was active",
+   "fields": [
+    {
+     "name": "index",
+     "type": "int"
+    },
+    {
+     "name": "kind",
+     "type": "str"
+    },
+    {
+     "name": "at",
+     "type": "float"
+    },
+    {
+     "name": "data",
+     "type": "Mapping",
+     "default": "{}"
+    }
+   ]
+  },
+  "Extension": {
+   "doc": "Declared as `EXTENSION` in an extension's `extension.py`. `setup` receives an ExtensionContext and returns Contributions. `contracts` is the major contracts version the extension was written for. `settings` declares what the module can be set up with (see Setting); it is read without running `setup`.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "setup",
+     "type": "Callable"
+    },
+    {
+     "name": "contracts",
+     "type": "str",
+     "default": "1"
+    },
+    {
+     "name": "version",
+     "type": "str",
+     "default": "0"
+    },
+    {
+     "name": "description",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "settings",
+     "type": "Sequence",
+     "default": "()"
+    }
+   ]
+  },
+  "FileRef": {
+   "doc": "A local file the core and interfaces can read.",
+   "fields": [
+    {
+     "name": "path",
+     "type": "str"
+    },
+    {
+     "name": "name",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "mime",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "size",
+     "type": "int",
+     "default": 0
+    }
+   ]
+  },
+  "HistoryItem": {
+   "doc": "HistoryItem(direction: \"Literal['in', 'out']\", text: 'str', at: 'float', sender_name: 'str' = '', sender_id: 'str' = '', kind: 'str' = 'text', message_id: 'str | None' = None, reply_to: 'str | None' = None, quoted_text: 'str' = '', files: 'tuple[FileRef, ...]' = ())",
+   "fields": [
+    {
+     "name": "direction",
+     "type": "\"in\" | \"out\""
+    },
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "at",
+     "type": "float"
+    },
+    {
+     "name": "sender_name",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "sender_id",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "kind",
+     "type": "str",
+     "default": "text"
+    },
+    {
+     "name": "message_id",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "reply_to",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "quoted_text",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "files",
+     "type": "list[FileRef]",
+     "default": "()"
+    }
+   ]
+  },
+  "HistorySummary": {
+   "doc": "A conversation's rolling summary: `text` covers its messages up to `upto` (epoch seconds, inclusive).",
+   "fields": [
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "upto",
+     "type": "float"
+    },
+    {
+     "name": "updated_at",
+     "type": "float"
+    }
+   ]
+  },
+  "Image": {
+   "doc": "An image shown with the last user message.",
+   "fields": [
+    {
+     "name": "mime",
+     "type": "str"
+    },
+    {
+     "name": "data",
+     "type": "bytes"
+    }
+   ]
+  },
+  "ModelError": {
+   "doc": "A model call failed. `kind` is one of: `unavailable` (no candidate answered), `invalid_output` (the answer did not match the schema or was truncated), `budget_exceeded`, `not_configured`, and (for a request with `tools`) `tools_unsupported`: the next candidate in the profile cannot call tools, so the request should be asked again in a form without them (the engine's JSON turns), where that candidate and those after it count.",
+   "error": true,
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str"
+    },
+    {
+     "name": "message",
+     "type": "str"
+    }
+   ]
+  },
+  "ModelRequest": {
+   "doc": "One language-model call. `messages` use roles `system`, `user` and `assistant` with plain-text content. With `tools` (1.7), an `assistant` message may also carry `tool_calls` (a list of {id, name, arguments}, as the result gave them) and `replay` (the result's `replay`, sent back as it is), and a `tool` message carries `tool_call_id` and the call's result as `content`. `profile` names a configured profile (an ordered list of provider/model candidates); `None` uses the session persona's profile, or `default`. With `output_schema`, the result's `data` is the parsed, schema-validated JSON object. `images` (local JPEG, PNG, GIF or WebP files, at most 6) are shown with the last user message. Candidates that cannot see images are tried last and are told images were attached instead. `persona` names the session persona the call is for, so her `$model` choice applies and her message can say which model wrote it; without it, the core uses the run's only persona with this profile. With `tools` (1.7), the model answers in words and calls: the result's `tool_calls` are checked against the tools' `parameters`, and `output_schema` is not used. Candidates are tried in order while they can call tools; the first that cannot ends the request with `ModelError(\"tools_unsupported\")`. Tool names may hold dots (`web.search`); an adapter maps them to what its API allows and back.",
+   "fields": [
+    {
+     "name": "messages",
+     "type": "Sequence"
+    },
+    {
+     "name": "profile",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "output_schema",
+     "type": "Mapping | none",
+     "default": null
+    },
+    {
+     "name": "schema_name",
+     "type": "str",
+     "default": "output"
+    },
+    {
+     "name": "effort",
+     "type": "\"low\" | \"medium\" | \"high\" | \"max\"",
+     "default": "low"
+    },
+    {
+     "name": "max_tokens",
+     "type": "int",
+     "default": 1500
+    },
+    {
+     "name": "timeout_s",
+     "type": "float",
+     "default": 35.0
+    },
+    {
+     "name": "images",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "persona",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "tools",
+     "type": "Sequence",
+     "default": "()"
+    }
+   ]
+  },
+  "ModelResult": {
+   "doc": "ModelResult(text: 'str', data: 'Any' = None, provider: 'str' = '', model: 'str' = '', input_tokens: 'int' = 0, output_tokens: 'int' = 0, duration_s: 'float' = 0.0, schema_mode: 'str' = '', fallbacks: 'tuple[str, ...]' = (), cached_input_tokens: 'int' = 0, tool_calls: 'tuple[ToolCall, ...]' = (), replay: 'Mapping[str, Any] | None' = None)",
+   "fields": [
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "data",
+     "type": "any",
+     "default": null
+    },
+    {
+     "name": "provider",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "model",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "input_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "output_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "duration_s",
+     "type": "float",
+     "default": 0.0
+    },
+    {
+     "name": "schema_mode",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "fallbacks",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "cached_input_tokens",
+     "type": "int",
+     "default": 0
+    },
+    {
+     "name": "tool_calls",
+     "type": "list[ToolCall]",
+     "default": "()"
+    },
+    {
+     "name": "replay",
+     "type": "Mapping | none",
+     "default": null
+    }
+   ]
+  },
+  "NotConfigured": {
+   "doc": "Raised by an adapter whose provider cannot be used (no key, missing settings): the candidate is skipped.",
+   "error": true,
+   "fields": [
+    {
+     "name": "kind",
+     "type": "str"
+    },
+    {
+     "name": "message",
+     "type": "str"
+    }
+   ]
+  },
+  "Operation": {
+   "doc": "A platform-specific action (for example `login`, or playing music) run through the core. It becomes the capability `<interface>.<name>`; `command`, if set, also makes it available as `$<command> <text>` with the text passed as `command_argument`. Operations are owner-only unless `owner_only=False`; a public operation must act only on the calling conversation (`context.address`), never on others. `risk` and the attributes (`private`, `subject`, `subject_kind`, `never_auto`, `grantable`, `confirm`) mean the same as on a Capability.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str"
+    },
+    {
+     "name": "parameters",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "required",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "risk",
+     "type": "Risk",
+     "default": "read"
+    },
+    {
+     "name": "command",
+     "type": "Command | str | none",
+     "default": null
+    },
+    {
+     "name": "command_argument",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "timeout_s",
+     "type": "float",
+     "default": 120.0
+    },
+    {
+     "name": "owner_only",
+     "type": "bool",
+     "default": true
+    },
+    {
+     "name": "private",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "subject",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "subject_kind",
+     "type": "str",
+     "default": "value"
+    },
+    {
+     "name": "never_auto",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "grantable",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "confirm",
+     "type": "bool",
+     "default": false
+    }
+   ]
+  },
+  "Option": {
+   "doc": "One argument. `attachment` options are delivered as the request's files, not in the text. A boolean option with a `flag` renders as that flag when true (`--fit`) and as nothing when false.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "type",
+     "type": "\"string\" | \"integer\" | \"number\" | \"boolean\" | \"attachment\"",
+     "default": "string"
+    },
+    {
+     "name": "required",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "choices",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "flag",
+     "type": "str",
+     "default": ""
+    }
+   ]
+  },
+  "PartContext": {
+   "doc": "What a computed prompt part may look at: the persona it is written for, and the run's address and trigger.",
+   "fields": [
+    {
+     "name": "persona",
+     "type": "Persona"
+    },
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "trigger",
+     "type": "Request"
+    },
+    {
+     "name": "owner",
+     "type": "bool",
+     "default": false
+    }
+   ]
+  },
+  "Persona": {
+   "doc": "Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart).",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "display_name",
+     "type": "str"
+    },
+    {
+     "name": "prompt",
+     "type": "str"
+    },
+    {
+     "name": "profile",
+     "type": "str",
+     "default": "default"
+    },
+    {
+     "name": "parts",
+     "type": "list[PromptPart]",
+     "default": "()"
+    }
+   ]
+  },
+  "PromptPart": {
+   "doc": "A piece of a persona's prompt that engines place for it: its personality, house rules, memory, anything. `text` is the text, or a function of a `PartContext` returning it (\"\" adds nothing). `place` says where an engine puts it: `stable` in the system prompt (the same every turn, so the provider's prompt cache keeps serving it), `turn` in the turn's context after the history (it may change every turn). Parts come in `order` (lower first). A module's part is for the personas it names (`personas`), or for every persona when it names none; a persona's own parts are its own. Engines get them rendered with `Session.prompt`.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "text",
+     "type": "str | Callable"
+    },
+    {
+     "name": "place",
+     "type": "str",
+     "default": "stable"
+    },
+    {
+     "name": "order",
+     "type": "int",
+     "default": 100
+    },
+    {
+     "name": "personas",
+     "type": "list[str]",
+     "default": "()"
+    }
+   ]
+  },
+  "Reply": {
+   "doc": "One outbound item. Interfaces render it in their platform's form. `kind=\"notice\"` carries a machine-readable `code` (for example `run_failed`, `approval_request`) so each interface can phrase it appropriately. `kind=\"event\"` is an interface notification for the owner (see InterfacePort.notify). `source` says who produced it: `run` (an engine), `command`, `owner` (an owner's relay or send), or `core`. `speaker` is the display name of the persona talking, set by engines with several personas; `label` qualifies it (for example a work note). Interfaces show both in their own way. `actions` are buttons, each running a `$command` as the person who presses it (interfaces without buttons show the commands as text). `private` asks to show the reply only to the person it answers, where the platform can (otherwise it is sent normally). `run_id` names the run a reply is about: its output and progress (progress carries a `Cancel` action), or the `$cancel` confirmation for it, after which interfaces can clear that run's progress display.",
+   "fields": [
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "kind",
+     "type": "\"text\" | \"file\" | \"progress\" | \"notice\" | \"event\""
+    },
+    {
+     "name": "text",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "file",
+     "type": "FileRef | none",
+     "default": null
+    },
+    {
+     "name": "quote",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "in_reply_to",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "run_id",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "code",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "data",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "source",
+     "type": "\"run\" | \"command\" | \"owner\" | \"core\"",
+     "default": "core"
+    },
+    {
+     "name": "id",
+     "type": "str",
+     "default": "generated"
+    },
+    {
+     "name": "speaker",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "label",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "actions",
+     "type": "list[Action]",
+     "default": "()"
+    },
+    {
+     "name": "private",
+     "type": "bool",
+     "default": false
+    }
+   ]
+  },
+  "Request": {
+   "doc": "One inbound message or trigger. `id` must be unique within the interface; the gateway drops a second request with the same ID. Facts such as `is_direct` and `mentions_me` are reported by the interface; the gateway's admission rules decide what they mean.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "str"
+    },
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "sender",
+     "type": "Sender"
+    },
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "received_at",
+     "type": "float"
+    },
+    {
+     "name": "origin",
+     "type": "\"person\" | \"routine\" | \"system\"",
+     "default": "person"
+    },
+    {
+     "name": "is_direct",
+     "type": "bool",
+     "default": true
+    },
+    {
+     "name": "mentions_me",
+     "type": "bool | none",
+     "default": null
+    },
+    {
+     "name": "reply_to",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "quoted_text",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "kind",
+     "type": "\"text\" | \"image\" | \"video\" | \"voice\" | \"file\" | \"sticker\" | \"other\"",
+     "default": "text"
+    },
+    {
+     "name": "files",
+     "type": "list[FileRef]",
+     "default": "()"
+    },
+    {
+     "name": "display",
+     "type": "Display",
+     "default": "generated"
+    },
+    {
+     "name": "extra",
+     "type": "Mapping",
+     "default": "{}"
+    }
+   ]
+  },
+  "Sender": {
+   "doc": "Who sent a request. `id` is stable within the interface (a platform user ID).",
+   "fields": [
+    {
+     "name": "id",
+     "type": "str"
+    },
+    {
+     "name": "name",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "kind",
+     "type": "\"person\" | \"bot\" | \"system\"",
+     "default": "person"
+    }
+   ]
+  },
+  "Setting": {
+   "doc": "One setting a module asks for, so `python -m core setup` and `$setup` can offer it. `key` is the key in the module's `config.yml`. A `secret` setting (a token, an API key) is never kept there nor shown in chat: it goes into `.env` under `env` (the first name if several; any of them counts as set), and only the guided setup on the machine asks for it. `ask` puts it in the first-run questions. `check`, if given, tries a newly entered value (`async check(value) -> str`): it returns a short success note (for example the bot's name) or raises ValueError with the reason.",
+   "fields": [
+    {
+     "name": "key",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str"
+    },
+    {
+     "name": "kind",
+     "type": "str",
+     "default": "text"
+    },
+    {
+     "name": "default",
+     "type": "any",
+     "default": null
+    },
+    {
+     "name": "env",
+     "type": "str | list[str]",
+     "default": "()"
+    },
+    {
+     "name": "ask",
+     "type": "bool",
+     "default": false
+    },
+    {
+     "name": "check",
+     "type": "Callable | none",
+     "default": null
+    }
+   ]
+  },
+  "SubmitResult": {
+   "doc": "Outcome of InterfacePort.submit. Truthy when the request was durably accepted. `reason`: `accepted`, `relayed` (an owner reply forwarded elsewhere), `command`, `duplicate`, or the admission decision (`disabled`, `not_mentioned`, `sender_not_allowed`, `owner_only`, `before_rule_change`, `too_old`).",
+   "fields": [
+    {
+     "name": "accepted",
+     "type": "bool"
+    },
+    {
+     "name": "reason",
+     "type": "str"
+    }
+   ]
+  },
+  "ToolCall": {
+   "doc": "One function call in a model's answer (added in 1.7). `arguments` is the parsed JSON object, checked against the tool's `parameters`; `id` pairs the call with its result in later messages.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "str"
+    },
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "arguments",
+     "type": "Mapping"
+    }
+   ]
+  },
+  "ToolResult": {
+   "doc": "What a capability returns. Capabilities report failures here instead of raising.",
+   "fields": [
+    {
+     "name": "status",
+     "type": "\"success\" | \"failed\" | \"needs_input\" | \"needs_approval\""
+    },
+    {
+     "name": "summary",
+     "type": "str"
+    },
+    {
+     "name": "files",
+     "type": "list[FileRef]",
+     "default": "()"
+    },
+    {
+     "name": "sources",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "data",
+     "type": "Mapping",
+     "default": "{}"
+    },
+    {
+     "name": "error_code",
+     "type": "str | none",
+     "default": null
+    },
+    {
+     "name": "retryable",
+     "type": "bool",
+     "default": false
+    }
+   ]
+  },
+  "ToolSpec": {
+   "doc": "A function the model may call (added in 1.7): `parameters` is the JSON schema of its arguments (an object).",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "description",
+     "type": "str"
+    },
+    {
+     "name": "parameters",
+     "type": "Mapping"
+    }
+   ]
+  }
+ },
+ "interfaces": {
+  "Diary": {
+   "doc": "One persona's notes about the person who sent the run's trigger, in this conversation only. People can read and delete what is kept about them with `$memory`. Routine runs have no person, so their diary is empty and refuses writes.",
+   "attributes": [
+    {
+     "name": "persona",
+     "type": "str"
+    },
+    {
+     "name": "available",
+     "type": "bool"
+    }
+   ],
+   "methods": [
+    {
+     "name": "recall",
+     "async": false,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      },
+      {
+       "name": "limit",
+       "type": "int",
+       "keyword_only": false,
+       "default": 8
+      }
+     ],
+     "returns": "list[DiaryNote]",
+     "doc": "Notes matching words in `text` first, then the most important and recent ones."
+    },
+    {
+     "name": "write",
+     "async": false,
+     "parameters": [
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "kind",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "note",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "importance",
+       "type": "int",
+       "keyword_only": false
+      }
+     ],
+     "returns": "bool",
+     "doc": "Create or replace the note under `key`. Raises ValueError for an invalid note, one that copies the message instead of paraphrasing it, or past the per-run limit. Returns False when unchanged."
+    }
+   ]
+  },
+  "Engine": {
+   "doc": "Helper class that provides a standard way to create an ABC using inheritance.",
+   "attributes": [
+    {
+     "name": "spec",
+     "type": "EngineSpec"
+    }
+   ],
+   "methods": [
+    {
+     "name": "run",
+     "async": true,
+     "parameters": [
+      {
+       "name": "session",
+       "type": "Session",
+       "keyword_only": false
+      }
+     ],
+     "returns": "RunYield",
+     "doc": "Handle the trigger (and any resumed events). Must be safe to call again after a restart."
+    },
+    {
+     "name": "stopped",
+     "async": true,
+     "parameters": [
+      {
+       "name": "session",
+       "type": "Session",
+       "keyword_only": false
+      },
+      {
+       "name": "reason",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": "A run of yours that was waiting (for input or an approval) was cancelled. Nothing of yours was running, so no CancelledError reached `run`: put right what still shows the work as going (`session.state` is the run's last saved state; it does not resume). Optional; by default nothing happens."
+    }
+   ]
+  },
+  "ExtensionContext": {
+   "doc": "What an extension receives at setup.",
+   "attributes": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "config",
+     "type": "Mapping"
+    },
+    {
+     "name": "data_dir",
+     "type": "path"
+    }
+   ],
+   "methods": [
+    {
+     "name": "log",
+     "async": false,
+     "parameters": [
+      {
+       "name": "event",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "fields",
+       "type": "any",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    }
+   ]
+  },
+  "History": {
+   "doc": "The conversation's history, kept by the core (every message in and out).",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "recent",
+     "async": false,
+     "parameters": [
+      {
+       "name": "limit",
+       "type": "int",
+       "keyword_only": false,
+       "default": 30
+      }
+     ],
+     "returns": "Sequence",
+     "doc": ""
+    },
+    {
+     "name": "search",
+     "async": false,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "limit",
+       "type": "int",
+       "keyword_only": false,
+       "default": 20
+      }
+     ],
+     "returns": "Sequence",
+     "doc": "Messages of this conversation containing `text` (any case, however a letter is written), newest first, beyond `recent`'s reach."
+    },
+    {
+     "name": "summarize",
+     "async": false,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "upto",
+       "type": "float",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": "Replace the rolling summary: `text` (1 to 8000 characters) covers messages up to `upto`, a finite time; anything else raises ValueError. Engines compact older history this way; the summary is shared by every engine and persona in the conversation, and people can read and clear it with `$memory`."
+    },
+    {
+     "name": "summary",
+     "async": false,
+     "parameters": [],
+     "returns": "HistorySummary | none",
+     "doc": "The conversation's rolling summary, if an engine wrote one."
+    }
+   ]
+  },
+  "Interface": {
+   "doc": "One platform connection. Only interfaces know platform details.",
+   "attributes": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "display",
+     "type": "Display"
+    },
+    {
+     "name": "operations",
+     "type": "list[Operation]"
+    }
+   ],
+   "methods": [
+    {
+     "name": "deliver",
+     "async": true,
+     "parameters": [
+      {
+       "name": "reply",
+       "type": "Reply",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Delivery",
+     "doc": "Render and send one reply. May take minutes for uploads; must not retry an uncertain send."
+    },
+    {
+     "name": "operate",
+     "async": true,
+     "parameters": [
+      {
+       "name": "operation",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "arguments",
+       "type": "Mapping",
+       "keyword_only": false
+      },
+      {
+       "name": "context",
+       "type": "ToolContext",
+       "keyword_only": false
+      }
+     ],
+     "returns": "ToolResult",
+     "doc": "Run an admin operation. `context` describes the caller (address, sender, run) and offers `workspace` and `progress` like any capability call."
+    },
+    {
+     "name": "start",
+     "async": true,
+     "parameters": [
+      {
+       "name": "port",
+       "type": "InterfacePort",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": "Connect and begin submitting requests. Must return promptly; run loops as tasks."
+    },
+    {
+     "name": "stop",
+     "async": true,
+     "parameters": [],
+     "returns": "none",
+     "doc": ""
+    }
+   ]
+  },
+  "InterfacePort": {
+   "doc": "What the gateway gives an interface. Every method only acts on this interface's own addresses.",
+   "attributes": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "bottle",
+     "type": "Store"
+    }
+   ],
+   "methods": [
+    {
+     "name": "approval_status",
+     "async": false,
+     "parameters": [
+      {
+       "name": "approval_id",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "str | none",
+     "doc": "`pending`, `approved`, `denied` or `expired` for an approval asked in one of this interface's conversations, else None (added in 1.7). An interface that shows approval cards asks this, so a card decided elsewhere (typed, in another interface) or expired with its run stops offering its buttons."
+    },
+    {
+     "name": "cancel",
+     "async": true,
+     "parameters": [
+      {
+       "name": "address",
+       "type": "Address",
+       "keyword_only": false
+      },
+      {
+       "name": "reason",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "int",
+     "doc": "Cancel open runs of a conversation because the platform state changed (a manual reply). Returns how many runs were cancelled."
+    },
+    {
+     "name": "cancel_all",
+     "async": true,
+     "parameters": [
+      {
+       "name": "reason",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "int",
+     "doc": "Cancel open runs of every conversation of this interface (an account switch or sign-out)."
+    },
+    {
+     "name": "check",
+     "async": false,
+     "parameters": [
+      {
+       "name": "reply",
+       "type": "Reply",
+       "keyword_only": false
+      }
+     ],
+     "returns": "str | none",
+     "doc": "Re-check a reply right before committing it (after waiting for spacing or a lock). Returns None if it may still be sent, else a reason (`run_closed`, `conversation_disabled`, `not_admitted`). Only run output can become invalid; other replies always return None."
+    },
+    {
+     "name": "commands",
+     "async": false,
+     "parameters": [],
+     "returns": "list[Command]",
+     "doc": "Every `$command` people can run here (built-in, capability and operation commands), for interfaces that offer a native command menu or their own help. Access is still checked per request; `Command.access` says the lowest level that may run each one."
+    },
+    {
+     "name": "directory",
+     "async": false,
+     "parameters": [],
+     "returns": "Mapping",
+     "doc": "What every interface has published: name → `{\"link\", \"status\", \"ready\"}` (added in 1.7)."
+    },
+    {
+     "name": "log",
+     "async": false,
+     "parameters": [
+      {
+       "name": "event",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "fields",
+       "type": "any",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "models_ready",
+     "async": false,
+     "parameters": [
+      {
+       "name": "profile",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "bool",
+     "doc": "Whether some candidate of the model profile can be called (its provider has a key), for showing who can answer before anyone asks (added in 1.7; engines and capabilities have `Models.ready`)."
+    },
+    {
+     "name": "notify",
+     "async": true,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "origin",
+       "type": "Address | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "code",
+       "type": "str",
+       "keyword_only": true,
+       "default": "event"
+      },
+      {
+       "name": "data",
+       "type": "Mapping | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "files",
+       "type": "Sequence",
+       "keyword_only": true,
+       "default": "()"
+      }
+     ],
+     "returns": "Delivery",
+     "doc": "Tell the owner something (an incoming message, a login change). Delivered as a Reply of kind `event` to the route configured for `origin` (kinds containing \"event\"), else the control route. An owner's reply to that delivered event is relayed back to `origin` as an owner message."
+    },
+    {
+     "name": "observe",
+     "async": true,
+     "parameters": [
+      {
+       "name": "address",
+       "type": "Address",
+       "keyword_only": false
+      },
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "direction",
+       "type": "\"in\" | \"out\"",
+       "keyword_only": true,
+       "default": "in"
+      },
+      {
+       "name": "sender",
+       "type": "Sender | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "kind",
+       "type": "str",
+       "keyword_only": true,
+       "default": "text"
+      },
+      {
+       "name": "message_id",
+       "type": "str | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "at",
+       "type": "float | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "reply_to",
+       "type": "str | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "quoted_text",
+       "type": "str",
+       "keyword_only": true,
+       "default": ""
+      },
+      {
+       "name": "files",
+       "type": "list[FileRef]",
+       "keyword_only": true,
+       "default": "()"
+      }
+     ],
+     "returns": "none",
+     "doc": "Record activity the core should know about but not act on (for example a reply someone typed on the phone, group chatter not addressed to the bot, an image sent before the question, or a late receipt) in conversation history. `files` are local copies engines may show to models. Idempotent per (address, direction, message_id)."
+    },
+    {
+     "name": "policy",
+     "async": false,
+     "parameters": [
+      {
+       "name": "address",
+       "type": "Address",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Mapping",
+     "doc": "Read-only view of the core's current policy for one of your conversations: `{\"admission\": {...rule...}, \"assignment\": {...} | None}`."
+    },
+    {
+     "name": "publish",
+     "async": false,
+     "parameters": [
+      {
+       "name": "link",
+       "type": "str | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "status",
+       "type": "Mapping | none",
+       "keyword_only": true,
+       "default": null
+      }
+     ],
+     "returns": "none",
+     "doc": "Tell the other interfaces where people reach this one (`link`, a URL) and a small public status (JSON, at most 16 KB), so they can link to it and show what happens there (added in 1.7). Each call replaces what it names; `status` may describe a place, see PLACE_STATUS. Kept while the core runs."
+    },
+    {
+     "name": "set_owners",
+     "async": false,
+     "parameters": [
+      {
+       "name": "sender_ids",
+       "type": "Sequence",
+       "keyword_only": false
+      },
+      {
+       "name": "control",
+       "type": "Address | none",
+       "keyword_only": false,
+       "default": null
+      },
+      {
+       "name": "fallback",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      }
+     ],
+     "returns": "none",
+     "doc": "Report the platform's own notion of the owner (for example a bot application's owner). Used only when core.yml lists no owners for this interface; `control` (one of your addresses, such as the owner's direct conversation) is used only when core.yml sets no control route. `fallback=True` offers `control` only for when no other interface offers one (a local console receiving approvals while nothing else is connected)."
+    },
+    {
+     "name": "set_ready",
+     "async": false,
+     "parameters": [
+      {
+       "name": "ready",
+       "type": "bool",
+       "keyword_only": false
+      },
+      {
+       "name": "detail",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
+     "returns": "none",
+     "doc": "Report whether the platform can send. While not ready, deliveries are refused (not uncertain) and the owner is told about each transition."
+    },
+    {
+     "name": "submit",
+     "async": true,
+     "parameters": [
+      {
+       "name": "request",
+       "type": "Request",
+       "keyword_only": false
+      }
+     ],
+     "returns": "SubmitResult",
+     "doc": "Hand one request to the core. Returns after it is durably accepted (truthy) or rejected by admission or deduplication (falsy, with a reason). Advance any read cursor only after this returns."
+    }
+   ]
+  },
+  "ModelAdapter": {
+   "doc": "Talks to one provider's API: one `complete` call is one request, returning the raw text. The core does the rest (fallback between candidates, schema validation, spacing, images for models that cannot see). `messages` use roles `system`, `user` and `assistant`. With `schema`, ask the API for JSON matching it (natively if it can, otherwise in the prompt). `images` go with the last user message. Raise NotConfigured when the provider cannot be used; any other exception moves on to the next candidate. An adapter may also define `async list_models()`, the models its provider offers: IDs, or (ID, release date or datetime) pairs so a provider's `models_since` setting can apply. One that can call tools sets `supports_tools = True` and takes `tools` (1.7): it offers them as the API's functions, returns the calls in `tool_calls`, and translates `tool_calls`/`replay` on assistant messages and `tool` messages into the API's own form. The core passes `tools` only when a request has some.",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "complete",
+     "async": true,
+     "parameters": [
+      {
+       "name": "model",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "messages",
+       "type": "Sequence",
+       "keyword_only": false
+      },
+      {
+       "name": "schema",
+       "type": "Mapping | none",
+       "keyword_only": false
+      },
+      {
+       "name": "schema_name",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "effort",
+       "type": "\"low\" | \"medium\" | \"high\" | \"max\"",
+       "keyword_only": false
+      },
+      {
+       "name": "max_tokens",
+       "type": "int",
+       "keyword_only": false
+      },
+      {
+       "name": "timeout_s",
+       "type": "float",
+       "keyword_only": false
+      },
+      {
+       "name": "images",
+       "type": "Sequence",
+       "keyword_only": false,
+       "default": "()"
+      }
+     ],
+     "returns": "AdapterResult",
+     "doc": ""
+    }
+   ]
+  },
+  "Models": {
+   "doc": "Base class for protocol classes. Protocol classes are defined as:: class Proto(Protocol): def meth(self) -> int: ... Such classes are primarily used with static type checkers that recognize structural subtyping (static duck-typing). For example:: class C: def meth(self) -> int: return 0 def func(x: Proto) -> int: return x.meth() func(C()) # Passes static type check See PEP 544 for details. Protocol classes decorated with @typing.runtime_checkable act as simple-minded runtime protocols that check only the presence of given attributes, ignoring their type signatures. Protocol classes can be generic, they are defined as:: class GenProto[T](Protocol): def meth(self) -> T: ...",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "generate",
+     "async": true,
+     "parameters": [
+      {
+       "name": "request",
+       "type": "ModelRequest",
+       "keyword_only": false
+      }
+     ],
+     "returns": "ModelResult",
+     "doc": ""
+    },
+    {
+     "name": "profiles",
+     "async": false,
+     "parameters": [],
+     "returns": "Sequence",
+     "doc": ""
+    },
+    {
+     "name": "ready",
+     "async": false,
+     "parameters": [
+      {
+       "name": "profile",
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
+      }
+     ],
+     "returns": "bool",
+     "doc": "Whether some candidate of `profile` (default: the run's first persona's) has its provider configured, so a call can be tried (added in 1.6). Engines use it to pick who works before trying; a call can still fail."
+    }
+   ]
+  },
+  "Session": {
+   "doc": "Everything an engine may use for one run. All access goes through these handles.",
+   "attributes": [
+    {
+     "name": "run_id",
+     "type": "str"
+    },
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "origin",
+     "type": "\"person\" | \"routine\" | \"system\""
+    },
+    {
+     "name": "display",
+     "type": "Display"
+    },
+    {
+     "name": "personas",
+     "type": "Sequence"
+    },
+    {
+     "name": "trigger",
+     "type": "Request"
+    },
+    {
+     "name": "events",
+     "type": "Sequence"
+    },
+    {
+     "name": "state",
+     "type": "dict"
+    },
+    {
+     "name": "resumed",
+     "type": "bool"
+    },
+    {
+     "name": "models",
+     "type": "Models"
+    },
+    {
+     "name": "tools",
+     "type": "Tools"
+    },
+    {
+     "name": "history",
+     "type": "History"
+    },
+    {
+     "name": "options",
+     "type": "Mapping"
+    },
+    {
+     "name": "owner",
+     "type": "bool"
+    },
+    {
+     "name": "access",
+     "type": "str"
+    }
+   ],
+   "methods": [
+    {
+     "name": "activity",
+     "async": false,
+     "parameters": [],
+     "returns": "list[Activity]",
+     "doc": "Other open runs in this conversation (work already in progress)."
+    },
+    {
+     "name": "diary",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Diary",
+     "doc": "The persona's notes about the trigger's sender. Notes are filed in the conversation they were written in; with the assignment's `diary_scope` option, those of every conversation (same interface) sharing that name are read and corrected together."
+    },
+    {
+     "name": "inbox",
+     "async": false,
+     "parameters": [],
+     "returns": "list[Request]",
+     "doc": "Requests for this run's lane that arrived while this run was thinking. Each is returned once. Requests arriving while the run waits on a capability or file delivery start their own run."
+    },
+    {
+     "name": "memory",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Store",
+     "doc": "The persona's private key-value store, shared by all its conversations (older: prefer `store(persona=...)`, which is the module's own)."
+    },
+    {
+     "name": "progress",
+     "async": true,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "prompt",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "place",
+       "type": "str",
+       "keyword_only": false,
+       "default": "stable"
+      }
+     ],
+     "returns": "str",
+     "doc": "The prompt parts for one of the run's personas at `place` (\"stable\" or \"turn\"), rendered in order and joined (\"\" when there are none): its own parts and the modules' parts for it. A part that fails to render is left out (and logged); none can fail the run."
+    },
+    {
+     "name": "reply",
+     "async": true,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "quote",
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
+      },
+      {
+       "name": "persona",
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
+      },
+      {
+       "name": "label",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
+     "returns": "Delivery",
+     "doc": "Say `text` in the conversation. `persona` (one of the session's) marks who speaks, so the interface can name them and history records them; `label` qualifies it, e.g. a work note."
+    },
+    {
+     "name": "save",
+     "async": true,
+     "parameters": [
+      {
+       "name": "state",
+       "type": "dict",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": "Persist engine state (JSON). Call after each meaningful step so a restart can resume."
+    },
+    {
+     "name": "send_file",
+     "async": true,
+     "parameters": [
+      {
+       "name": "file",
+       "type": "FileRef",
+       "keyword_only": false
+      },
+      {
+       "name": "caption",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
+     "returns": "Delivery",
+     "doc": ""
+    },
+    {
+     "name": "store",
+     "async": false,
+     "parameters": [
+      {
+       "name": "conversation",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      },
+      {
+       "name": "persona",
+       "type": "str | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "person",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      }
+     ],
+     "returns": "Store",
+     "doc": "A key-value store of this engine's module (added in 1.5), scoped by any combination of: this `conversation`, one of the session's personas (across conversations), and the trigger's sender (`person`, across conversations). No arguments: the module's store everywhere. Each module's stores are its own; the core keeps them and never reads them."
+    }
+   ]
+  },
+  "Store": {
+   "doc": "A private JSON key-value namespace. Values must be JSON-serializable. Each extension, persona or interface gets its own namespace; one cannot read another's keys.",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "delete",
+     "async": false,
+     "parameters": [
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "get",
+     "async": false,
+     "parameters": [
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "default",
+       "type": "any",
+       "keyword_only": false,
+       "default": null
+      }
+     ],
+     "returns": "any",
+     "doc": ""
+    },
+    {
+     "name": "keys",
+     "async": false,
+     "parameters": [
+      {
+       "name": "prefix",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
+     "returns": "Iterable",
+     "doc": ""
+    },
+    {
+     "name": "set",
+     "async": false,
+     "parameters": [
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "value",
+       "type": "any",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    }
+   ]
+  },
+  "ToolContext": {
+   "doc": "Handles the core gives a capability for one call. `display` is what the calling conversation can show (for example its upload limit). `files` are the files people attached to the run's requests, oldest first; `own_files` only those the person who started the run attached (in a group, others may add messages to a run). `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`). `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it.",
+   "attributes": [
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "sender",
+     "type": "Sender"
+    },
+    {
+     "name": "origin",
+     "type": "Origin"
+    },
+    {
+     "name": "run_id",
+     "type": "str"
+    },
+    {
+     "name": "display",
+     "type": "Display"
+    },
+    {
+     "name": "is_direct",
+     "type": "bool"
+    },
+    {
+     "name": "files",
+     "type": "tuple[FileRef, ...]"
+    },
+    {
+     "name": "own_files",
+     "type": "tuple[FileRef, ...]"
+    },
+    {
+     "name": "storage",
+     "type": "Store"
+    },
+    {
+     "name": "models",
+     "type": "Models"
+    },
+    {
+     "name": "workspace",
+     "type": "Path"
+    },
+    {
+     "name": "access",
+     "type": "Access"
+    },
+    {
+     "name": "history",
+     "type": "'History'"
+    }
+   ],
+   "methods": [
+    {
+     "name": "progress",
+     "async": true,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "schedule",
+     "async": true,
+     "parameters": [
+      {
+       "name": "at",
+       "type": "float",
+       "keyword_only": false
+      },
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "str",
+     "doc": "Deliver `text` to this conversation at epoch seconds `at`. Returns the scheduled ID."
+    },
+    {
+     "name": "scheduled",
+     "async": false,
+     "parameters": [],
+     "returns": "list[Mapping]",
+     "doc": "This conversation's pending scheduled messages: `id`, `at`, `text`, `sender_id`, `sender_name`."
+    },
+    {
+     "name": "store",
+     "async": false,
+     "parameters": [
+      {
+       "name": "conversation",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      },
+      {
+       "name": "persona",
+       "type": "str | none",
+       "keyword_only": true,
+       "default": null
+      },
+      {
+       "name": "person",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      }
+     ],
+     "returns": "Store",
+     "doc": "A key-value store of this capability's module (added in 1.5), scoped by any combination of this `conversation`, one of the run's personas, and the caller (`person`); no arguments: the module's store everywhere (the same as `storage`)."
+    },
+    {
+     "name": "unschedule",
+     "async": true,
+     "parameters": [
+      {
+       "name": "scheduled_id",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "bool",
+     "doc": "Cancel a pending scheduled message of this conversation. False if there is none."
+    }
+   ]
+  },
+  "Tools": {
+   "doc": "Base class for protocol classes. Protocol classes are defined as:: class Proto(Protocol): def meth(self) -> int: ... Such classes are primarily used with static type checkers that recognize structural subtyping (static duck-typing). For example:: class C: def meth(self) -> int: return 0 def func(x: Proto) -> int: return x.meth() func(C()) # Passes static type check See PEP 544 for details. Protocol classes decorated with @typing.runtime_checkable act as simple-minded runtime protocols that check only the presence of given attributes, ignoring their type signatures. Protocol classes can be generic, they are defined as:: class GenProto[T](Protocol): def meth(self) -> T: ...",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "call",
+     "async": true,
+     "parameters": [
+      {
+       "name": "name",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "arguments",
+       "type": "Mapping",
+       "keyword_only": false
+      },
+      {
+       "name": "call_id",
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
+      }
+     ],
+     "returns": "ToolResult",
+     "doc": "Run a capability under policy. Never raises for policy decisions; see ToolResult.status. `call_id` identifies the call within the run. Repeating a completed call_id returns the stored result instead of running again, which makes engines safe to replay after a restart."
+    },
+    {
+     "name": "list",
+     "async": false,
+     "parameters": [],
+     "returns": "Sequence",
+     "doc": "Capability schemas this session may offer to a model."
+    }
+   ]
+  }
+ }
+}

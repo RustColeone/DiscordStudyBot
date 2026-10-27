@@ -62,6 +62,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
 | Web UI | A chat page on your local network (`:4156`), no Discord needed: the five classmates in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
+| Workbench | Creator only: the club works on your code, HydraFusion-style. Each task is routed to one model, a cheap draft with a quality gate, or a draft reviewed by another model family; it is worked in its own git worktree and tested, and lands as one commit only after your second check and final approval. Before anything comes to you, a tester tries to break it against the request's acceptance criteria (the old code against the new). A page at `:4157`, `club` in any project folder, or remotely from a Discord channel. `venv/bin/python -m extensions.workbench` runs the core with just the lab (see [extensions/workbench](extensions/workbench/README.md)) |
 
 Reads and prepares run; writes and critical actions (sending elsewhere, changing settings, the shell)
 ask the owner, except what `permissions:` in core.yml lets run (by default anyone may use reminders,
@@ -135,7 +136,7 @@ module and modules never import the core ([`tests/test_core_boundaries.py`](test
 ```
 contracts/    public API between the core and modules
 core/         gateway, manager, providers, storage, loader
-extensions/   built-in modules (discord, cli, assistant, room, terminal, host, basic, media, images, web, reminders, system)
+extensions/   built-in modules (discord, cli, assistant, room, workbench, terminal, host, basic, media, images, web, reminders, system)
 plugins/      external modules (whale_chan example, wechat)
 tests/        tests and fixtures
 docs/         architecture, module guide, WeChat
