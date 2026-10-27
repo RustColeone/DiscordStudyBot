@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>DiscordStudyBot · Architecture</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="data.js"></script>
+  <script defer src="diagram.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">DiscordStudyBot <span>architecture</span></a>
+    <div class="search">
+      <label class="visually-hidden" for="search">Find a file, class or function</label>
+      <input id="search" type="search" placeholder="Find a file, class or function…" autocomplete="off">
+      <ol class="results" id="results" hidden></ol>
+    </div>
+  </header>
+  <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
+  <main class="layout">
+    <section class="chart" aria-label="Flow chart">
+      <div class="chart-head">
+        <div><h1 id="chart-title"></h1><p id="chart-hint"></p></div>
+      </div>
+      <div class="chart-frame">
+        <div class="chart-body" id="chart"></div>
+        <div class="zoom" id="zoom" role="group" aria-label="Zoom" hidden>
+          <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+          <button type="button" id="zoom-level" title="Back to 100%">100%</button>
+          <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+          <button type="button" id="zoom-fit" title="Fit the whole diagram (0)">Fit</button>
+        </div>
+        <p class="chart-help">Drag to move · scroll or pinch to zoom · click a box to go in</p>
+      </div>
+    </section>
+    <aside class="pane" id="pane" aria-label="Details"></aside>
+  </main>
+  <noscript>This page draws the code's architecture with JavaScript; please enable it.</noscript>
+</body>
+</html>
