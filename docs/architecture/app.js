@@ -1,6 +1,7 @@
 "use strict";
-// The architecture page: the code's own structure (data.js, made by tools/architecture.py) as flow charts to click
-// through, from the whole system down to one function, whose code shows in the pane on the right.
+// The architecture page: the code's own structure (data.js, made by tools/architecture.py) as diagrams to click
+// through, from the whole system down to one function, whose code shows in the pane on the right. diagram.js lays the
+// diagrams out and draws them; this file decides what each level shows, and fills the pane, the search and the trail.
 (() => {
   const A = window.ARCH;
   const $ = (selector) => document.querySelector(selector);
@@ -52,91 +53,63 @@
   const github = (path, start, end) => `${A.repo}/blob/${A.branch}/${path}${start ? `#L${start}${end ? `-L${end}` : ""}` : ""}`;
   const firstLine = (text) => String(text || "").split("\n")[0];
 
-  // ---- charts, written as Mermaid flowcharts -------------------------------------------------------------
-  const esc = (label) => String(label).split("\n").map((part) => part.replace(/#/g, "#35;").replace(/"/g, "#quot;")
-    .replace(/</g, "#60;").replace(/>/g, "#62;")).join("<br/>");
-  class Chart {
-    constructor(direction) { this.lines = [`flowchart ${direction}`]; this.targets = new Map(); this.labels = new Map(); this.count = 0; }
-    node(label, { shape = "box", target = "", current = false } = {}) {
-      const id = `n${this.count++}`;
-      const text = `"${esc(label)}"`;
-      const shapes = { box: `[${text}]`, round: `(${text})`, db: `[(${text})]`, hex: `{{${text}}}`, sub: `[[${text}]]`, pill: `([${text}])` };
-      this.lines.push(`  ${id}${shapes[shape]}`);
-      if (target) this.targets.set(id, target);
-      this.labels.set(id, label);
-      if (current) this.lines.push(`  class ${id} current`);
-      return id;
-    }
-    group(label, build, direction = "") {
-      const id = `g${this.count++}`;
-      this.lines.push(`  subgraph ${id}["${esc(label)}"]`);
-      if (direction) this.lines.push(`  direction ${direction}`);
-      build();
-      this.lines.push("  end");
-      return id;
-    }
-    edge(from, to, arrow = "-->", label = "") {
-      this.lines.push(`  ${from} ${arrow}${label ? `|"${esc(label)}"|` : ""} ${to}`);
-    }
-    text() { return [...this.lines, "  classDef current stroke:#c9681c,stroke-width:3px;", ""].join("\n"); }
-  }
+  // ---- charts: what each level shows (diagram.js lays them out and draws them) -----------------------------
+  const { Chart } = window.Diagram;
   const once = () => { const seen = new Set(); return (key) => (seen.has(key) ? false : (seen.add(key), true)); };
+  const CORE_KIND = { GW: "gateway", MG: "manager", PR: "providers", BOT: "store", TANK: "store", START: "startup" };
+  const symbolNode = (chart, path, symbol, current = "") => chart.node(symbol.kind === "class" ? symbol.name : `${symbol.name}()`, {
+    kind: symbol.kind, target: link(path, symbol.id), current: symbol.id === current, tip: firstLine(symbol.doc),
+    sub: symbol.kind === "class" ? plural(methodsOf(path, symbol.name).length, "method") : "" });
 
   function topChart() {
-    const chart = new Chart("TB");
-    const supervisor = chart.node("Supervisor\nparent process · heartbeat · restart", { target: link("core/supervisor.py") });
-    const slot = (key) => Object.entries(A.modules).filter(([, module]) => module.slots.includes(key));
-    const name = (folder) => folder.split("/").pop() + (folder.startsWith("plugins/") ? " · plugin" : "");
+    const chart = new Chart("DOWN");
+    const supervisor = chart.node("Supervisor", { kind: "supervisor", sub: "parent process · heartbeat · restart",
+                                                  target: link("core/supervisor.py"), tip: firstLine(files["core/supervisor.py"]?.doc) });
+    const inSlot = (key) => Object.keys(A.modules).filter((folder) => A.modules[folder].slots.includes(key));
+    const module = (folder) => chart.node(folder.split("/").pop(), { kind: "module", target: link(folder), tip: A.modules[folder].description,
+                                                                    sub: folder.startsWith("plugins/") ? "plugin" : "built-in" });
     const slots = {};
-    slots.interfaces = chart.group(SLOT.interfaces, () => {
-      for (const [folder] of slot("interfaces")) chart.node(name(folder), { target: link(folder) });
-    }, "LR");
+    slots.interfaces = chart.group(SLOT.interfaces, () => inSlot("interfaces").forEach(module), { kind: "interfaces", pack: true });
     const parts = {};
     const core = chart.group("Core · child process", () => {
-      for (const part of A.core) {
-        const shape = part.id === "MG" ? "hex" : ["BOT", "TANK"].includes(part.id) ? "db" : "box";
-        parts[part.id] = chart.node(`${part.label}\n${part.note}`, { shape, target: link(part.target) });
-      }
-    });
-    slots.engines = chart.group(SLOT.engines, () => {
-      for (const [folder] of slot("engines")) chart.node(name(folder), { target: link(folder) });
-    }, "LR");
-    slots.capabilities = chart.group(SLOT.capabilities, () => {
-      for (const [folder] of slot("capabilities")) chart.node(name(folder), { target: link(folder) });
-    }, "LR");
-    chart.node("contracts\nthe only code every part shares", { shape: "sub", target: link("contracts") });
+      for (const part of A.core) parts[part.id] = chart.node(part.label, { kind: CORE_KIND[part.id] || "startup", sub: part.note, target: link(part.target) });
+    }, { kind: "core" });
+    slots.engines = chart.group(SLOT.engines, () => inSlot("engines").forEach(module), { kind: "engines", pack: true });
+    slots.capabilities = chart.group(SLOT.capabilities, () => inSlot("capabilities").forEach(module), { kind: "capabilities", pack: true });
+    chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
+                              tip: firstLine(files["contracts/__init__.py"]?.doc) });
     for (const root of A.roots.filter((item) => !["contracts", "core", "extensions", "plugins"].includes(item))) {
-      chart.node(`${root}\n${plural(filesUnder(root).length, "file")}`, { shape: "pill", target: link(root) });
+      chart.node(`${root}/`, { kind: "folder", sub: plural(filesUnder(root).length, "file"), target: link(root) });
     }
-    chart.edge(supervisor, core, "-.->", "runs · watches");
-    chart.edge(slots.interfaces, parts.GW, "<-->", "Request / Reply");
-    chart.edge(parts.GW, parts.BOT, "---");
-    chart.edge(parts.GW, parts.MG, "<-->");
-    chart.edge(parts.MG, slots.engines, "<-->", "Session");
-    chart.edge(parts.MG, slots.capabilities, "<-->", "ToolContext");
-    chart.edge(parts.MG, parts.PR, "---");
-    chart.edge(parts.MG, parts.TANK, "---");
+    chart.edge(supervisor, core, { dashed: true, label: "runs · watches" });
+    chart.edge(slots.interfaces, parts.GW, { arrow: "both", label: "Request / Reply" });
+    chart.edge(parts.GW, parts.BOT, { arrow: "none" });
+    chart.edge(parts.GW, parts.MG, { arrow: "both" });
+    chart.edge(parts.MG, slots.engines, { arrow: "both", label: "Session" });
+    chart.edge(parts.MG, slots.capabilities, { arrow: "both", label: "ToolContext" });
+    chart.edge(parts.MG, parts.PR, { arrow: "none" });
+    chart.edge(parts.MG, parts.TANK, { arrow: "none" });
     return chart;
   }
 
   function folderChart(path) {
-    const folder = A.folders[path];
-    const chart = new Chart("LR");
+    const chart = new Chart("RIGHT");
     const ids = new Map();
     const childOf = (file) => file.startsWith(`${path}/`) ? `${path}/${file.slice(path.length + 1).split("/")[0]}` : "";
     chart.group(`${path}/`, () => {
-      for (const child of folder.children) {
+      for (const child of A.folders[path].children) {
         const short = child.split("/").pop();
-        let label;
         if (files[child]) {
-          label = `${short}\n${plural(files[child].symbols.filter((symbol) => !symbol.parent).length, "item")} · ${plural(files[child].lines, "line")}`;
+          const items = files[child].symbols.filter((symbol) => !symbol.parent).length;
+          ids.set(child, chart.node(short, { kind: "file", target: link(child), tip: firstLine(files[child].doc),
+                                             sub: `${plural(items, "item")} · ${plural(files[child].lines, "line")}` }));
         } else {
           const module = A.modules[child];
-          label = `${short}/\n${module ? (module.slots.map((slot) => slot.replace(/s$/, "")).join(" · ") || "module") : plural(filesUnder(child).length, "file")}`;
+          ids.set(child, chart.node(`${short}/`, { kind: module ? "module" : "folder", target: link(child), tip: module?.description || "",
+            sub: module ? module.slots.map((slot) => slot.replace(/s$/, "")).join(" · ") || "module" : plural(filesUnder(child).length, "file") }));
         }
-        ids.set(child, chart.node(label, { shape: files[child] ? "box" : "sub", target: link(child) }));
       }
-    });
+    }, { kind: "folder" });
     const outside = new Map();
     const fresh = once();
     for (const file of filesUnder(path)) {
@@ -150,15 +123,15 @@
         } else {
           const parts = item.path.split("/");
           const key = ["core", "extensions", "plugins"].includes(parts[0]) && parts.length > 2 ? parts.slice(0, 2).join("/") : parts[0];
-          if (!outside.has(key)) outside.set(key, chart.node(`${key}${files[key] ? "" : "/"}`, { shape: "pill", target: link(key) }));
-          if (fresh(`${from}>${key}`)) chart.edge(from, outside.get(key), "-.->");
+          if (!outside.has(key)) outside.set(key, chart.node(files[key] ? key : `${key}/`, { kind: "external", target: link(key), sub: "elsewhere" }));
+          if (fresh(`${from}>${key}`)) chart.edge(from, outside.get(key), { dashed: true });
         }
       }
     }
     return chart;
   }
 
-  function usesNodes(chart, path, pairs) {  // calls into other files: one node per file, dotted
+  function usesNodes(chart, path, pairs) {  // calls into other files: one box per file, dotted
     const nodes = new Map();
     const counts = new Map();
     for (const [, use] of pairs) counts.set(use.path, (counts.get(use.path) || 0) + 1);
@@ -166,20 +139,15 @@
     const fresh = once();
     for (const [from, use] of pairs) {
       if (!kept.has(use.path) || use.path === path) continue;
-      if (!nodes.has(use.path)) nodes.set(use.path, chart.node(`→ ${use.path}`, { shape: "pill", target: link(use.path) }));
-      if (fresh(`${from}>${use.path}`)) chart.edge(from, nodes.get(use.path), "-.->");
+      if (!nodes.has(use.path)) nodes.set(use.path, chart.node(use.path.split("/").pop(), { kind: "external", sub: use.path, target: link(use.path) }));
+      if (fresh(`${from}>${use.path}`)) chart.edge(from, nodes.get(use.path), { dashed: true });
     }
   }
 
   function fileChart(path, current = "") {
-    const chart = new Chart("LR");
+    const chart = new Chart("RIGHT");
     const ids = new Map();
-    for (const symbol of files[path].symbols.filter((item) => !item.parent)) {
-      const label = symbol.kind === "class" ? `class ${symbol.name}\n${plural(methodsOf(path, symbol.name).length, "method")}`
-        : `${symbol.name}()`;
-      ids.set(symbol.id, chart.node(label, { shape: symbol.kind === "class" ? "sub" : "round", target: link(path, symbol.id),
-                                             current: symbol.id === current }));
-    }
+    for (const symbol of files[path].symbols.filter((item) => !item.parent)) ids.set(symbol.id, symbolNode(chart, path, symbol, current));
     const fresh = once();
     const uses = [];
     for (const symbol of files[path].symbols) {
@@ -195,15 +163,18 @@
   }
 
   function sectionsChart(path, name) {
-    const chart = new Chart("LR");
+    const chart = new Chart("RIGHT");
     const sections = sectionsOf(path, name);
     const ids = new Map();
     const where = new Map();  // method id → its section
-    for (const [section, items] of sections) {
-      ids.set(section, chart.node(`${sectionName(section)}\n${plural(items.length, "method")}`,
-                                  { shape: "sub", target: link(path, `${name}@${sectionKey(section)}`) }));
-      for (const method of items) where.set(method.id, section);
-    }
+    chart.group(`class ${name}`, () => {
+      for (const [section, items] of sections) {
+        ids.set(section, chart.node(sectionName(section), { kind: "section", sub: plural(items.length, "method"),
+                                                             target: link(path, `${name}@${sectionKey(section)}`),
+                                                             tip: items.map((method) => method.name).join(", ") }));
+        for (const method of items) where.set(method.id, section);
+      }
+    }, { kind: "class" });
     const fresh = once();  // calls between sections only: a section's own chart shows the calls into other files
     for (const [section, items] of sections) {
       for (const method of items) {
@@ -218,7 +189,7 @@
 
   function classChart(path, name, current = "", only = null) {
     if (only === null && big(path, name)) return sectionsChart(path, name);
-    const chart = new Chart("LR");
+    const chart = new Chart("RIGHT");
     const everyMethod = methodsOf(path, name);
     const methods = only === null ? everyMethod : everyMethod.filter((method) => (method.section || "") === only);
     const ids = new Map();
@@ -228,28 +199,27 @@
       if (!sections.has(key)) sections.set(key, []);
       sections.get(key).push(method);
     }
-    const draw = (method) => ids.set(method.id, chart.node(`${method.name}()`, { shape: "round", target: link(path, method.id),
-                                                                                  current: method.id === current }));
-    for (const [section, items] of sections) {
-      if (sections.size > 1 || section) chart.group(sectionName(section), () => items.forEach(draw));
-      else items.forEach(draw);
-    }
-    // In one section: the class's other sections it calls into, as one node each
-    const otherSections = new Map();
+    chart.group(only === null ? `class ${name}` : `${name} · ${sectionName(only)}`, () => {
+      for (const [section, items] of sections) {
+        const drawAll = () => items.forEach((method) => ids.set(method.id, symbolNode(chart, path, method, current)));
+        if (only === null && (sections.size > 1 || section)) chart.group(sectionName(section), drawAll, { kind: "section" });
+        else drawAll();
+      }
+    }, { kind: "class" });
+    const otherSections = new Map();  // in one section: the class's other sections it calls into, one box each
     if (only !== null) {
       for (const method of methods) {
         for (const callee of method.calls || []) {
           const target = everyMethod.find((item) => item.id === callee);
-          if (target && (target.section || "") !== only && !otherSections.has(target.section || "")) {
-            const key = target.section || "";
-            otherSections.set(key, chart.node(`→ ${sectionName(key)}`, { shape: "sub", target: link(path, `${name}@${sectionKey(key)}`) }));
+          const key = target ? target.section || "" : null;
+          if (key !== null && key !== only && !otherSections.has(key)) {
+            otherSections.set(key, chart.node(sectionName(key), { kind: "section", sub: `another section of ${name}`,
+                                                                   target: link(path, `${name}@${sectionKey(key)}`) }));
           }
         }
       }
     }
     const local = new Map();  // the file's own functions and classes these methods call
-    const fresh = once();
-    const uses = [];
     for (const method of methods) {
       for (const callee of method.calls || []) {
         if (!ids.has(callee) && !callee.startsWith(`${name}.`) && symbolOf.has(`${path}::${callee}`)) local.set(callee, null);
@@ -257,19 +227,18 @@
     }
     if (local.size) {
       chart.group("in this file", () => {
-        for (const callee of local.keys()) {
-          const symbol = symbolOf.get(`${path}::${callee}`);
-          local.set(callee, chart.node(symbol.kind === "class" ? `class ${symbol.id}` : `${symbol.id}()`,
-                                       { shape: symbol.kind === "class" ? "sub" : "box", target: link(path, symbol.id) }));
-        }
-      });
+        for (const callee of local.keys()) local.set(callee, symbolNode(chart, path, symbolOf.get(`${path}::${callee}`)));
+      }, { kind: "plain" });
     }
+    const fresh = once();
+    const uses = [];
     for (const method of methods) {
       const from = ids.get(method.id);
       for (const callee of method.calls || []) {
         const target = everyMethod.find((item) => item.id === callee);
-        const to = ids.get(callee) || local.get(callee) || (target ? otherSections.get(target.section || "") : undefined);
-        if (to && to !== from && fresh(`${from}>${to}`)) chart.edge(from, to, otherSections.size && !ids.has(callee) && target ? "-.->" : "-->");
+        const elsewhere = target && !ids.has(callee) ? otherSections.get(target.section || "") : undefined;
+        const to = ids.get(callee) || local.get(callee) || elsewhere;
+        if (to && to !== from && fresh(`${from}>${to}`)) chart.edge(from, to, { dashed: Boolean(elsewhere) });
       }
       for (const use of method.uses || []) uses.push([from, use]);
     }
@@ -277,84 +246,30 @@
     return chart;
   }
 
-  // ---- drawing ------------------------------------------------------------------------------------------
-  // Mermaid (pinned) draws the charts; a second CDN stands in when the first cannot be reached.
-  const MERMAID = ["https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js",
-                   "https://unpkg.com/mermaid@10.9.1/dist/mermaid.min.js"];
-  let mermaidReady = null;
-  function loadMermaid() {
-    if (mermaidReady) return mermaidReady;
-    mermaidReady = MERMAID.reduce((tried, url) => tried.catch(() => new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = url;
-      script.onload = () => (window.mermaid ? resolve(window.mermaid) : reject(new Error("no mermaid")));
-      script.onerror = () => { script.remove(); reject(new Error(`could not load ${url}`)); };
-      document.head.append(script);
-    })), Promise.reject(new Error("start"))).then((mermaid) => {
-      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral",
-                           flowchart: { useMaxWidth: false, htmlLabels: true }, maxTextSize: 500000, maxEdges: 5000 });
-      return mermaid;
-    });
-    mermaidReady.catch(() => { mermaidReady = null; });  // try again on the next chart
-    return mermaidReady;
-  }
-  let drawing = 0;
-  const drawn = new Map();  // chart text → SVG, so going back is instant
+  // ---- drawing, with zoom controls -------------------------------------------------------------------------
+  let view = null;
   async function draw(chart) {
     const holder = $("#chart");
-    const turn = ++drawing;
-    const text = chart.text();
-    holder.replaceChildren(make("div", "chart-wait", "Drawing…"));
-    let mermaid;
+    holder.replaceChildren(make("div", "chart-wait", "Laying out…"));
+    $("#zoom").hidden = true;
     try {
-      mermaid = await loadMermaid();
-    } catch {
-      if (turn === drawing) holder.replaceChildren(make("div", "chart-wait", "The charts need Mermaid, loaded from the internet, and it could not be reached. The details on the right still work."));
-      return;
-    }
-    try {
-      if (!drawn.has(text)) drawn.set(text, (await mermaid.render(`chart-${turn}`, text)).svg);
-      if (turn !== drawing) return;
-      holder.innerHTML = drawn.get(text);  // Mermaid's own output, in strict mode
+      const drawn = await window.Diagram.draw(holder, chart, {
+        onGo: (target) => { location.hash = target; },
+        onZoom: (scale) => { $("#zoom-level").textContent = `${Math.round(scale * 100)}%`; },
+      });
+      if (!drawn) return;  // a newer chart was asked for meanwhile
+      view = drawn;
+      $("#zoom").hidden = false;
     } catch (error) {
-      if (turn === drawing) holder.replaceChildren(make("div", "chart-wait", `This chart could not be drawn: ${error?.message || error}`));
-      return;
+      holder.replaceChildren(make("div", "chart-wait", /load/.test(String(error?.message))
+        ? "The diagrams need their layout library (ELK), loaded from the internet, and it could not be reached. The details on the right still work."
+        : `This diagram could not be drawn: ${error?.message || error}`));
     }
-    for (const node of holder.querySelectorAll("g.node")) {
-      const id = (node.id.match(/^flowchart-(n\d+)-/) || [])[1];
-      const target = id && chart.targets.get(id);
-      if (!target) continue;
-      node.classList.add("is-link");
-      node.setAttribute("tabindex", "0");
-      node.setAttribute("role", "link");
-      node.setAttribute("aria-label", chart.labels.get(id).replace(/\n/g, ", "));
-      const go = () => { location.hash = target; };
-      node.addEventListener("click", go);
-      node.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); go(); } });
-    }
-    fit();
-    holder.querySelector("g.node.current")?.scrollIntoView({ block: "center", inline: "center" });
   }
-
-  // A chart fits the panel when that keeps it readable (at most 1.7 times smaller); the button switches to actual size.
-  let size = "auto";
-  function fit() {
-    const svg = $("#chart svg");
-    if (!svg) return;
-    const natural = svg.viewBox?.baseVal?.width || svg.getBBox().width;
-    const room = $("#chart").clientWidth - 40;
-    const fits = size === "fit" || (size === "auto" && natural <= room * 1.7);
-    svg.style.width = `${fits ? Math.min(natural, room) : natural}px`;
-    svg.style.height = "auto";
-    $("#size").textContent = fits && natural > room ? "Actual size" : "Fit to the panel";
-    $("#size").hidden = natural <= room;
-  }
-  $("#size").addEventListener("click", () => {
-    size = $("#size").textContent === "Actual size" ? "actual" : "fit";
-    fit();
-  });
-  window.addEventListener("resize", fit);
+  $("#zoom-in").addEventListener("click", () => view?.zoomBy(1.25));
+  $("#zoom-out").addEventListener("click", () => view?.zoomBy(0.8));
+  $("#zoom-fit").addEventListener("click", () => view?.fit(1.5));
+  $("#zoom-level").addEventListener("click", () => view?.zoomBy(1 / (view?.scale || 1)));  // back to 100%
 
   // ---- the pane on the right ------------------------------------------------------------------------------
   const linkList = (items) => {
@@ -586,8 +501,6 @@
     crumbs(path, symbol);
     $("#pane").replaceChildren(...pane);
     $("#pane").scrollTop = 0;
-    // The whole system and a big class's sections always fit; deeper charts keep a readable size.
-    size = !path || (symbol?.kind === "class" && big(path, symbol.name)) ? "fit" : "auto";
     draw(chart);
   }
 

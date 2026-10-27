@@ -7,6 +7,7 @@
   <title>DiscordStudyBot · Architecture</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="data.js"></script>
+  <script defer src="diagram.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -23,9 +24,17 @@
     <section class="chart" aria-label="Flow chart">
       <div class="chart-head">
         <div><h1 id="chart-title"></h1><p id="chart-hint"></p></div>
-        <button class="size" id="size" type="button" hidden>Actual size</button>
       </div>
-      <div class="chart-body" id="chart"></div>
+      <div class="chart-frame">
+        <div class="chart-body" id="chart"></div>
+        <div class="zoom" id="zoom" role="group" aria-label="Zoom" hidden>
+          <button type="button" id="zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+          <button type="button" id="zoom-level" title="Back to 100%">100%</button>
+          <button type="button" id="zoom-in" aria-label="Zoom in" title="Zoom in (+)">+</button>
+          <button type="button" id="zoom-fit" title="Fit the whole diagram (0)">Fit</button>
+        </div>
+        <p class="chart-help">Drag to move · scroll or pinch to zoom · click a box to go in</p>
+      </div>
     </section>
     <aside class="pane" id="pane" aria-label="Details"></aside>
   </main>

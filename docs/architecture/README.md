@@ -11,10 +11,14 @@ shows in the pane on the right. Every box can be clicked, and the search finds a
   after [docs/core/ARCHITECTURE.md](../core/ARCHITECTURE.md)).
 - **After every change, run `python tools/architecture.py` and commit `data.js` with the change.**
   `tests/test_architecture.py` fails while the page is out of date.
-- `app.js` and `style.css` are the page; the charts are drawn by [Mermaid](https://mermaid.js.org/) 10.9.1, loaded
-  from a CDN.
+- `app.js` decides what each level shows and fills the pane, the search and the trail. `diagram.js` lays the
+  diagrams out with [ELK](https://eclipse.dev/elk/) (elkjs 0.9.3, loaded from a CDN: layered, with right-angled edges
+  and groups inside groups) and draws them itself as SVG: cards with a badge for their kind (M module, D folder,
+  F file, C class, ƒ function, § section), tinted groups, dotted edges for imports and calls into other files.
+- Diagrams zoom and pan: scroll or pinch to zoom, drag to move, the − / % / + / Fit buttons, or the keys + − 0 and the
+  arrows. Hovering a box lights up its edges and neighbours. `style.css` holds the look, light and dark.
 
-**To read it locally**, open `index.html` in a browser (the charts need the internet for Mermaid), or serve the folder:
+**To read it locally**, open `index.html` in a browser (the diagrams need the internet for ELK), or serve the folder:
 `python -m http.server -d docs/architecture`.
 
 **To publish it on GitHub Pages:** in the repository's Settings → Pages, choose "Deploy from a branch", the branch

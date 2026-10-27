@@ -3,13 +3,14 @@
   --bg: #f7f5f1; --paper: #ffffff; --panel: #efebe4; --ink: #22201c; --muted: #6a645a; --line: #ddd6ca;
   --accent: #c9681c; --accent-soft: #fbe7d3; --code-bg: #1f1d1a; --code-ink: #ece6dc; --gutter: #7d766c;
   --kw: #f0a35e; --str: #a8d18b; --com: #8b857b; --num: #e6c07b; --def: #7fc1e8;
+  --canvas: #fbfaf7; --edge: #9a9184; --dot: #e6e0d6;
   --radius: 12px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--ink); background: var(--bg);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #171614; --paper: #201e1b; --panel: #2a2723; --ink: #ece6dc; --muted: #a59d90; --line: #39352f;
-          --accent: #f0a35e; --accent-soft: #3a2a1c; --code-bg: #121110; }
+          --accent: #f0a35e; --accent-soft: #3a2a1c; --code-bg: #121110; --canvas: #1b1a17; --edge: #8a8276; --dot: #2c2925; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -40,18 +41,21 @@ a { color: var(--accent); }
 
 .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 42%); min-height: 0; }
 .chart { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
-.chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 20px 6px; }
-.size { flex: none; border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 8px;
-        padding: 6px 10px; font: inherit; font-size: .85rem; cursor: pointer; }
-.size:hover { border-color: var(--accent); }
+.chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 20px 8px; }
 .chart-head h1 { margin: 0; font-size: 1.25rem; }
 .chart-head p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
-.chart-body { flex: 1; overflow: auto; padding: 10px 20px 30px; }
-.chart-body svg { display: block; margin: 0 auto; max-width: none; }
-.chart-body .node.is-link { cursor: pointer; }
-.chart-body .node.is-link:hover > rect, .chart-body .node.is-link:hover > polygon, .chart-body .node.is-link:hover > path,
-.chart-body .node.is-link:focus > rect, .chart-body .node.is-link:focus > polygon { stroke: var(--accent) !important; stroke-width: 2.5px !important; }
-.chart-body .node:focus { outline: none; }
+.chart-frame { position: relative; flex: 1; min-height: 0; margin: 0 12px 12px; border: 1px solid var(--line);
+               border-radius: var(--radius); background: var(--canvas); overflow: hidden; }
+.chart-body { position: absolute; inset: 0; }
+.zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
+        background: var(--paper); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0, 0, 0, .12); }
+.zoom[hidden] { display: none; }
+.zoom button { min-width: 34px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--ink);
+               font: inherit; font-size: .9rem; font-weight: 700; cursor: pointer; }
+.zoom button:hover, .zoom button:focus-visible { background: var(--panel); outline: none; }
+#zoom-level { min-width: 56px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
+.chart-help { position: absolute; left: 12px; bottom: 10px; margin: 0; font-size: .75rem; color: var(--muted);
+              pointer-events: none; }
 .chart-wait { color: var(--muted); padding: 20px; }
 
 .pane { overflow: auto; padding: 16px 20px 40px; background: var(--paper); min-width: 0; }
@@ -84,3 +88,45 @@ a { color: var(--accent); }
   .top { flex-wrap: wrap; }
   .search { width: 100%; }
 }
+
+/* the diagrams (diagram.js): cards with a badge for their kind, tinted groups, right-angled edges */
+.graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none;
+         background-image: radial-gradient(var(--dot) 1px, transparent 1px); background-size: 22px 22px; outline: none; }
+.graph.panning { cursor: grabbing; }
+.graph text { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.graph .card { fill: var(--paper); stroke: var(--line); stroke-width: 1.2; }
+.graph .node { transition: opacity .15s; }
+.graph .node .title { font-size: 13px; font-weight: 650; fill: var(--ink); }
+.graph .node .sub { font-size: 11px; fill: var(--muted); }
+.graph .badge { fill: var(--b, #8a8276); }
+.graph .badge-text { font-size: 10px; font-weight: 800; fill: #ffffff; text-anchor: middle; }
+.graph .node.link { cursor: pointer; }
+.graph .node.link:hover .card, .graph .node.link:focus .card { stroke: var(--accent); stroke-width: 2; }
+.graph .node:focus { outline: none; }
+.graph .node.current .card { stroke: var(--accent); stroke-width: 2.6; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 45%, transparent)); }
+.graph .k-module { --b: #2f8f83; } .graph .k-folder { --b: #7b8794; } .graph .k-file { --b: #4f7cc4; }
+.graph .k-class { --b: #8a5cc7; } .graph .k-function, .graph .k-method { --b: #d07a2c; } .graph .k-section { --b: #5f7d95; }
+.graph .k-gateway { --b: #3b82c4; } .graph .k-manager { --b: #c9681c; } .graph .k-providers { --b: #3f9a62; }
+.graph .k-store { --b: #6b7280; } .graph .k-startup { --b: #7b8794; } .graph .k-supervisor { --b: #57606a; } .graph .k-contracts { --b: #a35d8f; }
+.graph .k-external .card { fill: transparent; stroke-dasharray: 5 4; }
+.graph .k-external { --b: #9a9184; }
+.graph .k-manager .card { stroke: #c9681c; stroke-width: 1.8; }
+.graph .grp rect { fill: color-mix(in srgb, var(--panel) 45%, transparent); stroke: var(--line); stroke-width: 1.2; }
+.graph .grp-title { font-size: 12px; font-weight: 700; fill: var(--muted); letter-spacing: .02em; }
+.graph .g-interfaces rect { fill: color-mix(in srgb, #3b82c4 9%, transparent); stroke: color-mix(in srgb, #3b82c4 40%, var(--line)); }
+.graph .g-engines rect { fill: color-mix(in srgb, #c9681c 9%, transparent); stroke: color-mix(in srgb, #c9681c 40%, var(--line)); }
+.graph .g-capabilities rect { fill: color-mix(in srgb, #3f9a62 9%, transparent); stroke: color-mix(in srgb, #3f9a62 40%, var(--line)); }
+.graph .g-core rect { fill: color-mix(in srgb, var(--panel) 70%, transparent); stroke: var(--edge); stroke-width: 1.5; }
+.graph .g-class rect { fill: color-mix(in srgb, #8a5cc7 6%, transparent); stroke: color-mix(in srgb, #8a5cc7 35%, var(--line)); }
+.graph .g-section rect { fill: color-mix(in srgb, #5f7d95 7%, transparent); stroke: color-mix(in srgb, #5f7d95 30%, var(--line)); }
+.graph .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
+.graph .edge-g.dashed .edge { stroke-dasharray: 5 4; }
+.graph .arrowhead { fill: var(--edge); }
+.graph .edge-label-bg { fill: var(--canvas); stroke: var(--line); }
+.graph .edge-label { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.graph .edge-g { transition: opacity .15s; }
+.graph.dense .edge-g { opacity: .45; }
+.graph.dense.focus .edge-g.on { opacity: 1; }
+.graph.focus .node:not(.on), .graph.focus .edge-g:not(.on) { opacity: .22; }
+.graph.focus .edge-g.on .edge { stroke: var(--accent); stroke-width: 2.2; }
+@media (max-width: 860px) { .chart-frame { min-height: 52vh; } .chart-help { display: none; } }
