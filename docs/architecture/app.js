@@ -37,8 +37,7 @@
   const filesUnder = (folder) => Object.keys(files).filter((path) => path.startsWith(`${folder}/`));
   const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 ? "" : /(s|sh|ch|x)$/.test(word) ? "es" : "s"}`;
   const methodsOf = (path, name) => files[path].symbols.filter((symbol) => symbol.parent === name);
-  const BIG = 24;  // a class with more methods than this, in more than one section, is shown section by section
-  function sectionsOf(path, name) {
+  function sectionsOf(path, name) {  // a class's methods by the file's `# ---- name ----` comments
     const sections = new Map();
     for (const method of methodsOf(path, name)) {
       const key = method.section || "";
@@ -47,9 +46,7 @@
     }
     return sections;
   }
-  const big = (path, name) => methodsOf(path, name).length > BIG && sectionsOf(path, name).size > 1;
-  const sectionKey = (section) => section || "-";
-  const sectionName = (key) => (key === "-" || !key ? "(no section)" : key);
+  const sectionName = (section) => section || "(no section)";
   const github = (path, start, end) => `${A.repo}/blob/${A.branch}/${path}${start ? `#L${start}${end ? `-L${end}` : ""}` : ""}`;
   const firstLine = (text) => String(text || "").split("\n")[0];
 
@@ -144,103 +141,41 @@
     }
   }
 
+  // A file: its functions, and each class as a box around its methods (in the file's sections when it has them).
   function fileChart(path, current = "") {
-    const chart = new Chart("RIGHT");
-    const ids = new Map();
-    for (const symbol of files[path].symbols.filter((item) => !item.parent)) ids.set(symbol.id, symbolNode(chart, path, symbol, current));
+    const chart = new Chart("RIGHT", { compact: true });
+    const ids = new Map();      // symbol id → its box (a class: its group)
+    const ownClass = new Map(); // method id → its class
+    for (const symbol of files[path].symbols.filter((item) => !item.parent)) {
+      const methods = symbol.kind === "class" ? methodsOf(path, symbol.name) : [];
+      if (symbol.kind !== "class") { ids.set(symbol.id, symbolNode(chart, path, symbol, current)); continue; }
+      if (!methods.length) {  // a class with no methods of its own (a dataclass, say) is one box
+        ids.set(symbol.id, chart.node(symbol.name, { kind: "class", target: link(path, symbol.id), current: symbol.id === current,
+                                                     tip: firstLine(symbol.doc), sub: symbol.bases.length ? `(${symbol.bases.join(", ")})` : "class" }));
+        continue;
+      }
+      const sections = sectionsOf(path, symbol.name);
+      ids.set(symbol.id, chart.group(`class ${symbol.name}${symbol.bases.length ? `(${symbol.bases.join(", ")})` : ""}`, () => {
+        for (const [section, items] of sections) {
+          const drawAll = () => items.forEach((method) => {
+            ids.set(method.id, symbolNode(chart, path, method, current));
+            ownClass.set(method.id, symbol.name);
+          });
+          if (sections.size > 1 || section) chart.group(sectionName(section), drawAll, { kind: "section" });
+          else drawAll();
+        }
+      }, { kind: "class", target: link(path, symbol.id), current: symbol.id === current, tip: firstLine(symbol.doc) }));
+    }
     const fresh = once();
     const uses = [];
-    for (const symbol of files[path].symbols) {
-      const from = ids.get(symbol.parent || symbol.id);
+    for (const symbol of files[path].symbols.filter((item) => item.kind !== "class")) {
+      const from = ids.get(symbol.id);
       for (const callee of symbol.calls || []) {
-        const to = ids.get(callee.split(".")[0]) || ids.get(callee);
-        if (from && to && from !== to && fresh(`${from}>${to}`)) chart.edge(from, to);
+        const to = ids.get(callee);
+        if (!to || to === from || callee === ownClass.get(symbol.id)) continue;  // (never into its own class's box)
+        if (fresh(`${from}>${to}`)) chart.edge(from, to);
       }
-      for (const use of symbol.uses || []) if (from) uses.push([from, use]);
-    }
-    usesNodes(chart, path, uses);
-    return chart;
-  }
-
-  function sectionsChart(path, name) {
-    const chart = new Chart("RIGHT");
-    const sections = sectionsOf(path, name);
-    const ids = new Map();
-    const where = new Map();  // method id → its section
-    chart.group(`class ${name}`, () => {
-      for (const [section, items] of sections) {
-        ids.set(section, chart.node(sectionName(section), { kind: "section", sub: plural(items.length, "method"),
-                                                             target: link(path, `${name}@${sectionKey(section)}`),
-                                                             tip: items.map((method) => method.name).join(", ") }));
-        for (const method of items) where.set(method.id, section);
-      }
-    }, { kind: "class" });
-    const fresh = once();  // calls between sections only: a section's own chart shows the calls into other files
-    for (const [section, items] of sections) {
-      for (const method of items) {
-        for (const callee of method.calls || []) {
-          const other = where.get(callee);
-          if (other !== undefined && other !== section && fresh(`${section}>${other}`)) chart.edge(ids.get(section), ids.get(other));
-        }
-      }
-    }
-    return chart;
-  }
-
-  function classChart(path, name, current = "", only = null) {
-    if (only === null && big(path, name)) return sectionsChart(path, name);
-    const chart = new Chart("RIGHT");
-    const everyMethod = methodsOf(path, name);
-    const methods = only === null ? everyMethod : everyMethod.filter((method) => (method.section || "") === only);
-    const ids = new Map();
-    const sections = new Map();
-    for (const method of methods) {
-      const key = method.section || "";
-      if (!sections.has(key)) sections.set(key, []);
-      sections.get(key).push(method);
-    }
-    chart.group(only === null ? `class ${name}` : `${name} · ${sectionName(only)}`, () => {
-      for (const [section, items] of sections) {
-        const drawAll = () => items.forEach((method) => ids.set(method.id, symbolNode(chart, path, method, current)));
-        if (only === null && (sections.size > 1 || section)) chart.group(sectionName(section), drawAll, { kind: "section" });
-        else drawAll();
-      }
-    }, { kind: "class" });
-    const otherSections = new Map();  // in one section: the class's other sections it calls into, one box each
-    if (only !== null) {
-      for (const method of methods) {
-        for (const callee of method.calls || []) {
-          const target = everyMethod.find((item) => item.id === callee);
-          const key = target ? target.section || "" : null;
-          if (key !== null && key !== only && !otherSections.has(key)) {
-            otherSections.set(key, chart.node(sectionName(key), { kind: "section", sub: `another section of ${name}`,
-                                                                   target: link(path, `${name}@${sectionKey(key)}`) }));
-          }
-        }
-      }
-    }
-    const local = new Map();  // the file's own functions and classes these methods call
-    for (const method of methods) {
-      for (const callee of method.calls || []) {
-        if (!ids.has(callee) && !callee.startsWith(`${name}.`) && symbolOf.has(`${path}::${callee}`)) local.set(callee, null);
-      }
-    }
-    if (local.size) {
-      chart.group("in this file", () => {
-        for (const callee of local.keys()) local.set(callee, symbolNode(chart, path, symbolOf.get(`${path}::${callee}`)));
-      }, { kind: "plain" });
-    }
-    const fresh = once();
-    const uses = [];
-    for (const method of methods) {
-      const from = ids.get(method.id);
-      for (const callee of method.calls || []) {
-        const target = everyMethod.find((item) => item.id === callee);
-        const elsewhere = target && !ids.has(callee) ? otherSections.get(target.section || "") : undefined;
-        const to = ids.get(callee) || local.get(callee) || elsewhere;
-        if (to && to !== from && fresh(`${from}>${to}`)) chart.edge(from, to, { dashed: Boolean(elsewhere) });
-      }
-      for (const use of method.uses || []) uses.push([from, use]);
+      for (const use of symbol.uses || []) uses.push([from, use]);
     }
     usesNodes(chart, path, uses);
     return chart;
@@ -333,8 +268,8 @@
   function paneTop() {
     const pane = [...heading("Architecture", "DiscordStudyBot")];
     pane.push(make("div", "doc", "Every box is a real folder, file, class or function, read from the code by " +
-      "tools/architecture.py. Click a box (or search above) to go deeper: the system, a module, a file, a class, " +
-      "and finally one function, whose code shows here."));
+      "tools/architecture.py. Click a box (or search above) to go deeper: the system, a module, a file (its classes " +
+      "drawn around their methods), and one function, whose code shows here. A click keeps your zoom."));
     pane.push(make("p", "meta", counts()));
     pane.push(make("h3", "", "Read first"));
     pane.push(linkList([["Core architecture (the rules)", `${A.repo}/blob/${A.branch}/docs/core/ARCHITECTURE.md`],
@@ -398,23 +333,12 @@
       groups.get(method.section || "").push(method);
     }
     for (const [section, items] of groups) {
-      const title = make("h3", "", section || "Methods");
-      if (big(path, symbol.name)) { title.textContent = ""; const anchor = make("a", "", sectionName(section)); anchor.href = link(path, `${symbol.name}@${sectionKey(section)}`); title.append(anchor); }
-      pane.push(title);
+      pane.push(make("h3", "", section || "Methods"));
       pane.push(linkList(items.map((method) => [`${method.name}()`, link(path, method.id), firstLine(method.doc).slice(0, 70)])));
     }
     const firstMethod = methods[0]?.line;
     const headEnd = Math.min(firstMethod ? firstMethod - 1 : symbol.end, symbol.line + 80);
     pane.push(make("h3", "", "The class, up to its first method"), code(path, symbol.line, headEnd));
-    return pane;
-  }
-
-  function paneSection(path, name, section) {
-    const items = sectionsOf(path, name).get(section) || [];
-    const pane = [...heading("Section", `${name} · ${sectionName(section)}`),
-                  make("p", "meta", `${plural(items.length, "method")} of class ${name}, in ${path}`)];
-    pane.push(make("h3", "", "Methods"));
-    pane.push(linkList(items.map((method) => [`${method.name}()`, link(path, method.id), firstLine(method.doc).slice(0, 70)])));
     return pane;
   }
 
@@ -445,11 +369,7 @@
     const parts = path ? path.split("/") : [];
     parts.forEach((part, index) => items.push([part, link(parts.slice(0, index + 1).join("/"))]));
     if (symbol?.parent) items.push([symbol.parent, link(path, symbol.parent)]);
-    if (symbol?.section !== undefined && symbol.parent && big(path, symbol.parent)) {
-      items.push([sectionName(symbol.section), link(path, `${symbol.parent}@${sectionKey(symbol.section)}`)]);
-    }
-    if (symbol?.sectionOnly) items.push([symbol.name, ""]);
-    else if (symbol) items.push([symbol.name, link(path, symbol.id)]);
+    if (symbol) items.push([symbol.name, link(path, symbol.id)]);
     const nav = $("#crumbs");
     nav.replaceChildren();
     items.forEach(([label, href], index) => {
@@ -465,28 +385,17 @@
     let chart, pane, title, hint, symbol = null;
     if (!path) {
       [chart, pane, title, hint] = [topChart(), paneTop(), "The whole system", "The core in the middle, the modules in its three slots. Click a box to go in."];
-    } else if (files[path] && name.includes("@")) {
-      const [className, key] = name.split("@");
-      const section = key === "-" ? "" : key;
-      [chart, pane, title, hint] = [classChart(path, className, "", section), paneSection(path, className, section),
-                                    `${className} · ${sectionName(section)}`, "Its methods, and which call which; dotted: into the class's other sections."];
-      symbol = { parent: className, name: sectionName(section), sectionOnly: true };
     } else if (files[path]) {
-      symbol = name ? symbolOf.get(`${path}::${name}`) || null : null;
+      symbol = name ? symbolOf.get(`${path}::${name.split("@")[0]}`) || null : null;  // (an old section link: its class)
+      const where = path.split("/").pop();
+      chart = fileChart(path, symbol?.id || "");
       if (symbol?.kind === "class") {
-        [chart, pane, title, hint] = [classChart(path, symbol.name), paneClass(path, symbol), `class ${symbol.name}`,
-                                      big(path, symbol.name) ? "Its sections (from the file's own section comments), and which call into which. Click one to see its methods."
-                                        : "Its methods, grouped by the file's sections, and which call which. Click one for its code."];
-      } else if (symbol?.parent) {
-        const only = big(path, symbol.parent) ? symbol.section || "" : null;
-        [chart, pane, title, hint] = [classChart(path, symbol.parent, symbol.id, only), paneFunction(path, symbol), `${symbol.id}()`,
-                                      `In class ${symbol.parent}; its code is on the right.`];
+        [pane, title, hint] = [paneClass(path, symbol), `class ${symbol.name}`, `In ${where}, outlined; its methods are inside it.`];
       } else if (symbol) {
-        [chart, pane, title, hint] = [fileChart(path, symbol.id), paneFunction(path, symbol), `${symbol.name}()`,
-                                      `In ${path.split("/").pop()}; its code is on the right.`];
+        [pane, title, hint] = [paneFunction(path, symbol), `${symbol.id}()`, `In ${where}, outlined; its code is on the right.`];
       } else {
-        [chart, pane, title, hint] = [fileChart(path), paneFile(path), path.split("/").pop(),
-                                      "Its classes and functions, and which call which (dotted: calls into other files). Click one to go in."];
+        [pane, title, hint] = [paneFile(path), where,
+                               "Its functions, and each class as a box around its methods; arrows: who calls whom. Hover a box for its calls into other files."];
       }
     } else if (A.folders[path]) {
       [chart, pane, title, hint] = [folderChart(path), paneFolder(path), `${path}/`,

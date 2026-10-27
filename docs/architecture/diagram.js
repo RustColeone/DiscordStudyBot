@@ -14,8 +14,11 @@
 
   // ---- describing a chart ---------------------------------------------------------------------------------
   class Chart {
-    constructor(direction = "RIGHT") {
+    // compact: each box laid out on its own and the boxes packed tight; edges crossing between boxes are drawn as
+    // curves (a file's classes and sections). Otherwise ELK routes every edge through the groups (the top map).
+    constructor(direction = "RIGHT", { compact = false } = {}) {
       this.direction = direction;
+      this.compact = compact;
       this.nodes = [];
       this.groups = [];
       this.edges = [];
@@ -28,9 +31,11 @@
                         parent: this.stack.at(-1) || null });
       return id;
     }
-    group(title, build, { kind = "plain", pack = false } = {}) {  // pack: its boxes in a grid (they have no edges inside)
+    // pack: its boxes in a grid (they have no edges inside); target: where a click on its title goes
+    group(title, build, { kind = "plain", pack = false, target = "", current = false, tip = "" } = {}) {
       const id = `g${this.count++}`;
-      this.groups.push({ id, title: String(title), kind, pack, parent: this.stack.at(-1) || null });
+      this.groups.push({ id, title: String(title), kind, pack, target, current, tip: String(tip || ""),
+                         parent: this.stack.at(-1) || null });
       this.stack.push(id);
       build();
       this.stack.pop();
@@ -39,7 +44,11 @@
     edge(from, to, { dashed = false, label = "", arrow = "end" } = {}) {  // arrow: end, both or none
       if (from && to && from !== to) this.edges.push({ id: `e${this.edges.length}`, from, to, dashed, label, arrow });
     }
-    key() { return JSON.stringify([this.direction, this.nodes, this.groups, this.edges]); }
+    // The diagram without its highlight: the same structure lays out the same, so a click inside it keeps the view.
+    structure() {
+      const plain = (items) => items.map((item) => ({ ...item, current: false }));
+      return JSON.stringify([this.direction, this.compact, plain(this.nodes), plain(this.groups), this.edges]);
+    }
   }
 
   // ---- layout (ELK) ---------------------------------------------------------------------------------------
@@ -64,6 +73,7 @@
   });
 
   function elkGraph(chart) {
+    const compact = chart.compact;
     const root = {
       id: "root", children: [], edges: [],
       layoutOptions: {
@@ -73,23 +83,38 @@
         "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF", "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
         "elk.separateConnectedComponents": "true", "elk.spacing.componentComponent": "34", "elk.aspectRatio": "1.7",
         "elk.edgeLabels.placement": "CENTER", "elk.padding": "[top=24,left=24,bottom=24,right=24]",
+        ...(compact ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN" } : {}),
       },
     };
     const holders = new Map([[null, root]]);
+    const holdsGroups = new Set(chart.groups.map((group) => group.parent));
+    const holdsNodes = new Set(chart.nodes.map((node) => node.parent));
     for (const group of chart.groups) {
       const minimum = Math.ceil(textWidth(group.title, 12, 700) + 40);
-      holders.set(group.id, { id: group.id, children: [], layoutOptions: {
+      const packed = group.pack || (compact && holdsGroups.has(group.id) && !holdsNodes.has(group.id));  // boxes of boxes
+      holders.set(group.id, { id: group.id, children: [], edges: [], layoutOptions: {
         "elk.padding": "[top=38,left=16,bottom=16,right=16]", "elk.nodeSize.constraints": "MINIMUM_SIZE",
         "elk.nodeSize.minimum": `(${minimum}, 60)`,
-        ...(group.pack ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN", "elk.algorithm": "rectpacking",
-                           "elk.aspectRatio": "2.2", "elk.spacing.nodeNode": "12" } : {}) } });
+        ...(compact ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN", "elk.algorithm": "layered",
+                        "elk.direction": chart.direction, "elk.edgeRouting": "ORTHOGONAL",
+                        "elk.layered.spacing.nodeNodeBetweenLayers": "40", "elk.spacing.nodeNode": "12",
+                        "elk.separateConnectedComponents": "true", "elk.spacing.componentComponent": "18",
+                        "elk.aspectRatio": "1.3" } : {}),
+        ...(packed ? { "elk.hierarchyHandling": "SEPARATE_CHILDREN", "elk.algorithm": "rectpacking",
+                       "elk.aspectRatio": group.pack ? "2.2" : "1.5", "elk.spacing.nodeNode": group.pack ? "12" : "18" } : {}) } });
     }
     for (const group of chart.groups) holders.get(group.parent).children.push(holders.get(group.id));
     for (const node of chart.nodes) holders.get(node.parent).children.push({ id: node.id, ...boxSize(node) });
-    root.edges = chart.edges.map((edge) => ({
-      id: edge.id, sources: [edge.from], targets: [edge.to],
-      labels: edge.label ? [{ text: edge.label, width: Math.ceil(textWidth(edge.label, 11) + 12), height: 18 }] : [],
-    }));
+    // Compact: an edge goes to ELK only inside the box holding both its ends; the others are drawn as curves.
+    const parentOf = new Map([...chart.nodes, ...chart.groups].map((item) => [item.id, item.parent]));
+    for (const edge of chart.edges) {
+      const holder = compact ? parentOf.get(edge.from) : null;
+      if (compact && holder !== parentOf.get(edge.to)) continue;
+      holders.get(holder).edges.push({
+        id: edge.id, sources: [edge.from], targets: [edge.to],
+        labels: edge.label ? [{ text: edge.label, width: Math.ceil(textWidth(edge.label, 11) + 12), height: 18 }] : [],
+      });
+    }
     return root;
   }
 
@@ -114,6 +139,25 @@
     return `${path} L${last.x},${last.y}`;
   }
 
+  function curve(a, b) {  // from the side of box a facing box b, to the facing side of b
+    const ac = { x: a.x + a.width / 2, y: a.y + a.height / 2 }, bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    let start, end, c1, c2;
+    if (b.x >= a.x + a.width + 8 || a.x >= b.x + b.width + 8) {
+      const right = b.x >= a.x + a.width + 8;
+      start = { x: right ? a.x + a.width : a.x, y: ac.y };
+      end = { x: right ? b.x : b.x + b.width, y: bc.y };
+      const pull = Math.max(36, Math.abs(end.x - start.x) / 2) * (right ? 1 : -1);
+      [c1, c2] = [{ x: start.x + pull, y: start.y }, { x: end.x - pull, y: end.y }];
+    } else {
+      const below = bc.y > ac.y;
+      start = { x: ac.x, y: below ? a.y + a.height : a.y };
+      end = { x: bc.x, y: below ? b.y : b.y + b.height };
+      const pull = Math.max(28, Math.abs(end.y - start.y) / 2) * (below ? 1 : -1);
+      [c1, c2] = [{ x: start.x, y: start.y + pull }, { x: end.x, y: end.y - pull }];
+    }
+    return `M${start.x},${start.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${end.x},${end.y}`;
+  }
+
   function render(chart, laid) {
     const where = new Map();  // every box, group and the root: its place on the page
     (function place(node, x, y) {
@@ -121,7 +165,7 @@
       where.set(node.id, box);
       for (const child of node.children || []) place(child, box.x, box.y);
     })(laid, 0, 0);
-    const dense = (laid.edges || []).length > 30;  // many edges: drawn lighter until a box is hovered
+    const dense = chart.edges.length > 30;  // many edges: drawn lighter until a box is hovered
     const svg = el("svg", { class: `graph${dense ? " dense" : ""}`, role: "group", tabindex: "0",
                             "aria-label": "Diagram; drag to pan, scroll or pinch to zoom" });
     const defs = el("defs");
@@ -136,23 +180,40 @@
     world.append(groupsLayer, edgesLayer, nodesLayer);
     svg.append(defs, world);
 
+    const groups = new Map();
     for (const group of chart.groups) {
       const box = where.get(group.id);
       if (!box) continue;
-      const g = el("g", { class: `grp g-${group.kind}` });
-      g.append(el("rect", { x: box.x, y: box.y, width: box.width, height: box.height, rx: 14 }),
+      const g = el("g", { class: `grp g-${group.kind}${group.target ? " link" : ""}${group.current ? " current" : ""}`,
+                          "data-id": group.id });
+      g.append(el("rect", { class: "grp-box", x: box.x, y: box.y, width: box.width, height: box.height, rx: 14 }),
                el("text", { x: box.x + 14, y: box.y + 23, class: "grp-title" }, group.title));
+      if (group.target) {  // its title strip is what a click opens; the rest of it pans like the background
+        g.append(el("rect", { class: "grp-hit", x: box.x, y: box.y, width: box.width, height: 34, rx: 14 }));
+        g.setAttribute("tabindex", "0");
+        g.setAttribute("role", "link");
+        g.setAttribute("aria-label", group.title);
+      }
+      if (group.tip) g.append(el("title", {}, group.tip));
       groupsLayer.append(g);
+      groups.set(group.id, g);
     }
 
     const links = new Map();  // box id → the edges and boxes it touches, for lighting them up
     const touch = (id, item) => { if (!links.has(id)) links.set(id, []); links.get(id).push(item); };
     const edgeOf = new Map(chart.edges.map((edge) => [edge.id, edge]));
-    for (const laidEdge of laid.edges || []) {
+    const laidEdges = [];  // [edge, the box it was laid out in]
+    (function collect(node) {
+      for (const edge of node.edges || []) laidEdges.push([edge, node.id]);
+      for (const child of node.children || []) collect(child);
+    })(laid);
+    const drawn = new Set();
+    for (const [laidEdge, holder] of laidEdges) {
       const edge = edgeOf.get(laidEdge.id);
       const section = laidEdge.sections?.[0];
       if (!edge || !section) continue;
-      const offset = where.get(laidEdge.container) || { x: 0, y: 0 };
+      drawn.add(edge.id);
+      const offset = where.get(laidEdge.container || holder) || { x: 0, y: 0 };
       const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint].map((point) => ({ x: point.x + offset.x, y: point.y + offset.y }));
       const g = el("g", { class: `edge-g${edge.dashed ? " dashed" : ""}` });
       const path = el("path", { d: rounded(points), class: "edge" });
@@ -164,6 +225,19 @@
         g.append(el("rect", { x, y, width: label.width, height: label.height, rx: 5, class: "edge-label-bg" }),
                  el("text", { x: x + label.width / 2, y: y + label.height / 2 + 4, class: "edge-label" }, label.text));
       }
+      edgesLayer.append(g);
+      touch(edge.from, { line: g, other: edge.to });
+      touch(edge.to, { line: g, other: edge.from });
+    }
+    for (const edge of chart.edges) {  // between boxes laid out apart: a curve from side to side
+      const a = where.get(edge.from), b = where.get(edge.to);
+      if (drawn.has(edge.id) || !a || !b) continue;
+      // A dotted curve (a call into another file) stays hidden until one of its ends is hovered.
+      const g = el("g", { class: `edge-g free${edge.dashed ? " dashed quiet" : ""}` });
+      const path = el("path", { d: curve(a, b), class: "edge" });
+      if (edge.arrow !== "none") path.setAttribute("marker-end", "url(#arrow)");
+      if (edge.arrow === "both") path.setAttribute("marker-start", "url(#arrow-start)");
+      g.append(path);
       edgesLayer.append(g);
       touch(edge.from, { line: g, other: edge.to });
       touch(edge.to, { line: g, other: edge.from });
@@ -193,10 +267,10 @@
     // Hovering (or focusing) a box: it, its edges and the boxes at their other ends stay bright.
     const light = (id, on) => {
       svg.classList.toggle("focus", on);
-      nodes.get(id)?.classList.toggle("on", on);
+      (nodes.get(id) || groups.get(id))?.classList.toggle("on", on);
       for (const item of links.get(id) || []) {
         item.line.classList.toggle("on", on);
-        nodes.get(item.other)?.classList.toggle("on", on);
+        (nodes.get(item.other) || groups.get(item.other))?.classList.toggle("on", on);
       }
     };
     for (const [id, g] of nodes) {
@@ -205,10 +279,22 @@
       g.addEventListener("focus", () => light(id, true));
       g.addEventListener("blur", () => light(id, false));
     }
+    for (const [id, g] of groups) {
+      const hit = g.querySelector(".grp-hit");
+      if (!hit) continue;
+      hit.addEventListener("pointerenter", () => light(id, true));
+      hit.addEventListener("pointerleave", () => light(id, false));
+    }
     const bounds = where.get("root");
-    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height },
-             current: chart.nodes.find((node) => node.current && where.has(node.id)) ? where.get(chart.nodes.find((node) => node.current).id) : null,
-             targets: new Map(chart.nodes.filter((node) => node.target).map((node) => [node.id, node.target])) };
+    const items = [...chart.nodes, ...chart.groups];
+    const current = items.find((item) => item.current && where.has(item.id));
+    // Where a big diagram begins: its first box along the flow (left-most, or top-most going down).
+    const down = chart.direction === "DOWN";
+    const first = chart.nodes.map((node) => where.get(node.id)).filter(Boolean)
+      .sort((a, b) => (down ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y))[0] || null;
+    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, first,
+             current: current ? where.get(current.id) : null,
+             targets: new Map(items.filter((item) => item.target).map((item) => [item.id, item.target])) };
   }
 
   // ---- zooming and panning ---------------------------------------------------------------------------------
@@ -223,7 +309,11 @@
       }, { passive: false });
       svg.addEventListener("pointerdown", (event) => {
         this.pointers.set(event.pointerId, this.point(event));
-        if (this.pointers.size === 1) { this.origin = this.point(event); this.moved = false; this.pressed = event.target.closest(".node.link"); }
+        if (this.pointers.size === 1) {
+          this.origin = this.point(event);
+          this.moved = false;
+          this.pressed = event.target.closest(".node.link") || (event.target.classList.contains("grp-hit") ? event.target.parentNode : null);
+        }
         svg.setPointerCapture(event.pointerId);
       });
       svg.addEventListener("pointermove", (event) => {
@@ -252,7 +342,7 @@
       svg.addEventListener("pointercancel", release);
       svg.addEventListener("dblclick", (event) => { if (!event.target.closest(".node")) this.zoomAt(1.7, ...this.point(event)); });
       svg.addEventListener("keydown", (event) => {
-        const node = event.target.closest?.(".node.link");
+        const node = event.target.closest?.(".node.link, .grp.link");
         if (node && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); this.go(node); return; }
         const pan = 60;
         const actions = { "+": () => this.zoomBy(1.25), "=": () => this.zoomBy(1.25), "-": () => this.zoomBy(0.8), "0": () => this.fit(),
@@ -294,35 +384,53 @@
       this.y = box.height / 2 - (target.y + target.height / 2) * scale;
       this.apply();
     }
-    start() {  // the current box centred; else the whole diagram if it stays readable, else its beginning at 60%
-      if (this.current) { this.focusOn(this.current, Math.max(0.85, Math.min(1, this.fitScale()))); return; }
-      if (this.fitScale() >= 0.6) { this.fit(1); return; }
+    set(scale, x, y) { Object.assign(this, { scale, x, y }); this.apply(); }
+    keep(scale) {  // another diagram, at the user's zoom: the current box centred, else all of it, else its beginning
       const box = this.svg.getBoundingClientRect();
-      this.scale = 0.6;
-      this.x = 16;
-      this.y = Math.max(16, (box.height - this.bounds.height * this.scale) / 2);
-      this.apply();
+      if (this.current) { this.focusOn(this.current, scale); return; }
+      const width = this.bounds.width * scale, height = this.bounds.height * scale;
+      if (width <= box.width && height <= box.height) {
+        this.set(scale, (box.width - width) / 2, (box.height - height) / 2);
+      } else {
+        this.begin(scale);
+      }
+    }
+    begin(scale) {  // the diagram's first box near the top left, at this zoom
+      const box = this.svg.getBoundingClientRect();
+      const first = this.first || { x: 0, y: 0, width: 0, height: 0 };
+      this.set(scale, 40 - first.x * scale, Math.max(24, box.height / 3 - (first.y + first.height / 2) * scale));
+    }
+    start() {  // the current box centred; else the whole diagram if it stays readable, else its beginning at 70%
+      if (this.current) { this.focusOn(this.current, Math.max(0.85, Math.min(1, this.fitScale()))); return; }
+      if (this.fitScale() >= 0.55) { this.fit(1); return; }
+      this.begin(0.7);
     }
   }
 
   // ---- the page's one call ------------------------------------------------------------------------------------
-  const laidOut = new Map();  // chart → its layout, so going back is instant
+  const laidOut = new Map();  // structure → its layout, so a click or going back lays nothing out again
   let turn = 0;
+  let last = null;  // the latest diagram's structure and view
   async function draw(holder, chart, { onGo, onZoom }) {
     const mine = ++turn;
-    const key = chart.key();
-    let laid = laidOut.get(key);
+    const structure = chart.structure();
+    let laid = laidOut.get(structure);
     if (!laid) {
       const elk = await loadElk();
       laid = await elk.layout(elkGraph(chart));
-      laidOut.set(key, laid);
+      laidOut.set(structure, laid);
     }
     if (mine !== turn) return null;
+    const before = last;
     const picture = render(chart, laid);
     holder.replaceChildren(picture.svg);
     const view = new Viewport(picture, onGo);
     view.onZoom = onZoom;
-    view.start();
+    // The same diagram (a click inside it): exactly where the user was. Another one: at the user's zoom.
+    if (before && before.structure === structure) view.set(before.view.scale, before.view.x, before.view.y);
+    else if (before) view.keep(before.view.scale);
+    else view.start();
+    last = { structure, view };
     return view;
   }
 

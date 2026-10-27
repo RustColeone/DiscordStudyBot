@@ -111,14 +111,14 @@ a { color: var(--accent); }
 .graph .k-external .card { fill: transparent; stroke-dasharray: 5 4; }
 .graph .k-external { --b: #9a9184; }
 .graph .k-manager .card { stroke: #c9681c; stroke-width: 1.8; }
-.graph .grp rect { fill: color-mix(in srgb, var(--panel) 45%, transparent); stroke: var(--line); stroke-width: 1.2; }
+.graph .grp-box { fill: color-mix(in srgb, var(--panel) 45%, transparent); stroke: var(--line); stroke-width: 1.2; }
 .graph .grp-title { font-size: 12px; font-weight: 700; fill: var(--muted); letter-spacing: .02em; }
-.graph .g-interfaces rect { fill: color-mix(in srgb, #3b82c4 9%, transparent); stroke: color-mix(in srgb, #3b82c4 40%, var(--line)); }
-.graph .g-engines rect { fill: color-mix(in srgb, #c9681c 9%, transparent); stroke: color-mix(in srgb, #c9681c 40%, var(--line)); }
-.graph .g-capabilities rect { fill: color-mix(in srgb, #3f9a62 9%, transparent); stroke: color-mix(in srgb, #3f9a62 40%, var(--line)); }
-.graph .g-core rect { fill: color-mix(in srgb, var(--panel) 70%, transparent); stroke: var(--edge); stroke-width: 1.5; }
-.graph .g-class rect { fill: color-mix(in srgb, #8a5cc7 6%, transparent); stroke: color-mix(in srgb, #8a5cc7 35%, var(--line)); }
-.graph .g-section rect { fill: color-mix(in srgb, #5f7d95 7%, transparent); stroke: color-mix(in srgb, #5f7d95 30%, var(--line)); }
+.graph .g-interfaces .grp-box { fill: color-mix(in srgb, #3b82c4 9%, transparent); stroke: color-mix(in srgb, #3b82c4 40%, var(--line)); }
+.graph .g-engines .grp-box { fill: color-mix(in srgb, #c9681c 9%, transparent); stroke: color-mix(in srgb, #c9681c 40%, var(--line)); }
+.graph .g-capabilities .grp-box { fill: color-mix(in srgb, #3f9a62 9%, transparent); stroke: color-mix(in srgb, #3f9a62 40%, var(--line)); }
+.graph .g-core .grp-box { fill: color-mix(in srgb, var(--panel) 70%, transparent); stroke: var(--edge); stroke-width: 1.5; }
+.graph .g-class .grp-box { fill: color-mix(in srgb, #8a5cc7 6%, transparent); stroke: color-mix(in srgb, #8a5cc7 35%, var(--line)); }
+.graph .g-section .grp-box { fill: color-mix(in srgb, #5f7d95 7%, transparent); stroke: color-mix(in srgb, #5f7d95 30%, var(--line)); }
 .graph .edge { fill: none; stroke: var(--edge); stroke-width: 1.5; }
 .graph .edge-g.dashed .edge { stroke-dasharray: 5 4; }
 .graph .arrowhead { fill: var(--edge); }
@@ -129,4 +129,11 @@ a { color: var(--accent); }
 .graph.dense.focus .edge-g.on { opacity: 1; }
 .graph.focus .node:not(.on), .graph.focus .edge-g:not(.on) { opacity: .22; }
 .graph.focus .edge-g.on .edge { stroke: var(--accent); stroke-width: 2.2; }
+.graph .edge-g.quiet:not(.on) { opacity: 0; }
 @media (max-width: 860px) { .chart-frame { min-height: 52vh; } .chart-help { display: none; } }
+.graph .grp-hit { fill: transparent; cursor: pointer; }
+.graph .grp.link .grp-title { fill: var(--ink); }
+.graph .grp.link:has(.grp-hit:hover) .grp-box, .graph .grp.link:focus .grp-box { stroke: var(--accent); stroke-width: 2; }
+.graph .grp:focus { outline: none; }
+.graph .grp.current .grp-box { stroke: var(--accent); stroke-width: 2.6; }
+.graph .grp { transition: opacity .15s; }
