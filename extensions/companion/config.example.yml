@@ -1,0 +1,8 @@
+# Companion settings. Copy to config.yml (git-ignored); extension_config.companion in core.yml overrides it.
+# It needs mneme-llm 0.2 or newer (pip install -U mneme-llm); without it the module adds nothing.
+
+# personas: [luna, gemini, claude, deepseek, grok]   # whose companion it keeps (left out: every persona)
+# language: zh                  # the language of the lines it adds to prompts (en or zh; mneme-llm's default: en)
+# platforms: {whale_chan: discord}   # interfaces that share people: one Discord user is one person on both bots
+# roles:                        # who people are to every student it keeps: creator (one), family, friend, acquaintance
+#   "discord:123456789012345678": creator

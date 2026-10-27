@@ -24,6 +24,7 @@ build:
 | [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
 | [`room`](../../extensions/room/README.md) | Engine | Several personas on one work board, parallel jobs |
 | [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, shipping your own model profiles and a provider |
+| [`companion`](../../extensions/companion/README.md) | Prompt part, capabilities | Working with every persona by name without importing anyone: a computed `turn` part, typed-only commands, a permission rule for its own capability |
 | [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |

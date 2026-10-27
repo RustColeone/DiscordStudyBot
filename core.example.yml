@@ -15,7 +15,8 @@
 # external ones in plugins/. Turn one off by folder (extensions/terminal) or by name (terminal), and
 # add module folders that live elsewhere (they count as external). Built-in modules:
 #   discord, assistant, basic, cli (stdin chat, for local testing), room (the shared room's engine),
-#   students (luna, gemini, claude, deepseek, grok: the characters, one folder each),
+#   students (luna, gemini, claude, deepseek, grok: the characters, one folder each), companion ($alias, $bond;
+#   mneme-llm 0.2),
 #   media ($video, $clip; yt-dlp + ffmpeg), images ($draw), system ($status), reminders ($remind),
 #   web ($search, $read, image search, maps, $wolfram with WOLFRAM_APPID), terminal (creator-only shell:
 #   $t <line>, a terminal channel, or the assistant with your approval; docs/core/EXTENSIONS.md),
