@@ -4,8 +4,8 @@ A module is a directory with an `extension.py` (the contract still calls the dec
 `Extension`). Built-in modules live in [`extensions/`](../../extensions) and are maintained and tested
 with the core; external ones are dropped into [`plugins/`](../../plugins) or live elsewhere. Every
 module loads unless `core.yml` excludes it. A module can add **interfaces** (platform
-connections), **engines** (turn loops), **capabilities** (actions) and default **personas**, in any
-combination. The core treats your code as a black box and you treat the core as one: the only shared
+connections), **engines** (turn loops), **capabilities** (actions), default **personas** and **watchers**
+(learning from what personas say), in any combination. The core treats your code as a black box and you treat the core as one: the only shared
 code is the [`contracts`](../../contracts) package, which is the complete public API. This guide
 describes everything the core does with it; you should not need to read core code.
 [ARCHITECTURE.md](ARCHITECTURE.md) explains the internals for core maintainers.
@@ -23,8 +23,8 @@ build:
 | [`host`](../../extensions/host/README.md), [`terminal`](../../extensions/terminal/README.md) | Capabilities (terminal also an engine) | Sensitive actions: owner-only, private data, secret paths, approvals and confirmations |
 | [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
 | [`room`](../../extensions/room/README.md) | Engine | Several personas on one work board, parallel jobs |
-| [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, shipping your own model profiles and a provider |
-| [`companion`](../../extensions/companion/README.md) | Prompt part, capabilities | Working with every persona by name without importing anyone: a computed `turn` part, typed-only commands, a permission rule for its own capability |
+| [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, her pictures and other names, a rename that keeps her data (`formerly`), shipping your own model profiles and a provider |
+| [`companion`](../../extensions/companion/README.md) | Prompt part, watcher, capabilities | Working with every persona by name without importing anyone: a computed `turn` part, a watcher that learns from every engine, facts the pages show, typed-only commands, a permission rule for its own capability |
 | [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
@@ -168,6 +168,21 @@ a later candidate answer in its place, so the engine can ask that step in its JS
 no provider for its own sake and does not count against the run's `model_calls`. An extension may ship default
 personas in `Contributions.personas`; a configured persona with the same name wins.
 
+A persona may also carry (contracts 1.9):
+
+* `aliases`: other names people call her by. The room counts "Luna, …" as calling GPT, and the companion's
+  `$alias luna Lulu` finds her by it.
+* `formerly`: persona names she had before. On every start, a former name no persona has now is read as hers:
+  core.yml's assignments and `personas: <old name>: parts:` apply to her (the audit says
+  `persona_renamed_in_config`; rename them there when convenient), and what the core keeps under the old name
+  moves to hers once (`persona_data_moved`, with counts): her memory, every module's stores scoped by her, diary
+  notes, `$model` choices, runtime assignments, facts, the runs she is in, and her name on what she said. What she
+  already has under the new name wins. A module that keeps its own data by persona name (the web UI's chats, say)
+  does the same from `InterfacePort.personas()`. Let open runs finish before renaming someone.
+* `pictures`: kind → image file (`avatar`, square; `card`, 3:4; any kind a page knows). Interfaces get them, as
+  absolute paths, from `InterfacePort.personas()` and serve them themselves; a picture dropped in an interface's
+  own folder may override one.
+
 ### Prompt parts
 
 A persona can carry prompt parts beside its prompt: its personality, house rules, anything an engine should
@@ -180,9 +195,9 @@ personas:
     parts:
       - {name: personality, file: personas/assistant.md}       # relative to core.yml's folder
       - {name: house, text: "Answer in the person's language."}
-  luna:                           # a module's persona (a student): without a `prompt`, only parts are added
+  gpt:                            # a module's persona (a student): without a `prompt`, only parts are added
     parts:
-      - {name: personality, file: personas/luna.md}
+      - {name: personality, file: personas/gpt.md}
       - {name: season, text: "It is exam season at school.", place: turn, order: 50}
 ```
 
@@ -206,12 +221,65 @@ personas:
 A module gives its own personas parts (`Persona(..., parts=(...))`), and may add parts for others with
 `Contributions.prompt_parts`: `PromptPart(name, text, place="stable", order=100, personas=())`, for every
 persona, or for those in `personas`. Two modules may not add parts of the same name (the second fails to
-load). A part's `text` may be a function of a `PartContext` (`persona`, `address`, `trigger`, `owner`), called
+load). A part's `text` may be a function of a `PartContext` (`persona`, `address`, `trigger`, `owner`, and since 1.9
+`engine`, the engine placing it), called
 (never awaited) each time the part is used, so it should be quick. A persona's own part shadows a module's part
 of the same name. A part that raises or returns something other than text is left out and audited
 (`prompt_part_problem`, with the module that added it), once until it renders again; it never fails the run.
 Engines get the rendered parts with `session.prompt(persona, place)`; the assistant, room and whale_chan
 engines place them as above. An engine that never calls it ignores parts.
+
+### Watchers
+
+A module that learns from what is said (memory, mood, closeness: the companion) adds watchers (contracts 1.9):
+
+```python
+from contracts import Contributions, Watcher
+
+async def learn(exchange, context):
+    # exchange: address, persona (a Persona), text (what she said), trigger (the Request she answered), run_id,
+    # engine, at; exchange.person is (interface, sender id)
+    if exchange.trigger.origin != "person":
+        return
+    result = await context.models.generate(...)          # her profile unless the request names one
+    context.store(persona=True, person=True).set("seen", True)
+    context.facts.set(exchange.persona.name, "mood", {"face": "good"}, person=exchange.person)
+
+def setup(context):
+    return Contributions(watchers=[Watcher("companion", learn, personas=(), timeout_s=120)])
+```
+
+* `run(exchange, context)` is awaited after each message a persona says, once it is delivered and recorded,
+  whichever engine she spoke in: one exchange per message (three messages in a run are three exchanges).
+  Progress lines, work notes (a reply with a label) and command output give none.
+* It runs beside the conversation, never before a delivery. One persona's exchanges reach one watcher one at a
+  time, in the order she spoke. A failure or a timeout (`timeout_s`) is written in the audit log
+  (`watcher_failed`) and nothing else happens; the core's stop cancels watchers still running.
+* `context.models` calls models with the persona's profile unless a request names another; the calls are added to
+  the run's usage (`watcher_calls`, tokens) but not counted against its budget, since the run may be over.
+  `context.history` reads the conversation, `context.store(conversation=, persona=, person=)` is the module's own
+  store (`persona=True` is the exchange's persona, `person=True` its person), `context.facts` publishes facts,
+  `context.log(event, **fields)` writes to the audit log.
+* `personas` limits a watcher to those personas (none: every persona). `exchange.engine` lets a watcher keep to
+  the engines whose messages are conversation (the companion skips the Classroom's reports).
+
+### Facts
+
+A fact is a small public value a module publishes about a persona, or about a persona and one person: her mood
+or level, a person's bond with her, the name they call her (contracts 1.9). Pages show them; nothing else reads
+them, so a fact is never a module's private state (that goes in its stores).
+
+* A module writes with `context.facts` (from `setup`, kept for later) or a watcher's `context.facts`:
+  `facts.set(persona, key, value, person=None)`, `facts.get(...)`, `facts.delete(...)`; `set(..., None)` deletes.
+  A key is lowercase letters, digits and `_`; a value is JSON, at most 4 KB once encoded. `person` is
+  `(interface, sender id)`, as `Exchange.person` gives it. A module writes only its own keys.
+* An interface reads with `port.facts(persona, sender_id=None)`: `{"<module>.<key>": value}` for the persona,
+  with what is published about her and that person of this interface over it. It reads only its own people.
+* Pages look for the names they know, whichever module publishes them: `alias` (a string), `bond`
+  (`{"role", "closeness"}`, 0 to 100), `mood` (`{"value", "face", "feelings"}`; `face` is great, good, ok, worry
+  or sad). Level and stamina are to follow the same way.
+* Facts are kept in the tank (`core:facts`) and last across restarts. Publish again at start what your own data
+  already holds, so a page shows it before anyone talks.
 
 ### Model providers
 
@@ -269,9 +337,10 @@ from contracts import Contributions, Extension, Persona
 
 def setup(context) -> Contributions:
     # context.name, context.config (local config.yml, overridden by core.yml), context.data_dir (private dir),
-    # context.log(event, **fields)
+    # context.facts (what it publishes for pages, contracts 1.9), context.log(event, **fields)
     return Contributions(interfaces=[...], engines=[...], capabilities=[...],
-                         personas=[Persona("whale", "本鲸", "…", profile="default")])
+                         personas=[Persona("whale", "本鲸", "…", profile="default")],
+                         prompt_parts=[...], watchers=[...])
 
 EXTENSION = Extension("my_extension", setup, contracts="1", version="1", description="...")
 ```
@@ -376,6 +445,8 @@ needs) and [`extensions/discord`](../../extensions/discord/interface.py) (a full
 | `publish(link=None, status=None)` | (contracts 1.7) Tell the other interfaces where people reach you (`link`, an http(s) URL) and a small public status (a JSON object, at most 16 KB), so they can link to you and show what happens here. Each call replaces what it names. A status that describes a place follows `contracts.PLACE_STATUS`: `{"place": {"name", "icon", "note"}, "people": [{"key", "name", "avatar", "doing", "title"}], "away": [keys of people from elsewhere who are here now], "tickets": [{"key", "by", "title", "link"}]}`; any interface can then draw any other place (the web UI's mini map draws the Classroom this way, and the Classroom draws MomoChat). A key is the name lowercased with only its letters and digits kept, in any script ("Flash-chan" → "flashchan"); an empty key matches nobody. The status must be plain JSON (no NaN or Infinity) and a place's lists must have that shape, else `ValueError`. Kept in memory while the core runs; publish again at start. |
 | `directory()` | (contracts 1.7) What every interface has published: name → `{"link", "status", "ready"}` (copies). |
 | `approval_status(approval_id) -> str \| None` | (contracts 1.7) `pending`, `approved`, `denied` or `expired` for an approval asked in one of your conversations (None for any other). A pending one whose run is no longer open counts as expired. Ask it before offering an approval card's buttons: a card may have been decided elsewhere (typed, in another interface) or have expired with its run. |
+| `personas()` | (contracts 1.9) Every persona, in the order modules gave them: `name`, `display_name`, `aliases`, `formerly`, `pictures` (kind → absolute image path) and `ready` (some candidate of her profile can be called). A page shows the students from this rather than keeping its own list. |
+| `facts(persona, sender_id=None)` | (contracts 1.9) What modules publish about a persona, and about her and one of your people (see [Facts](#facts)). |
 
 All port methods act only on your own interface's addresses (except `directory`, which only reads); anything else
 raises `ValueError`.
@@ -721,9 +792,9 @@ commands of their own for this.
 ### The built-in `room` engine
 
 [`extensions/room`](../../extensions/room/engine.py) is the shared room: several personas own one
-request together on a work board. Its usual characters, `luna`, `gemini`, `claude`, `deepseek` and `grok`, come from
+request together on a work board. Its usual characters, `gpt`, `gemini`, `claude`, `deepseek` and `grok`, come from
 the [`students`](../../extensions/students/README.md) module, with a model profile of the same name for each (her
-own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back to Luna's chain) and Grok's
+own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back to GPT's chain) and Grok's
 provider. The students' `config.yml` overrides them, and core.yml overrides both.
 
 * Who answers: personas named in the message (name, display name or `aliases`), everyone for
@@ -738,7 +809,7 @@ provider. The students' `config.yml` overrides them, and core.yml overrides both
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
 * Each character's system prompt is her prompt, display name and stable prompt parts, then the room's
   rules; the time, her turn parts and her diary come in the turn's context, before the request, so for one
-  speaker the system prompt stays the same from turn to turn. Give a character more personality in core.yml (`personas: luna:
+  speaker the system prompt stays the same from turn to turn. Give a character more personality in core.yml (`personas: gpt:
   parts:`, see [Prompt parts](#prompt-parts)) rather than by editing the module.
 * Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
   left out), the board, recent room messages, shared tool results, images (attached to the run's messages,
@@ -871,6 +942,7 @@ Pick the tier by what the data is; none of them needs anything new from the core
 | --- | --- | --- |
 | What was said, and what is remembered about it | The core's: `session.history` (recent, search, the rolling summary) and diaries. The core enforces their rules and people control them with `$memory` | A chat's summary; a character's notes about you |
 | Small state of your module | `session.store(...)` / `context.store(...)`: key-value, JSON values, scoped by any combination of `conversation`, `persona` and `person`; your module's name comes first, so no module reads another's | A rotation counter (`conversation=True`), a person's preferences (`person=True`), a character's own data (`persona=...`) |
+| What pages should show about a persona | Facts (`context.facts`, [above](#facts)): small public JSON values, read by interfaces only | A bond, a mood, the name someone calls her |
 | Bulk or structured data of your module | Your own files or database in `context.data_dir`; the core never opens it | A trade log, price series, a transcript |
 
 A "person" is a sender on one interface: the same human on Discord and on the web UI is two people to

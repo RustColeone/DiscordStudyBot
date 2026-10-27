@@ -120,6 +120,7 @@ a { color: var(--accent); }
 .graph .g-engines .grp-box { fill: color-mix(in srgb, #c9681c 9%, transparent); stroke: color-mix(in srgb, #c9681c 40%, var(--line)); }
 .graph .g-capabilities .grp-box { fill: color-mix(in srgb, #3f9a62 9%, transparent); stroke: color-mix(in srgb, #3f9a62 40%, var(--line)); }
 .graph .g-personas .grp-box { fill: color-mix(in srgb, #b0577a 9%, transparent); stroke: color-mix(in srgb, #b0577a 40%, var(--line)); }
+.graph .g-watchers .grp-box { fill: color-mix(in srgb, #3f8f86 9%, transparent); stroke: color-mix(in srgb, #3f8f86 40%, var(--line)); }
 .graph .g-core .grp-box { fill: color-mix(in srgb, var(--panel) 70%, transparent); stroke: var(--edge); stroke-width: 1.5; }
 .graph .g-class .grp-box { fill: color-mix(in srgb, #8a5cc7 6%, transparent); stroke: color-mix(in srgb, #8a5cc7 35%, var(--line)); }
 .graph .g-section .grp-box { fill: color-mix(in srgb, #5f7d95 7%, transparent); stroke: color-mix(in srgb, #5f7d95 30%, var(--line)); }

@@ -206,7 +206,7 @@ class Context:
                 "fallbacks": answer.get("fallbacks", [])}
 
     def crew(self) -> list[Seat]:
-        """The classmates who came along to the lab for this task (besides the one who brought you, who leads and
+        """The classmates who came along to the Classroom for this task (besides the one who brought you, who leads and
         keeps her usual roles); empty when nobody was chosen."""
         data = (self.task() or {}).get("data") or {} if self.task_id else {}
         invited = data.get("invited") or {}

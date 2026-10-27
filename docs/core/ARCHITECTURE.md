@@ -72,6 +72,7 @@ sequenceDiagram
     participant M as Manager
     participant E as Engine
     participant C as Capability
+    participant W as Watcher
     I->>G: submit(Request)
     G->>G: dedupe · admission · $command?
     G->>M: accept(request)
@@ -82,8 +83,14 @@ sequenceDiagram
     M->>C: run(arguments, context) after policy
     M->>G: deliver(Reply)
     G->>I: deliver(Reply) via routes
+    M-)W: run(Exchange) once delivered and recorded (beside the run)
     E-->>M: RunYield (done / waiting_input / waiting_approval)
 ```
+
+A watcher (contracts 1.9) sees each message a persona said, after it was delivered and recorded, whichever engine
+she spoke in. It runs as a side task of the Manager: one persona's exchanges reach one watcher in order, within its
+timeout, and a failure is only audited. Its model calls go through `Manager.generate(..., watcher=True)`: added to
+the run's usage, outside its budget, and never taken as the persona's answer (`_answered`).
 
 ## Durable runs
 
@@ -300,7 +307,11 @@ the owner; deliveries are refused while not ready), `check` a reply right before
 an interface can also ask whether a model profile can answer (`models_ready`), whether an approval is still
 pending (`approval_status`), and `publish` its link and a small public status (a place on the club's map, say)
 that the other interfaces read from the `directory`: modules learn about each other through the core this way,
-never by calling each other. When the core stops, it cancels runs with `contracts.SHUTDOWN`, so an engine can tell a
+never by calling each other. Since 1.9 an interface lists the personas (`personas`: names, aliases, pictures,
+readiness) and reads `facts`, the small public values modules publish about a persona and one of its own people
+(kept in the tank's `core:facts` by `core/manager/facts.py`), so a page shows a bond or a mood without knowing which
+module keeps it. A persona's `formerly` names are adopted at start (`core/manager/renames.py`): core.yml's old
+names are read as hers and the tank's data under them is moved once (`Tank.rename_persona`). When the core stops, it cancels runs with `contracts.SHUTDOWN`, so an engine can tell a
 stop (the run resumes) from a cancel.
 
 Revocation is immediate: a rule that stops admitting a conversation, or an assignment that is disabled
@@ -365,13 +376,14 @@ to the unit to keep a core that keeps crashing down until it is fixed.
 | [`core/manager/manager.py`](../../core/manager/manager.py) | Registries, runs, permission decisions, approvals, grants, commands |
 | [`core/manager/policy.py`](../../core/manager/policy.py) | Assignments, budgets, owners and the permissions model (`use`, tiers, rules, layers) |
 | [`core/manager/secrets.py`](../../core/manager/secrets.py) | Secret values, formats and paths; scrubbing (S1-S3) |
-| [`core/manager/handles.py`](../../core/manager/handles.py) | Session, tools, models and capability context handles |
+| [`core/manager/handles.py`](../../core/manager/handles.py) | Session, tools, models, capability and watcher context handles |
+| [`core/manager/facts.py`](../../core/manager/facts.py), [`core/manager/renames.py`](../../core/manager/renames.py) | Facts modules publish for pages; a renamed persona's former names adopted at start |
 | [`core/manager/core_capabilities.py`](../../core/manager/core_capabilities.py) | `core.*` capabilities and interface operations |
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
-| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `webui` the example interface (a chat page on the local network, the room by default), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
-| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines, `students` (the five characters, one folder each), `companion` (what each student keeps of each person: roles and aliases, in mneme-llm), `workbench` (coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; its own page), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
+| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `webui` the example interface (MomoChat: a chat page on the local network, the room by default), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
+| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines, `students` (the five characters, one folder each), `companion` (what each student keeps of each person, in mneme-llm: roles, aliases, notes, mood, learned by a watcher), `workbench` (coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; its own page), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 | [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |
 | [`core/setup.py`](../../core/setup.py), [`core/wizard.py`](../../core/wizard.py) | Setting up: module settings, file edits (one key at a time), `$setup`, and the guided `python -m core setup` |

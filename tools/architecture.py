@@ -6,7 +6,7 @@
 Everything comes from the code itself: git's list of Python files, and Python's `ast` for each file's docstring,
 imports, classes, functions, which of them call which, and the source. A module's data files (its `.yml` and `.md`
 files other than READMEs: settings, a student's prompt) are listed too, with their text and the files they name.
-Which modules fill which slot (interfaces, engines, capabilities, personas) is read from their `extension.py`. Only the top map's boxes are named here (CORE_PARTS), after
+Which modules fill which slot (interfaces, engines, capabilities, personas, watchers) is read from their `extension.py`. Only the top map's boxes are named here (CORE_PARTS), after
 docs/core/ARCHITECTURE.md; change them when the architecture changes. The output has no dates or commit IDs, so it
 changes only when the code does.
 """
@@ -26,7 +26,9 @@ OUT = ROOT / "docs" / "architecture" / "data.js"
 REPO = "https://github.com/RustColeone/DiscordStudyBot"
 BRANCH = "master"
 ROOTS = ("contracts", "core", "extensions", "plugins", "tools", "tests")  # the folders the page shows, in order
-SLOTS = ("interfaces", "engines", "capabilities", "personas")
+SLOTS = ("interfaces", "engines", "capabilities", "personas", "watchers")
+FIELDS = {"interfaces", "engines", "capabilities", "personas", "profiles", "assignments", "admission", "permissions",
+          "providers", "adapters", "prompt_parts", "watchers"}  # contracts.Contributions
 DATA = ("yml", "yaml", "md")  # a module's data files: settings, prompts (READMEs are the folders' own text)
 # The core's blocks on the top map (docs/core/ARCHITECTURE.md): id, label, what it owns or does, where it lives.
 CORE_PARTS = [
@@ -219,8 +221,9 @@ def slots(files: dict[str, dict]) -> dict[str, dict]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Contributions":
                 filled |= {keyword.arg for keyword in node.keywords if keyword.arg in SLOTS}
-            if isinstance(node, ast.Dict):  # contributions built as a dict first (whale_chan)
-                filled |= {key.value for key in node.keys if isinstance(key, ast.Constant) and key.value in SLOTS}
+            keys = {key.value for key in getattr(node, "keys", None) or () if isinstance(key, ast.Constant)}
+            if isinstance(node, ast.Dict) and keys and keys <= FIELDS:  # contributions built as a dict first (whale_chan)
+                filled |= keys & set(SLOTS)  # (an assignment's {"engine", "personas", ...} is not one)
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Extension":
                 for keyword in node.keywords:
                     if keyword.arg == "description" and isinstance(keyword.value, ast.Constant):

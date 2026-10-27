@@ -2,7 +2,7 @@
 
 An external module (in `plugins/`, tracked in git, loaded like any other module) that serves a chat page
 from the bot itself. Open `http://<this computer>:4156` from a laptop or phone at home and talk to the
-bot without Discord: each chat is a conversation of the shared room (Luna, Gemini, Claude, DeepSeek and
+bot without Discord: each chat is a conversation of the shared room (GPT, Gemini, Claude, DeepSeek and
 Grok) by default, with Markdown and LaTeX, files both ways, live "typing" lines, approval cards with
 buttons, and a per-chat model menu. Whoever opens the page acts as the bot's creator.
 
@@ -15,13 +15,18 @@ to connect the core to a new platform, especially one you host yourself.
 | Kind | Name | Details |
 | --- | --- | --- |
 | Interface | `webui` (renamable with the `interface` key) | `Display(markdown=True, edits=False, progress=True, quotes=False, files=True, max_upload_mb=50, max_text_chars=20000)`; the last two come from `max_upload_mb` and `max_text_chars`. No `operations`. |
-| Default assignment | `webui:*` | `{engine: room, personas: [luna, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true, diary_scope: webui}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
+| Default assignment | `webui:*` | `{engine: room, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true, diary_scope: webui}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
 | Runtime assignments | `webui:<chat>` | One per chat started with some of the classmates (not all), set with `core.set_assignment` and removed with the chat (below). |
 | Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
 | Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the default chat (`classroom`) becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
 
 It contributes no engines, capabilities, personas, profiles or permissions. The five personas come from
 [`extensions/students`](../../extensions/students), and the `room` engine from [`extensions/room`](../../extensions/room).
+It reads them from the core (contracts 1.9): their display names and pictures from `port.personas()`, and where each
+stands with you from `port.facts()` (the `alias`, `bond` and `mood` any module publishes; the companion does),
+polled every `places_poll_s` seconds while a page is open and sent as a `roster` event when it changes. A persona
+named by a former name of hers (`formerly`) is read as her, and at start her old chats and bubbles are renamed to
+her (`persona_renamed` in the audit log).
 
 Declared settings (editable with `python -m core setup` and `$setup`):
 
@@ -49,7 +54,7 @@ It loads by default. To change anything, copy [`config.example.yml`](config.exam
 | `remote_access` | false | Let clients beyond the local network in, only through a trusted proxy and only with a passphrase set (see [Behind a reverse proxy](#behind-a-reverse-proxy)). |
 | `trusted_proxies` | `[127.0.0.1, ::1]` | Addresses whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed (nginx on this machine). |
 | `personas` | the five classmates | Personas of the default `webui:*` assignment, and who the new-chat picker offers. |
-| `classmates` | `[Luna, Gemini, Claude, DeepSeek, Grok]` | Display names of those personas, in the same order (a missing one is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
+| `classmates` | the personas' own display names | Names of your own for those personas, in the same order (one the core does not know is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
 | `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget; `options` are merged key by key over the web UI's). |
 | `max_upload_mb` | 50 | Largest upload and largest file the core sends here; also sizes the server's request limit. |
 | `map` | true | The mini map: MomoChat and the places other interfaces publish in the core's directory (contracts 1.7), such as the Classroom, read every `places_poll_s` (5) seconds while a page is open. MomoChat publishes itself too (its link and the students), so other interfaces can draw it. A student visiting another place shows there too (a student is in every place at once); one holding an invitation for you has a pulsing ring, its ticket in the corridor. No other place: no map. `false` turns it off. |
@@ -64,7 +69,8 @@ Environment: `WEBUI_PASSPHRASE` (optional). Python package: `aiohttp` (in `requi
 needs it too). The browser loads KaTeX 0.16.11 from jsDelivr, pinned
 with integrity hashes; without internet access math is shown as raw TeX.
 
-Pictures for the classmates go in [`avatars/`](avatars/README.md). The page's icon art is credited in
+Each classmate's picture is her own (the students module's, through `port.personas()`); one dropped in
+[`avatars/`](avatars/README.md) wins over it on this page. The page's icon art is credited in
 [`static/CREDITS.md`](static/CREDITS.md) (CC BY-NC-SA 4.0).
 
 To turn it off, in core.yml:
@@ -94,7 +100,7 @@ chat's members.
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
 (`compact`), a message naming no one gets an answer from whoever's turn it is while the others may chime
 in or stay silent (`chime_in`), and every web chat shares one diary scope (`diary_scope: webui`), so
-what Luna learns about you in the group chat she still knows in your direct messages with her. Each note
+what GPT learns about you in the group chat she still knows in your direct messages with her. Each note
 stays filed in the chat it was written in; the scope only lets the others read it, so changing or removing
 it loses nothing. Change any of these under
 `assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).
@@ -111,7 +117,7 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | [`static/app.js`](static/app.js) | The page: websocket client, rendering, chat list, class list and model menu, composer, palette, uploads. |
 | [`static/markdown.js`](static/markdown.js) | A small Markdown renderer that escapes the text first and adds only its own tags (links only to http/https); math is typeset by KaTeX when loaded; `@Name` becomes a chip. |
 | [`static/style.css`](static/style.css) | Layout and theme (light and dark). |
-| [`avatars/`](avatars/README.md) | Classmates' pictures, served at `/avatars/<key>`. |
+| [`avatars/`](avatars/README.md) | Pictures of your own for the classmates (over the students' own), served at `/avatars/<key>`. |
 | [`static/cafe.html`](static/cafe.html), [`static/cafe.js`](static/cafe.js), [`static/cafe.css`](static/cafe.css) | The cafe: every student walking around a room (drawn, or a picture from `rooms/`); a tap opens her direct chat (`/#dm=<persona>`). The page comes with its data (`{{data}}`, JSON that never ends its script tag). |
 | [`static/places.js`](static/places.js) | The places bar on both pages: every place's `views` from the core's directory, sorted by `order` (the workbench keeps a copy). |
 | [`rooms/`](rooms/README.md) | The cafe's preset room pictures, served at `/rooms/<file>`. |
@@ -123,9 +129,9 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | `GET /` | The chat page (`no-cache`). |
 | `GET /login`, `POST /login` | Sign-in page and form, only meaningful with a passphrase. |
 | `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
-| `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif). |
+| `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif), else the student's own `avatar` picture whose name or display name has that key. |
 | `GET /cafe` | The cafe page, with its data inside (`no-cache`); signed out, it goes to the sign-in page. |
-| `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, avatar, ready}], avatars, rooms, here, places}`. `ready` asks `models_ready` for the profile named after her (the room's are). |
+| `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, alias, bond, mood, avatar, ready}], avatars, rooms, here, places}`. `ready` is the core's (`port.personas()`), else `models_ready` for the profile named after her. |
 | `GET /rooms/{name}` | Only a picture `rooms/` lists (nothing else, and never outside it). |
 | `GET /favicon.ico` | `static/favicon.png`. |
 | `GET /files/{file_id}` | A stored upload or delivered file (below). |
@@ -252,13 +258,14 @@ Server to page (`_broadcast` sends to every open page, so several devices stay i
 
 | `type` | Fields | Meaning |
 | --- | --- | --- |
-| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display}]`), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class), `progress`, `default`, `max_upload_mb` | Sent on connect. |
+| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display, alias, bond, mood}]`; the last three None until a module publishes them), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class), `progress`, `default`, `max_upload_mb` | Sent on connect. |
 | `message` | `item` | A new stored message (yours or the bot's). |
 | `update` | `item` | A stored message changed (an approval card decided). |
 | `conversations` | `items` | The chat list changed. |
 | `deleted` | `conversation`, `items` | A chat was deleted. |
 | `progress` | `conversation`, `run_id`, `text`, `actions`, `at` | A run's typing line. |
 | `progress_clear` | `conversation`, `run_id` | Remove that line. |
+| `roster` | `roster` | Where a student stands with you changed (a new alias, a bond grown, a mood). |
 | `models` | `conversation`, `purpose`, `ok`, `code`, `text`, `result` | Answer to a quiet `$model`. |
 | `ack` | `id`, `ok`, `reason` | Only to the sender: the `SubmitResult` reason (`accepted`, `command`, `duplicate`, `disabled`, ...). |
 | `error` | `text` | Only to the sender: a chat could not be started (unknown classmates, or the core refused its assignment). |

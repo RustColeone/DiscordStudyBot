@@ -20,11 +20,12 @@ from typing import Any, Mapping, Protocol
 
 import jsonschema
 
-from contracts import (SHUTDOWN, Action, Address, Capability, Command, Delivery, Display, Engine, FileRef,
+from contracts import (SHUTDOWN, Action, Address, Capability, Command, Delivery, Display, Engine, Exchange, FileRef,
                        ModelError, ModelRequest, ModelResult, Operation, Option, PartContext, Persona, PromptPart,
-                       Reply, Request, Risk, RunYield, Sender, ToolResult)
+                       Reply, Request, Risk, RunYield, Sender, ToolResult, Watcher)
 from core.audit import Audit
-from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, local_time
+from core.manager.facts import FactsDesk
+from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, WatchContextHandle, local_time
 from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
@@ -130,6 +131,9 @@ class Manager:
         self.personas = dict(personas)
         self._persona_parts = dict(persona_parts or {})  # core.yml's parts for modules' personas, by name
         self.prompt_parts: list[PromptPart] = []  # modules' parts, for every persona or those they name
+        self.watchers: list[tuple[Watcher, str]] = []  # (watcher, its module), in the order modules gave them
+        self._watching: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)  # (watcher, persona)
+        self.facts = FactsDesk(tank)
         self._part_origin: dict[int, str] = {}  # id(part) → the module that contributed it
         self._part_problems: set[tuple] = set()  # (persona, part, place, kind) audited and not yet recovered
         self._config_assignments = dict(assignments)
@@ -209,10 +213,19 @@ class Manager:
 
     def register_persona(self, persona: Persona, extension: str) -> None:
         # Configuration wins over an extension's default persona of the same name; parts core.yml gives that name
-        # (an entry without a prompt) are added to the extension's persona.
-        if persona.name not in self.personas and persona.name in self._persona_parts:
-            persona = with_parts(persona, self._persona_parts[persona.name])
+        # (an entry without a prompt) are added to the extension's persona, as are those it gives a former name of
+        # hers (Persona.formerly) when it gives none under her new one.
+        if persona.name not in self.personas:
+            named = next((name for name in (persona.name, *persona.formerly) if name in self._persona_parts), None)
+            if named is not None:
+                persona = with_parts(persona, self._persona_parts[named])
         self.personas.setdefault(persona.name, persona)
+
+    def register_watcher(self, watcher: Watcher, extension: str) -> None:
+        other = next((module for item, module in self.watchers if item.name == watcher.name), None)
+        if other is not None:
+            raise ValueError(f"Watcher {watcher.name!r} is already registered by {other!r}")
+        self.watchers.append((watcher, extension))
 
     def register_prompt_part(self, part: PromptPart, extension: str) -> None:
         other = next((item for item in self.prompt_parts if item.name == part.name), None)
@@ -390,8 +403,9 @@ class Manager:
                 problems.append(f"assignment {pattern!r}: engine {engine.spec.name!r} needs exactly one persona")
             if engine is not None and engine.spec.personas == "many" and not assignment.personas:
                 problems.append(f"assignment {pattern!r}: engine {engine.spec.name!r} needs personas")
+        formerly = {old for persona in self.personas.values() for old in persona.formerly}
         for name in self._persona_parts:
-            if name not in self.personas:
+            if name not in self.personas and name not in formerly:
                 problems.append(f"persona {name!r} has no `prompt` in core.yml, and no loaded module has a persona "
                                 "of that name to add its parts to")
         for persona in self.personas.values():
@@ -784,7 +798,15 @@ class Manager:
         return [request_from_dict(event.data["request"]) for event in events]
 
     # ---- models -----------------------------------------------------------------------------------
-    async def generate(self, run_id: str, request: ModelRequest, profile: str) -> ModelResult:
+    async def generate(self, run_id: str, request: ModelRequest, profile: str, *, watcher: bool = False) -> ModelResult:
+        if watcher:  # a watcher's call: counted in the run's usage, outside its budget, and no one's answer
+            result = await self.providers.generate(request, profile)
+            self._add_usage(run_id, watcher_calls=1, input_tokens=result.input_tokens,
+                            output_tokens=result.output_tokens)
+            self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
+                              duration_s=result.duration_s, input_tokens=result.input_tokens,
+                              output_tokens=result.output_tokens, watcher=True)
+            return result
         record = self.tank.run(run_id)
         budget = Assignment.from_dict(record.assignment).budget
         if record.usage.get("model_calls", 0) >= budget.model_calls:
@@ -1275,7 +1297,36 @@ class Manager:
             self.tank.record_message(record.address, "out", text, message_id=delivery.message_id, run_id=run_id,
                                      reply_to=trigger.id, sender_name=speaker,
                                      kind="note" if label else "text")
+            if persona and not label and source == "run":
+                self._tell_watchers(Exchange(trigger.address, self.personas[persona], text, trigger, run_id,
+                                             record.engine, time.time()))
         return delivery
+
+    # ---- watchers -----------------------------------------------------------------------------------
+    def _tell_watchers(self, exchange: Exchange) -> None:
+        for watcher, module in self.watchers:
+            if not watcher.personas or exchange.persona.name in watcher.personas:
+                self._spawn(self._run_watcher(watcher, module, exchange))
+
+    async def _run_watcher(self, watcher: Watcher, module: str, exchange: Exchange) -> None:
+        """One persona's exchanges reach a watcher one at a time, in the order she spoke."""
+        async with self._watching[(watcher.name, exchange.persona.name)]:
+            try:
+                await asyncio.wait_for(watcher.run(exchange, WatchContextHandle(self, module, exchange)),
+                                       watcher.timeout_s)
+            except asyncio.TimeoutError:
+                self.audit.record("watcher_failed", watcher=watcher.name, extension=module, run=exchange.run_id,
+                                  persona=exchange.persona.name, error="timeout")
+            except Exception as error:  # a watcher never fails the conversation
+                self.audit.record("watcher_failed", watcher=watcher.name, extension=module, run=exchange.run_id,
+                                  persona=exchange.persona.name, error=f"{type(error).__name__}: {error}"[:300])
+
+    def persona_views(self) -> list[dict[str, Any]]:
+        """InterfacePort.personas: every persona, as pages show her."""
+        return [{"name": persona.name, "display_name": persona.display_name, "aliases": list(persona.aliases),
+                 "formerly": list(persona.formerly),
+                 "pictures": {kind: str(Path(path).expanduser().resolve()) for kind, path in persona.pictures.items()},
+                 "ready": self.providers.profile_ready(persona.profile)} for persona in self.personas.values()]
 
     async def send_file(self, run_id: str, file: FileRef, caption: str = "") -> Delivery:
         record = self.tank.run(run_id)

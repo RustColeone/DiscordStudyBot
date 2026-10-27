@@ -1,7 +1,7 @@
 {
- "version": "1.8",
+ "version": "1.9",
  "constants": {
-  "CONTRACTS_VERSION": "1.8",
+  "CONTRACTS_VERSION": "1.9",
   "DIARY_KINDS": [
    "fact",
    "episode",
@@ -312,7 +312,7 @@
    ]
   },
   "Contributions": {
-   "doc": "What an extension adds. Besides interfaces, engines, capabilities and personas, an extension may suggest defaults so it works when dropped in: model `providers` (name → settings, as in core.yml; configured settings win key by key) and `profiles` (name → ordered candidates, as in core.yml), and `assignments` and `admission` rules for its own interfaces' addresses (`<interface>:*` or `<interface>:<conversation>`). core.yml and runtime edits always win. `permissions` suggests permission defaults in the core.yml `permissions:` form (`{pattern: {use, tiers, rules}}`): `use` and `tiers` only for its own interfaces' addresses, `rules` only for its own capabilities. The module's config.yml `permissions:` overrides these, and core.yml overrides both, setting by setting. `adapters` adds provider kinds (kind → AdapterFactory) for APIs the built-in kinds do not speak; its providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused.",
+   "doc": "What an extension adds. Besides interfaces, engines, capabilities and personas, an extension may suggest defaults so it works when dropped in: model `providers` (name → settings, as in core.yml; configured settings win key by key) and `profiles` (name → ordered candidates, as in core.yml), and `assignments` and `admission` rules for its own interfaces' addresses (`<interface>:*` or `<interface>:<conversation>`). core.yml and runtime edits always win. `permissions` suggests permission defaults in the core.yml `permissions:` form (`{pattern: {use, tiers, rules}}`): `use` and `tiers` only for its own interfaces' addresses, `rules` only for its own capabilities. The module's config.yml `permissions:` overrides these, and core.yml overrides both, setting by setting. `adapters` adds provider kinds (kind → AdapterFactory) for APIs the built-in kinds do not speak; its providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused. `watchers` (added in 1.9) see every persona's delivered messages, whichever engine she spoke in (see Watcher).",
    "fields": [
     {
      "name": "interfaces",
@@ -366,6 +366,11 @@
     },
     {
      "name": "prompt_parts",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "watchers",
      "type": "Sequence",
      "default": "()"
     }
@@ -506,6 +511,39 @@
      "name": "data",
      "type": "Mapping",
      "default": "{}"
+    }
+   ]
+  },
+  "Exchange": {
+   "doc": "What a watcher sees: one message a persona said (`text`), once it was delivered and recorded, and the message she answered (`trigger`, the run's). A run in which she speaks three times gives three exchanges. Progress lines, work notes (a reply with a label) and command output give none.",
+   "fields": [
+    {
+     "name": "address",
+     "type": "Address"
+    },
+    {
+     "name": "persona",
+     "type": "Persona"
+    },
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "trigger",
+     "type": "Request"
+    },
+    {
+     "name": "run_id",
+     "type": "str"
+    },
+    {
+     "name": "engine",
+     "type": "str"
+    },
+    {
+     "name": "at",
+     "type": "float"
     }
    ]
   },
@@ -907,7 +945,7 @@
    ]
   },
   "PartContext": {
-   "doc": "What a computed prompt part may look at: the persona it is written for, and the run's address and trigger.",
+   "doc": "What a computed prompt part may look at: the persona it is written for, the run's address and trigger, and (added in 1.9) the engine placing it, so a part can keep to some engines.",
    "fields": [
     {
      "name": "persona",
@@ -925,11 +963,16 @@
      "name": "owner",
      "type": "bool",
      "default": false
+    },
+    {
+     "name": "engine",
+     "type": "str",
+     "default": ""
     }
    ]
   },
   "Persona": {
-   "doc": "Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart).",
+   "doc": "Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart). Added in 1.9: `aliases`, other names people call her by (\"Luna, …\" still calls on GPT); `formerly`, persona names she had before, so the core moves what it keeps under them to her name and reads core.yml's old name as hers (modules that keep their own data by persona name do the same); `pictures`, kind → image file (`avatar`, square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`.",
    "fields": [
     {
      "name": "name",
@@ -952,6 +995,21 @@
      "name": "parts",
      "type": "list[PromptPart]",
      "default": "()"
+    },
+    {
+     "name": "aliases",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "formerly",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "pictures",
+     "type": "Mapping",
+     "default": "{}"
     }
    ]
   },
@@ -1272,6 +1330,29 @@
      "type": "Mapping"
     }
    ]
+  },
+  "Watcher": {
+   "doc": "A module's watcher: `run(exchange, context)` is awaited after each exchange of the personas it names (`personas`), or of every persona when it names none. It runs beside the conversation, never before a delivery, and within `timeout_s`; a failure or a timeout is only written in the audit log.",
+   "fields": [
+    {
+     "name": "name",
+     "type": "str"
+    },
+    {
+     "name": "run",
+     "type": "Callable"
+    },
+    {
+     "name": "personas",
+     "type": "list[str]",
+     "default": "()"
+    },
+    {
+     "name": "timeout_s",
+     "type": "float",
+     "default": 120.0
+    }
+   ]
   }
  },
  "interfaces": {
@@ -1394,6 +1475,10 @@
     {
      "name": "data_dir",
      "type": "path"
+    },
+    {
+     "name": "facts",
+     "type": "Facts"
     }
    ],
    "methods": [
@@ -1410,6 +1495,89 @@
        "name": "fields",
        "type": "any",
        "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    }
+   ]
+  },
+  "Facts": {
+   "doc": "Small public values a module publishes about a persona (added in 1.9): her mood or level, or, with `person`, where she stands with one person (their bond, the name they call her). Interfaces read them with `InterfacePort.facts` to show them on a page; nothing else does, so a fact is never a module's private state. A module writes only its own keys (lowercase letters, digits and `_`); readers see them as `<module>.<key>`. `person` is `(interface, sender id)`, the person as one interface knows them (`Exchange.person`). A value is JSON, at most 4 KB once encoded; setting None deletes it. Facts last across restarts.",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "delete",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "person",
+       "type": "list[str] | none",
+       "keyword_only": true,
+       "default": null
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "get",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "person",
+       "type": "list[str] | none",
+       "keyword_only": true,
+       "default": null
+      }
+     ],
+     "returns": "any",
+     "doc": ""
+    },
+    {
+     "name": "set",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "key",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "value",
+       "type": "any",
+       "keyword_only": false
+      },
+      {
+       "name": "person",
+       "type": "list[str] | none",
+       "keyword_only": true,
+       "default": null
       }
      ],
      "returns": "none",
@@ -1641,6 +1809,25 @@
      "doc": "What every interface has published: name → `{\"link\", \"status\", \"ready\"}` (added in 1.7)."
     },
     {
+     "name": "facts",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "sender_id",
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
+      }
+     ],
+     "returns": "Mapping",
+     "doc": "What modules publish about a persona (`<module>.<key>` → value, see contracts.Facts), and with `sender_id`, what they publish about her and that person of this interface over it (added in 1.9)."
+    },
+    {
      "name": "log",
      "async": false,
      "parameters": [
@@ -1773,6 +1960,13 @@
      ],
      "returns": "none",
      "doc": "Record activity the core should know about but not act on (for example a reply someone typed on the phone, group chatter not addressed to the bot, an image sent before the question, or a late receipt) in conversation history. `files` are local copies engines may show to models. Idempotent per (address, direction, message_id)."
+    },
+    {
+     "name": "personas",
+     "async": false,
+     "parameters": [],
+     "returns": "Sequence",
+     "doc": "Every persona the core has, in the order modules gave them (added in 1.9): `name`, `display_name`, `aliases`, `formerly`, `pictures` (kind → absolute image path, see Persona) and `ready` (some candidate of her profile can be called). Pages show the students from this rather than keeping their own list."
     },
     {
      "name": "policy",
@@ -2429,6 +2623,69 @@
      "parameters": [],
      "returns": "Sequence",
      "doc": "Capability schemas this session may offer to a model."
+    }
+   ]
+  },
+  "WatchContext": {
+   "doc": "What a watcher may use for one exchange. `models` calls models with the persona's profile unless a request names another; the calls are counted in the run's usage (`watcher_calls`, tokens) but not against its budget, since the run may be over. `history` reads the conversation (what others said around her message); `store` is the module's own, scoped as `Session.store`, with the exchange's person and persona; `facts` publishes for interfaces.",
+   "attributes": [
+    {
+     "name": "models",
+     "type": "Models"
+    },
+    {
+     "name": "history",
+     "type": "History"
+    },
+    {
+     "name": "facts",
+     "type": "Facts"
+    }
+   ],
+   "methods": [
+    {
+     "name": "log",
+     "async": false,
+     "parameters": [
+      {
+       "name": "event",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "fields",
+       "type": "any",
+       "keyword_only": false
+      }
+     ],
+     "returns": "none",
+     "doc": ""
+    },
+    {
+     "name": "store",
+     "async": false,
+     "parameters": [
+      {
+       "name": "conversation",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      },
+      {
+       "name": "persona",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      },
+      {
+       "name": "person",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      }
+     ],
+     "returns": "Store",
+     "doc": ""
     }
    ]
   }

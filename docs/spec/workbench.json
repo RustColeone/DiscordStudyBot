@@ -545,7 +545,7 @@
   },
   {
    "name": "workbench.tasks",
-   "description": "The lab's logbook: what the club did in the lab (tasks with their status, outcome and summary), newest first. query: words to look for; project: one project's tasks.",
+   "description": "The Logbook: what the club did in the Classroom (tasks with their status, outcome and summary), newest first. query: words to look for; project: one project's tasks.",
    "parameters": {
     "query": {
      "type": "string"
@@ -568,7 +568,7 @@
   },
   {
    "name": "workbench.invite",
-   "description": "Take the person to the lab, where the club changes code in one of their projects (fix, add, build, refactor, test). Use it when they want such work done, not for what you can answer here. Ask in your message whether they want to come along (for example: 'I think we need to go to the lab for this, do you want to come with me?'). It only prepares an invitation and returns a link to give them; nothing starts until they follow it. brief: what the lab should do, with every decision, name and example from this conversation; notes: what you know about how they like such work done; project: one of workbench.projects if known; title: a short name; classmate: your name; companions: classmates you would like to bring along (names), when the work wants more hands or another view; the person can change who comes.",
+   "description": "Take the person to the Classroom, where the club changes code in one of their projects (fix, add, build, refactor, test). Use it when they want such work done, not for what you can answer here. Ask in your message whether they want to come along (for example: 'I think we need to go to the Classroom for this, do you want to come with me?'). It only prepares an invitation and returns a link to give them; nothing starts until they follow it. brief: what the club should do there, with every decision, name and example from this conversation; notes: what you know about how they like such work done; project: one of workbench.projects if known; title: a short name; classmate: your name; companions: classmates you would like to bring along (names), when the work wants more hands or another view; the person can change who comes.",
    "parameters": {
     "brief": {
      "type": "string"
@@ -619,10 +619,10 @@
  ],
  "team": {
   "seats": {
-   "luna": {
-    "name": "Luna",
+   "gpt": {
+    "name": "GPT",
     "family": "openai",
-    "voice": "Luna, the white-haired dragon girl and calm, dependable student-council president",
+    "voice": "GPT, the white-haired dragon girl and calm, dependable student-council president",
     "cheap": [
      {
       "provider": "openai",
@@ -632,8 +632,11 @@
     "strong": [
      {
       "provider": "openai",
-      "model": "gpt-6-luna"
+      "model": "gpt-6.1-sol"
      }
+    ],
+    "also": [
+     "luna"
     ]
    },
    "claude": {
@@ -707,7 +710,7 @@
   },
   "roles": {
    "router": [
-    "luna",
+    "gpt",
     "claude",
     "gemini",
     "deepseek",
@@ -717,26 +720,26 @@
     "deepseek",
     "gemini",
     "grok",
-    "luna",
+    "gpt",
     "claude"
    ],
    "judge": [
     "gemini",
-    "luna",
+    "gpt",
     "deepseek",
     "claude",
     "grok"
    ],
    "strong": [
     "claude",
-    "luna",
+    "gpt",
     "gemini",
     "deepseek",
     "grok"
    ],
    "critic": [
     "claude",
-    "luna",
+    "gpt",
     "gemini",
     "deepseek",
     "grok"
@@ -745,12 +748,12 @@
     "deepseek",
     "gemini",
     "grok",
-    "luna",
+    "gpt",
     "claude"
    ],
    "planner": [
     "claude",
-    "luna",
+    "gpt",
     "gemini",
     "deepseek",
     "grok"
@@ -1487,12 +1490,12 @@
    "zh": "我根据{critic}的审查进行修改。"
   },
   "arrived": {
-   "en": "Here we are in the lab. I brought what we talked about in the classroom.",
-   "zh": "到实验室了。教室里聊的内容我都带来了。"
+   "en": "Here we are in the Classroom. I brought what we talked about in MomoChat.",
+   "zh": "到教室了。MomoChat 里聊的内容我都带来了。"
   },
   "arrived_with": {
-   "en": "Here we are in the lab, with {company}. I brought what we talked about in the classroom.",
-   "zh": "到实验室了，{company}也来了。教室里聊的内容我都带来了。"
+   "en": "Here we are in the Classroom, with {company}. I brought what we talked about in MomoChat.",
+   "zh": "到教室了，{company}也来了。MomoChat 里聊的内容我都带来了。"
   },
   "queued": {
    "en": "Got it, I'll add that as soon as the current step is done.",
@@ -1527,8 +1530,8 @@
    "zh": "已提交为分支 {branch} 上的 {commit}，可以随时合并。"
   },
   "not_checked": {
-   "en": "Not yet: {count} item(s) on the checklist are not ticked. Look at each one, tick it (the boxes in the lab, or `$check {task} all` once you have), and approve the new request.",
-   "zh": "还不行：检查清单上还有 {count} 项没有勾选。逐项看过并勾选（实验室里的勾选框，或看完后用 `$check {task} all`），然后批准新的请求。"
+   "en": "Not yet: {count} item(s) on the checklist are not ticked. Look at each one, tick it (the boxes in the Classroom, or `$check {task} all` once you have), and approve the new request.",
+   "zh": "还不行：检查清单上还有 {count} 项没有勾选。逐项看过并勾选（教室里的勾选框，或看完后用 `$check {task} all`），然后批准新的请求。"
   },
   "review_denied": {
    "en": "Not approved, so nothing was applied. Tell me what to change, or discard the task.",

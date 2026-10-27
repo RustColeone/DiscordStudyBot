@@ -101,8 +101,9 @@ def report_text(board, team, task: dict, link: Callable[[str], str] = lambda tas
     if landed:
         outcome = f"landed as {str(landed.get('commit', ''))[:8]} on {landed.get('branch', '')}"
     else:
-        outcome = {"answered": "answered", "review": "ready for your check in the lab", "approved":
-                   "checked, waiting for the final approval in the lab", "failed": "did not pass, nothing was applied",
+        outcome = {"answered": "answered", "review": "ready for your check in the Classroom", "approved":
+                   "checked, waiting for the final approval in the Classroom",
+                   "failed": "did not pass, nothing was applied",
                    "discarded": "discarded", "cancelled": "stopped"}.get(task["status"], task["status"])
     facts = [outcome]
     if change.get("stat") and change.get("stat") != "no changes":
@@ -114,15 +115,15 @@ def report_text(board, team, task: dict, link: Callable[[str], str] = lambda tas
     body = str(data.get("summary") or data.get("answer") or data.get("failure") or "").strip()
     if len(body) > 1500:
         body = body[:1500].rsplit(" ", 1)[0] + " …"
-    lines = [f"🧪 **Back from the lab: {task['title']}**", " · ".join(facts)
+    lines = [f"📝 **Back from the Classroom: {task['title']}**", " · ".join(facts)
              + (f" ({' and '.join(people)})" if people else "")]
-    # Who was really there, so the classroom remembers the visit as it was, not as it was planned.
+    # Who was really there, so MomoChat remembers the visit as it was, not as it was planned.
     worked = [name(seat) for seat in dict.fromkeys(step["seat"] for step in board.steps(task["id"]) if step["seat"])]
     # whom the person took along (picked on arrival, none included), else whom the invitation suggested
     asked = data["crew"] if "crew" in data else (data.get("invited") or {}).get("crew") or []
     missing = [name(seat) for seat in asked if name(seat) and name(seat) not in worked]
     if any(worked):
-        lines.append(f"In the lab: {', '.join(filter(None, worked))}."
+        lines.append(f"In the Classroom: {', '.join(filter(None, worked))}."
                      + (f" Asked along but not there: {', '.join(missing)}." if missing else ""))
     if body:
         lines.append(body)

@@ -18,7 +18,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Mapping
 
-from contracts import CONTRACTS_VERSION, Capability, Contributions, Engine, Extension, Interface, Persona, PromptPart
+from contracts import (CONTRACTS_VERSION, Capability, Contributions, Engine, Extension, Interface, Persona, PromptPart,
+                       Watcher)
 
 
 class ExtensionError(RuntimeError):
@@ -31,6 +32,7 @@ class ExtensionContextImpl:
     config: Mapping[str, Any]
     data_dir: Path
     _log: Callable[..., None]
+    facts: Any = None  # contracts.Facts for this module (contracts 1.9); None when loaded without a core
 
     def log(self, event: str, **fields: Any) -> None:
         self._log("extension", extension=self.name, detail=event, **fields)
@@ -96,13 +98,14 @@ def local_config(path: str | Path) -> dict:
 
 
 async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[str, Any]], data_root: Path,
-                         log: Callable[..., None]) -> LoadedExtension:
+                         log: Callable[..., None], facts_for: Callable[[str], Any] | None = None) -> LoadedExtension:
     extension, module = import_extension(path)
     data_dir = data_root / extension.name
     data_dir.mkdir(parents=True, exist_ok=True)
     from core.defaults import merge
     config = merge(local_config(path), dict(config_for(extension.name) or {}))
-    context = ExtensionContextImpl(extension.name, config, data_dir, log)
+    context = ExtensionContextImpl(extension.name, config, data_dir, log,
+                                   facts_for(extension.name) if facts_for is not None else None)
     try:
         contributions = extension.setup(context)
         if inspect.isawaitable(contributions):
@@ -128,4 +131,9 @@ async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[s
     for item in contributions.prompt_parts:
         if not isinstance(item, PromptPart):
             raise ExtensionError(f"{extension.name}: {item!r} is not a contracts.PromptPart")
+    if not isinstance(contributions.watchers, (list, tuple)):
+        raise ExtensionError(f"{extension.name}: watchers is a list of contracts.Watcher")
+    for item in contributions.watchers:
+        if not isinstance(item, Watcher):
+            raise ExtensionError(f"{extension.name}: {item!r} is not a contracts.Watcher")
     return LoadedExtension(extension, Path(path).resolve(), module, contributions, config)

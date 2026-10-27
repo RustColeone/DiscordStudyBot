@@ -6,6 +6,7 @@ models:
   - {provider: gemini, model: gemini-3.8-flash}
   - {provider: gemini, model: gemini-3.6-flash}
 fallback: 3
+pictures: {avatar: avatar.png}
 prompt:
   - prompt.md
   - ../shared/school.md        # the club and the five members

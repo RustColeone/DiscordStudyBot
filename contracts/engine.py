@@ -44,12 +44,14 @@ PART_PLACES = ("stable", "turn")
 
 @dataclass(frozen=True)
 class PartContext:
-    """What a computed prompt part may look at: the persona it is written for, and the run's address and trigger."""
+    """What a computed prompt part may look at: the persona it is written for, the run's address and trigger, and
+    (added in 1.9) the engine placing it, so a part can keep to some engines."""
 
     persona: "Persona"
     address: Address
     trigger: Request
     owner: bool = False
+    engine: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,13 +88,21 @@ class PromptPart:
 @dataclass(frozen=True)
 class Persona:
     """Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its
-    personality, say), which engines place beside `prompt` (see PromptPart)."""
+    personality, say), which engines place beside `prompt` (see PromptPart).
+
+    Added in 1.9: `aliases`, other names people call her by ("Luna, …" still calls on GPT); `formerly`, persona
+    names she had before, so the core moves what it keeps under them to her name and reads core.yml's old name as
+    hers (modules that keep their own data by persona name do the same); `pictures`, kind → image file (`avatar`,
+    square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`."""
 
     name: str
     display_name: str
     prompt: str
     profile: str = "default"
     parts: tuple[PromptPart, ...] = ()  # added later: new fields go last
+    aliases: tuple[str, ...] = ()
+    formerly: tuple[str, ...] = ()
+    pictures: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if not isinstance(self.parts, (tuple, list)) or not all(isinstance(part, PromptPart) for part in self.parts):
@@ -101,6 +111,19 @@ class Persona:
         if len(set(names)) != len(names):
             raise ValueError(f"persona {self.name!r}: two parts have the same name")
         object.__setattr__(self, "parts", tuple(self.parts))
+        for field_name in ("aliases", "formerly"):
+            value = getattr(self, field_name)
+            value = (value,) if isinstance(value, str) else value
+            if not isinstance(value, (tuple, list)) or not all(isinstance(item, str) and item.strip()
+                                                                 for item in value):
+                raise ValueError(f"persona {self.name!r}: {field_name} is a list of names")
+            object.__setattr__(self, field_name, tuple(item.strip() for item in value))
+        if self.name in self.formerly:
+            raise ValueError(f"persona {self.name!r}: formerly lists her own name")
+        if not isinstance(self.pictures, Mapping) or not all(isinstance(kind, str) and kind and isinstance(path, str)
+                                                             and path for kind, path in self.pictures.items()):
+            raise ValueError(f"persona {self.name!r}: pictures maps a kind (avatar, card, …) to an image file")
+        object.__setattr__(self, "pictures", dict(self.pictures))
 
 
 @dataclass(frozen=True)

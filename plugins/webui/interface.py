@@ -45,7 +45,9 @@ DECISION = re.compile(r"^\$(approve|deny)\s+([0-9a-f]{4,12})(\s+always)?\s*$", r
 # The member list's model menu asks the core with `$model` in the background (see _quiet_command).
 MODEL_PURPOSES = ("overview", "choose")
 QUIET_PREFIX = "web-quiet-"  # the request IDs of the page's own commands
-DISPLAY = {"luna": "Luna", "gemini": "Gemini", "claude": "Claude", "deepseek": "DeepSeek", "grok": "Grok"}
+# What pages show of where a student stands with you: the facts any module publishes under these names
+# (contracts.Facts; the companion's `companion.alias`, say), the first of each found.
+STANDING = ("alias", "bond", "mood")
 QUIET_TIMEOUT_S = 20
 TIDY_AFTER_START_S = 5  # the core's manager starts after its interfaces; commands wait for it
 PERSONA = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
@@ -122,12 +124,16 @@ class WebUI(Interface):
         self.user_id = str(config.get("user_id", "creator"))
         self.user_name = str(config.get("user_name") or getpass.getuser() or "You")
         self.title = str(config.get("title", "Study Room"))
-        # Who may be in a chat (`personas`, in order) and their names on the page (`classmates`, the same order).
-        self.personas = [str(item) for item in config.get("personas") or list(DISPLAY)]
-        shown = [str(item) for item in config.get("classmates") or []]
-        self.classmates = [shown[index] if index < len(shown) else DISPLAY.get(name, name.capitalize())
-                           for index, name in enumerate(self.personas)]
-        self.roster = [{"name": name, "display": display} for name, display in zip(self.personas, self.classmates)]
+        # Who may be in a chat (`personas`, in order). Their names and pictures are the core's (`port.personas`), unless
+        # `classmates` gives names of its own (the same order); until the page starts, a name is the persona's.
+        self.personas = [str(item) for item in config.get("personas") or []]
+        self.shown_names = [str(item) for item in config.get("classmates") or []]
+        self.pictures: dict[str, Path] = {}  # avatar key → a student's own picture (Persona.pictures)
+        self.classmates: list[str] = []
+        self.roster: list[dict] = []
+        self.ready: dict[str, bool] = {}
+        self._standing_shown: list[dict] | None = None  # the roster pages were last sent
+        self._meet({})
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
         self.networks = [ipaddress.ip_network(str(item), strict=False) for item in config.get("networks") or []]
         # A reverse proxy on this machine (nginx) forwards the real client and scheme; only it is believed.
@@ -157,11 +163,62 @@ class WebUI(Interface):
         self.places_poll_s = max(2.0, float(config.get("places_poll_s", 5)))
         self.places: dict | None = None
 
+    # ---- the students, as the core describes them -------------------------------------------------------
+    def _meet(self, views: dict[str, dict]) -> None:
+        """Names, pictures and readiness from the core's personas (contracts 1.9); a persona named by a former name of
+        hers (Persona.formerly) is read as her."""
+        former = {old: view["name"] for view in views.values() for old in view.get("formerly") or ()}
+        self.personas = list(dict.fromkeys(name if name in views else former.get(name, name) for name in self.personas))
+        shown = self.shown_names
+        self.classmates = [shown[index] if index < len(shown) else
+                           views.get(name, {}).get("display_name") or name.capitalize()
+                           for index, name in enumerate(self.personas)]
+        self.roster = [{"name": name, "display": display} for name, display in zip(self.personas, self.classmates)]
+        self.ready = {name: bool(view.get("ready", True)) for name, view in views.items()}
+        self.pictures = {}
+        for name in self.personas:
+            avatar = (views.get(name, {}).get("pictures") or {}).get("avatar")
+            if avatar and Path(avatar).suffix.lower() in AVATAR_TYPES and Path(avatar).is_file():
+                for key in (avatar_key(name), avatar_key(views[name].get("display_name", ""))):
+                    if key:
+                        self.pictures.setdefault(key, Path(avatar))
+
+    def standing(self) -> list[dict]:
+        """The roster with where each student stands with you (STANDING facts; None when nothing is published)."""
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        found = []
+        for item in self.roster:
+            values = facts(item["name"], self.user_id) if callable(facts) else {}
+            found.append({**item, **{kind: next((value for key, value in values.items()
+                                                 if key.rsplit(".", 1)[-1] == kind), None) for kind in STANDING}})
+        return found
+
+    async def _watch_standing(self) -> None:
+        """While a page is open, tell it when where a student stands with you changes (a new alias, a bond grown)."""
+        while not self._stopping:
+            if self._sockets:
+                try:
+                    roster = self.standing()
+                except Exception as error:  # a nicety: it never stops the chat
+                    self.port.log("standing_failed", error=type(error).__name__)
+                    roster = self._standing_shown
+                if roster != self._standing_shown:
+                    self._standing_shown = roster
+                    await self._broadcast({"type": "roster", "roster": roster})
+            await asyncio.sleep(self.places_poll_s)
+
     # ---- lifecycle -------------------------------------------------------------------------------
     async def start(self, port) -> None:
         self.port = port
         self.store = Store(self.data_dir / "webui.db")
         self.store.ensure(DEFAULT_CONVERSATION, DEFAULT_TITLE)
+        views = {view["name"]: view for view in port.personas()} if callable(getattr(port, "personas", None)) else {}
+        self._meet(views)
+        for view in views.values():  # a student renamed: her old bubbles and chats are hers
+            if view.get("formerly"):
+                moved = self.store.rename_persona(view["formerly"], view["name"], view["display_name"])
+                if moved:
+                    port.log("persona_renamed", persona=view["name"], moved=moved)
         # Whoever opens the page is the creator; approvals they start come back to the page. With no other
         # interface offering one, the classroom also becomes the control route.
         port.set_owners([self.user_id], control=Address(self.name, DEFAULT_CONVERSATION), fallback=True)
@@ -192,6 +249,8 @@ class WebUI(Interface):
               + (" (passphrase required)." if self.passphrase else "."), flush=True)
         port.log("listening", address=self.address_shown, passphrase=bool(self.passphrase))
         self._spawn(self._tidy(delay=TIDY_AFTER_START_S))
+        if views:
+            self._spawn(self._watch_standing())
         if self.map and callable(getattr(port, "publish", None)):  # a core before 1.7 has no directory: no map
             port.publish(link=self.address_shown, status=self.place())
             self._spawn(self._watch_places())
@@ -407,19 +466,21 @@ class WebUI(Interface):
         return web.FileResponse(path, headers={"Content-Type": "image/png", "Cache-Control": "max-age=86400"})
 
     def avatars(self) -> list[str]:
+        """Who has a picture: those dropped in `avatars/` (which win), and the students' own (Persona.pictures)."""
         folder = self.folder / "avatars"
-        if not folder.is_dir():
-            return []
-        return sorted({path.stem.lower() for path in folder.iterdir()
-                       if path.suffix.lower() in AVATAR_TYPES and AVATAR_KEY.fullmatch(path.stem.lower())})
+        own = {path.stem.lower() for path in folder.iterdir() if path.suffix.lower() in AVATAR_TYPES
+               and AVATAR_KEY.fullmatch(path.stem.lower())} if folder.is_dir() else set()
+        return sorted(own | {key for key in self.pictures if AVATAR_KEY.fullmatch(key)})
 
     async def _avatar(self, request: web.Request) -> web.StreamResponse:
         key = request.match_info["key"].lower()
         if AVATAR_KEY.fullmatch(key):
-            for path in (self.folder / "avatars").glob("*"):
-                if path.stem.lower() == key and path.suffix.lower() in AVATAR_TYPES:
-                    return web.FileResponse(path, headers={"Content-Type": AVATAR_TYPES[path.suffix.lower()],
-                                                           "Cache-Control": "max-age=300"})
+            found = [path for path in (self.folder / "avatars").glob("*")
+                     if path.stem.lower() == key and path.suffix.lower() in AVATAR_TYPES]
+            path = found[0] if found else self.pictures.get(key)
+            if path is not None and path.is_file():
+                return web.FileResponse(path, headers={"Content-Type": AVATAR_TYPES[path.suffix.lower()],
+                                                       "Cache-Control": "max-age=300"})
         raise web.HTTPNotFound()
 
     # ---- the cafe: the students walking around a preset room; a tap opens her chat ------------------------
@@ -451,7 +512,8 @@ class WebUI(Interface):
         is named after her, as the room's are), the rooms, and the places for the places bar."""
         ready = getattr(self.port, "models_ready", None) if self.port is not None else None
         students = [{**item, "avatar": avatar_key(item["name"]),
-                     "ready": bool(ready(item["name"])) if callable(ready) else True} for item in self.roster]
+                     "ready": self.ready[item["name"]] if item["name"] in self.ready else
+                     bool(ready(item["name"])) if callable(ready) else True} for item in self.standing()]
         return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
                 "here": self.here(), "places": self._places()}
 
@@ -529,8 +591,10 @@ class WebUI(Interface):
         commands = [{"name": command.name, "description": command.description, "usage": command.usage(),
                      "examples": [example for example in command.examples if example]}
                     for command in self.port.commands()]
+        self._standing_shown = self.standing()
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
-                "classmates": self.classmates, "roster": self.roster, "avatars": self.avatars(), "commands": commands,
+                "classmates": self.classmates, "roster": self._standing_shown, "avatars": self.avatars(),
+                "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
                 "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb, "here": self.here(),
                 "places": self._places() if self.map and self.port is not None and

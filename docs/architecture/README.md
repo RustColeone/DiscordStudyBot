@@ -11,7 +11,7 @@ a diagram keeps your zoom and place; going to another diagram keeps your zoom. E
   tracks under `contracts/`, `core/`, `extensions/`, `plugins/`, `tools/` and `tests/`. It records each file's
   docstring, imports, classes, functions, which call which inside the file, and the source. A module's data files
   (its `.yml` and `.md` files other than READMEs: settings, a student's prompt) are listed too, with their text and
-  the files they name by a relative path, so `luna/student.yml` points at her prompt files in order. Which slot each
+  the files they name by a relative path, so `gpt/student.yml` points at her prompt files in order. Which slot each
   module fills (interfaces, engines, capabilities, personas) is read from its `extension.py`. Only the core's boxes on
   the top map are named in the tool (`CORE_PARTS`, after [docs/core/ARCHITECTURE.md](../core/ARCHITECTURE.md)).
 - **After every change, run `python tools/architecture.py` and commit `data.js` with the change.**

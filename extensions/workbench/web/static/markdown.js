@@ -3,7 +3,7 @@
 /* A small Markdown renderer that is safe by construction: the text is HTML-escaped first and only the
    renderer's own tags are added (links only to http/https). Math ($…$, $$…$$, \(…\), \[…\]) is cut out
    before anything else and typeset by KaTeX when it has loaded, else shown as raw TeX. Mentions of the given
-   names (@Luna) become chips. */
+   names (@GPT) become chips. */
 (function () {
   const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   const escape = (text) => String(text).replace(/[&<>"']/g, (c) => ESCAPES[c]);

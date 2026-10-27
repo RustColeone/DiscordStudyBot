@@ -19,10 +19,10 @@ from contracts import Persona
 FAMILIES = {"deepseek": "deepseek", "openai": "openai", "gemini": "google", "claude": "anthropic", "grok": "xai"}
 
 DEFAULT_TEAM = {
-    "luna": {"name": "Luna", "family": "openai",
-             "voice": "Luna, the white-haired dragon girl and calm, dependable student-council president",
-             "cheap": [{"provider": "openai", "model": "gpt-6-luna"}],
-             "strong": [{"provider": "openai", "model": "gpt-6-luna"}]},
+    "gpt": {"name": "GPT", "family": "openai",
+            "voice": "GPT, the white-haired dragon girl and calm, dependable student-council president",
+            "cheap": [{"provider": "openai", "model": "gpt-6-luna"}],  # Luna and Sol, her two models
+            "strong": [{"provider": "openai", "model": "gpt-6.1-sol"}], "also": ["luna"]},
     "claude": {"name": "Claude", "family": "anthropic",
                "voice": "Claude, the orange-haired young lady and sharp-eyed, elegant disciplinary-committee member",
                "cheap": [{"provider": "claude", "model": "claude-haiku-5-5"}],
@@ -43,13 +43,13 @@ DEFAULT_TEAM = {
 # Who may take each role, most preferred first. A drafter is cheap; a judge is a cheap second opinion from another
 # family; `strong` takes over a draft that did not pass; a critic is a strong reviewer from another family.
 DEFAULT_ROLES = {
-    "router": ["luna", "claude", "gemini", "deepseek", "grok"],
-    "drafter": ["deepseek", "gemini", "grok", "luna", "claude"],
-    "judge": ["gemini", "luna", "deepseek", "claude", "grok"],
-    "strong": ["claude", "luna", "gemini", "deepseek", "grok"],
-    "critic": ["claude", "luna", "gemini", "deepseek", "grok"],
-    "tester": ["deepseek", "gemini", "grok", "luna", "claude"],  # cheapest first: testing costs the most tokens
-    "planner": ["claude", "luna", "gemini", "deepseek", "grok"],  # the plan workflow: strong, so a cheap seat can follow
+    "router": ["gpt", "claude", "gemini", "deepseek", "grok"],
+    "drafter": ["deepseek", "gemini", "grok", "gpt", "claude"],
+    "judge": ["gemini", "gpt", "deepseek", "claude", "grok"],
+    "strong": ["claude", "gpt", "gemini", "deepseek", "grok"],
+    "critic": ["claude", "gpt", "gemini", "deepseek", "grok"],
+    "tester": ["deepseek", "gemini", "grok", "gpt", "claude"],  # cheapest first: testing costs the most tokens
+    "planner": ["claude", "gpt", "gemini", "deepseek", "grok"],  # the plan workflow: strong, so a cheap seat can follow
 }
 TIERS = {"router": "cheap", "drafter": "cheap", "judge": "cheap", "strong": "strong", "critic": "strong",
          "planner": "strong"}

@@ -8,7 +8,7 @@ compact_profile: default        # the model profile that writes the summary
 # A conversation's assignment can set any of these in its `options`, and also `diary_scope` (a name: its
 # characters' notes about a person are shared with every conversation using the same name).
 max_tokens: 1500
-aliases: {claude: [Haiku]}      # other names people call a persona by
+aliases: {}                     # more names that call on a persona, beyond her own aliases
 
 # The characters and their models are the students module's (extensions/students): its config.yml takes the
 # `providers:` and `profiles:` this file used to hold.

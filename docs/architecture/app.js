@@ -11,7 +11,8 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot", personas: "Persona slot" };
+  const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot", personas: "Persona slot",
+                 watchers: "Watcher slot" };
   const files = A.files;
 
   // ---- the index: every symbol by file, and who calls it (inside its file) -----------------------------
@@ -74,6 +75,7 @@
     slots.engines = chart.group(SLOT.engines, () => inSlot("engines").forEach(module), { kind: "engines", pack: true });
     slots.capabilities = chart.group(SLOT.capabilities, () => inSlot("capabilities").forEach(module), { kind: "capabilities", pack: true });
     slots.personas = chart.group(SLOT.personas, () => inSlot("personas").forEach(module), { kind: "personas", pack: true });
+    slots.watchers = chart.group(SLOT.watchers, () => inSlot("watchers").forEach(module), { kind: "watchers", pack: true });
     chart.node("How a mod goes in", { kind: "guide", sub: "add a module of your own", target: link(GUIDE) });
     chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
                               tip: firstLine(files["contracts/__init__.py"]?.doc) });
@@ -81,13 +83,15 @@
       chart.node(`${root}/`, { kind: "folder", sub: plural(filesUnder(root).length, "file"), target: link(root) });
     }
     chart.edge(supervisor, core, { dashed: true, label: "runs · watches" });
-    chart.edge(slots.interfaces, parts.GW, { arrow: "both", label: "Request / Reply" });
+    chart.edge(slots.interfaces, parts.GW, { arrow: "both", label: "Request / Reply · personas · facts" });
     chart.edge(parts.GW, parts.BOT, { arrow: "none" });
     chart.edge(parts.GW, parts.MG, { arrow: "both" });
     chart.edge(parts.MG, slots.engines, { arrow: "both", label: "Session" });
     chart.edge(parts.MG, slots.capabilities, { arrow: "both", label: "ToolContext" });
     chart.edge(slots.personas, parts.MG, { label: "Persona" });
     chart.edge(slots.personas, parts.PR, { dashed: true, label: "profiles · providers" });
+    chart.edge(parts.MG, slots.watchers, { label: "Exchange" });
+    chart.edge(slots.watchers, parts.MG, { dashed: true, label: "facts" });
     chart.edge(parts.MG, parts.PR, { arrow: "none" });
     chart.edge(parts.MG, parts.TANK, { arrow: "none" });
     return chart;
@@ -231,7 +235,7 @@
     }, { kind: "plain" });
     const loader = chart.node("Loader", { kind: "startup", sub: "a private package; the contracts version checked",
                                           target: symbolLink("core/loader.py", "import_extension") });
-    const setup = chart.node("setup(context)", { kind: "function", sub: "name · config · data_dir · log → Contributions",
+    const setup = chart.node("setup(context)", { kind: "function", sub: "name · config · data_dir · facts · log → Contributions",
                                                  target: symbolLink("core/loader.py", "load_extension") });
     const slots = chart.group("Contributions, wired in by the core", () => {
       chart.node("interfaces", { kind: "gateway", sub: "Interface slot: start(port), deliver(reply)", target: fileLink("contracts/interface.py") });
@@ -239,6 +243,8 @@
       chart.node("capabilities", { kind: "providers", sub: "Capability slot: one action, a ToolResult", target: fileLink("contracts/capability.py") });
       chart.node("personas · profiles · providers · prompt parts", { kind: "contracts", sub: "who answers, on which models",
                                                                      target: symbolLink("contracts/extension.py", "Contributions") });
+      chart.node("watchers", { kind: "startup", sub: "Watcher slot: learns from what personas say; publishes facts",
+                               target: fileLink("contracts/watchers.py") });
       chart.node("assignments · admission · permissions", { kind: "store", sub: "defaults for its own addresses only" });
     }, { kind: "core", pack: true });
     const check = chart.node("python -m core --check", { kind: "supervisor", sub: "loads every module, lists what it adds",
@@ -264,11 +270,12 @@
         "description=\"…\", settings=(…)). contracts is the major version of the contracts it targets; a mismatch " +
         "refuses to load. The folder's other files are imported with relative imports (from .engine import MyEngine)."],
       ["3. Return what it adds from setup(context)", "setup gets context.name, context.config (its config.yml, with " +
-        "core.yml's extension_config over it), context.data_dir (a private folder) and context.log(event, **fields). " +
-        "It returns Contributions(...): interfaces (only they know a platform), engines (a turn loop through Session " +
-        "handles), capabilities (one action each, returning a ToolResult), personas, model profiles and providers, " +
-        "prompt parts, and assignments, admission and permissions for its own addresses. It runs once, at startup: " +
-        "network loops start in Interface.start, not in setup."],
+        "core.yml's extension_config over it), context.data_dir (a private folder), context.facts (what it publishes " +
+        "for pages) and context.log(event, **fields). It returns Contributions(...): interfaces (only they know a " +
+        "platform), engines (a turn loop through Session handles), capabilities (one action each, returning a " +
+        "ToolResult), personas, model profiles and providers, prompt parts, watchers, and assignments, admission and " +
+        "permissions for its own addresses. It runs once, at startup: network loops start in Interface.start, not in " +
+        "setup."],
       ["4. Settings", "Ship a documented config.example.yml; the machine's own copy is config.yml beside it " +
         "(git-ignored). Declared Settings can be set with python -m core setup, or $setup in a chat. A secret goes " +
         "to .env only (read it with os.getenv) and is never typed in a chat; only secrets belong in .env."],
@@ -281,8 +288,19 @@
       ["Turning one off", "In core.yml: modules: {exclude: [whale_chan]} (a folder name or a path ending). An " +
         "excluded module is never imported."],
       ["A new student needs no code", "Add a folder to extensions/students/ with a student.yml (name, display_name, " +
-        "models, the prompt files in order) and her prompt.md. The students module reads every such folder at startup; " +
-        "her prompt is the files' lines joined with nothing between them. See extensions/students/README.md."],
+        "models, the prompt files in order; aliases, pictures and formerly if she has them) and her prompt.md. The " +
+        "students module reads every such folder at startup; her prompt is the files' lines joined with nothing " +
+        "between them. Every page shows her picture (pictures: {avatar: avatar.png}) through the core, and a renamed " +
+        "student keeps what was hers (formerly: [old name]). See extensions/students/README.md."],
+      ["Learning from what is said: watchers and facts", "A module that remembers (the companion) adds " +
+        "Contributions(watchers=[Watcher(name, run)]): run(exchange, context) is awaited after each message a persona " +
+        "says, whichever engine she spoke in, one exchange at a time per persona, beside the conversation (a failure " +
+        "is only logged). exchange holds the persona, what she said and the message she answered; context gives " +
+        "models (counted in the run's usage, not its budget), the conversation's history, the module's stores and " +
+        "facts. A fact is a small public value about a persona, or a persona and one person: " +
+        "context.facts.set(persona, \"bond\", {...}, person=exchange.person). Pages read them with port.facts(persona, " +
+        "sender_id) and list the students with port.personas() (names, aliases, pictures), so MomoChat shows your " +
+        "name for her, her bond and mood without knowing which module keeps them."],
     ];
     for (const [title, text] of steps) pane.push(make("h3", "", title), make("div", "doc", text));
     pane.push(make("h3", "", "Examples to copy, smallest first"));

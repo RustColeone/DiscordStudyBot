@@ -1,10 +1,12 @@
 # Claude: one student. extension.py reads every folder with a student.yml (see ../README.md).
 name: claude
 display_name: Claude
+aliases: [Haiku]            # other names that call on her ("Haiku, ...", after her model)
 order: 3
 models:
   - {provider: claude, model: claude-haiku-5-5}
 fallback: 4
+pictures: {avatar: avatar.png}
 prompt:
   - prompt.md
   - ../shared/school.md        # the club and the five members

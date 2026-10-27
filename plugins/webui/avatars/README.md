@@ -1,10 +1,11 @@
 # Classmates' pictures
 
-Drop one picture per classmate here, named after them (lowercase, letters and digits only):
+Each student's picture is her own, in the students module (`extensions/students/<name>/avatar.png`), and every page
+shows it. Drop a picture here to use another one on this page, named after her (lowercase, letters and digits only):
 
 | File | Shown for |
 | --- | --- |
-| `luna.png` | Luna |
+| `gpt.png` | GPT |
 | `gemini.png` | Gemini |
 | `claude.png` | Claude |
 | `deepseek.png` | DeepSeek |

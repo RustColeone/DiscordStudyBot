@@ -70,10 +70,18 @@ class ShippedStudentsTests(unittest.TestCase):
         extension, module = load("students")
         contributions = module.setup(Context())
         self.assertEqual([persona.name for persona in contributions.personas],
-                         ["luna", "gemini", "claude", "deepseek", "grok"])
+                         ["gpt", "gemini", "claude", "deepseek", "grok"])
         self.assertEqual([persona.profile for persona in contributions.personas],
-                         ["luna", "gemini", "claude", "deepseek", "grok"])
-        shared = module.compose(ROOT / "extensions" / "students" / "luna",
+                         ["gpt", "gemini", "claude", "deepseek", "grok"])
+        gpt, claude = contributions.personas[0], contributions.personas[2]
+        self.assertEqual((gpt.display_name, gpt.aliases, gpt.formerly), ("GPT", ("Luna",), ("luna",)))
+        self.assertEqual(claude.aliases, ("Haiku",))
+        for persona in contributions.personas:  # each has her picture in her own folder
+            self.assertEqual(Path(persona.pictures["avatar"]), ROOT / "extensions" / "students" / persona.name
+                             / "avatar.png")
+        self.assertTrue(gpt.prompt.startswith("你是 GPT，"))
+        self.assertNotIn("Luna", "".join(persona.prompt for persona in contributions.personas))
+        shared = module.compose(ROOT / "extensions" / "students" / "gpt",
                                 ["../shared/school.md", "../shared/public.md", "../shared/math.md",
                                  "../shared/conversation.md"])
         for persona in contributions.personas:
@@ -88,10 +96,10 @@ class ShippedStudentsTests(unittest.TestCase):
         _, module = load("students")
         mine = [{"provider": "fake", "model": "mine"}]
         contributions = module.setup(Context({"providers": {"grok": {"models_exclude": ["imagine", "old"]}},
-                                              "profiles": {"luna": mine}}))
+                                              "profiles": {"gpt": mine}}))
         self.assertEqual(contributions.providers["grok"]["models_exclude"], ["imagine", "old"])
         self.assertEqual(contributions.providers["grok"]["base_url"], "https://api.x.ai/v1")
-        self.assertEqual(contributions.profiles["luna"], mine)
+        self.assertEqual(contributions.profiles["gpt"], mine)
         self.assertEqual(contributions.profiles["grok"][0], {"provider": "grok", "model": "grok-4-fast"})
 
     def test_the_room_runs_them_and_notes_models_left_in_its_own_config(self):

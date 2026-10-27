@@ -13,7 +13,7 @@ def setup(context) -> Contributions:
     engine = RoomEngine(max_steps=number(config.get("max_steps"), 24, 4, 50),
                         history_limit=number(config.get("history_limit"), 30, 1, 150),
                         max_tokens=number(config.get("max_tokens"), 1500, 100, 32000),
-                        aliases=config.get("aliases") or {"claude": ["Haiku"]},
+                        aliases=config.get("aliases") or {},
                         chime_in=flag(config.get("chime_in"), False), compact=flag(config.get("compact"), True),
                         compact_every=number(config.get("compact_every"), 20, 1, 1000),
                         compact_profile=str(config.get("compact_profile") or "default"))

@@ -115,6 +115,15 @@ class InterfacePort(Protocol):
         conversations, else None (added in 1.7). An interface that shows approval cards asks this, so a card decided
         elsewhere (typed, in another interface) or expired with its run stops offering its buttons."""
 
+    def personas(self) -> Sequence[Mapping[str, Any]]:
+        """Every persona the core has, in the order modules gave them (added in 1.9): `name`, `display_name`,
+        `aliases`, `formerly`, `pictures` (kind → absolute image path, see Persona) and `ready` (some candidate of
+        her profile can be called). Pages show the students from this rather than keeping their own list."""
+
+    def facts(self, persona: str, sender_id: str | None = None) -> Mapping[str, Any]:
+        """What modules publish about a persona (`<module>.<key>` → value, see contracts.Facts), and with
+        `sender_id`, what they publish about her and that person of this interface over it (added in 1.9)."""
+
     def log(self, event: str, **fields: Any) -> None: ...
 
 

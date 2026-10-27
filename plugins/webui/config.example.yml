@@ -19,8 +19,8 @@ port: 4156                      # open http://<this computer's address>:4156
 
 # Who answers: by default the shared room's five classmates (the room engine). The new-chat picker offers
 # these; a chat with some of them (one: a direct message) gets its own assignment, removed with the chat.
-# personas: [luna, gemini, claude, deepseek, grok]
-# classmates: [Luna, Gemini, Claude, DeepSeek, Grok]   # their display names, in the same order
+# personas: [gpt, gemini, claude, deepseek, grok]
+# classmates: [GPT, Gemini, Claude, DeepSeek, Grok]    # names of your own for them (default: the students')
 # assignment:
 #   budget: {model_calls: 40, tool_calls: 24, seconds: 900}
 #   options:                    # the room's options here (these are the web UI's defaults)

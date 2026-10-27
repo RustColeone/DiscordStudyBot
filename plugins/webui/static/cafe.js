@@ -10,7 +10,7 @@
     return node;
   };
   // Each student's colour (her hair, as on MomoChat's page); anyone else gets one from her name.
-  const COLOURS = { luna: "#7d8898", gemini: "#7a63de", claude: "#c4694a", deepseek: "#3570d2", grok: "#a8801c" };
+  const COLOURS = { gpt: "#7d8898", gemini: "#7a63de", claude: "#c4694a", deepseek: "#3570d2", grok: "#a8801c" };
   const keyOf = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
   const colourOf = (name) => {
     const key = keyOf(name);

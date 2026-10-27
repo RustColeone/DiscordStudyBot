@@ -63,12 +63,12 @@
 #   judge: the quick check in a cascade                  strong: takes over a draft that did not pass
 #   critic: the review in a critique (no tools)
 # roles:
-#   router: [luna, claude, gemini, deepseek, grok]
-#   drafter: [deepseek, gemini, grok, luna, claude]
-#   judge: [gemini, luna, deepseek, claude, grok]
-#   strong: [claude, luna, gemini, deepseek, grok]
-#   critic: [claude, luna, gemini, deepseek, grok]
-#   tester: [deepseek, gemini, grok, luna, claude]   # cheapest first; another company than the author goes first
+#   router: [gpt, claude, gemini, deepseek, grok]
+#   drafter: [deepseek, gemini, grok, gpt, claude]
+#   judge: [gemini, gpt, deepseek, claude, grok]
+#   strong: [claude, gpt, gemini, deepseek, grok]
+#   critic: [claude, gpt, gemini, deepseek, grok]
+#   tester: [deepseek, gemini, grok, gpt, claude]   # cheapest first; another company than the author goes first
 #
 # families: {openrouter: mixed}  # provider → family, for providers the defaults do not know
 # providers:                     # extra or changed providers (used on its own; inside the bot core.yml's win)

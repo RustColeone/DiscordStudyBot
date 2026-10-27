@@ -10,7 +10,7 @@
   // accent: rings, the bubble's strip and glows; ink: names and text; border/bubble (optional): override the
   // strip colour and the bubble's fill.
   const PEOPLE = {
-    luna: { accent: "#ffffff", ink: "#7d8898" },
+    gpt: { accent: "#ffffff", ink: "#7d8898" },
     gemini: { accent: "#9a86f2", ink: "#7a63de" },
     claude: { accent: "#e5896a", ink: "#c4694a" },
     deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
@@ -84,6 +84,19 @@
   const chatOf = (id) => state.conversations.find((chat) => chat.id === id);
   const membersOf = (chat) => (chat?.personas ? chat.personas.map(displayOf) : state.classmates);
   const isDirect = (chat) => chat?.personas?.length === 1;
+  // Where a student stands with you (the companion's facts, when it runs): your name for her, her bond and mood.
+  const standingOf = (display) => state.roster.find((item) => item.display === display) || {};
+  const FACES = { great: "😄", good: "🙂", ok: "😐", worry: "😟", sad: "😢" };
+  function bondLine(display) {
+    const { bond, mood } = standingOf(display);
+    const parts = [], said = [];
+    if (bond) { parts.push(`♥ ${bond.closeness}`); said.push(`${bond.role}, closeness ${bond.closeness}/100`); }
+    if (mood) { parts.push(`${FACES[mood.face] || ""} ${mood.value}`.trim()); said.push(`mood ${mood.value}/100 (${mood.face})`); }
+    if (!parts.length) return null;
+    const line = make("div", "member-bond", parts.join("  "));
+    line.title = said.join("; ");
+    return line;
+  }
 
   // ---- panels: chats on the left, classmates on the right ------------------------------------------
   // Three widths: wide shows both panels, medium the chats only, narrow neither (they slide over the chat
@@ -196,8 +209,12 @@
       const face = make("div", "member-face");
       face.append(avatar(name), make("span", "presence"));
       const text = make("div", "member-text");
-      text.append(make("div", "member-name", name),
-        make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : where));
+      const { alias } = standingOf(name);
+      const shown = make("div", "member-name", alias || name);
+      if (alias) shown.append(make("span", "member-real", ` · ${name}`));  // what you call her, then her name
+      text.append(shown, make("div", "member-status", typing.has(name) ? "typing…" : spoke ? "speaking" : where));
+      const bond = bondLine(name);
+      if (bond) text.append(bond);
       member.append(face, text);
       member.onclick = () => { mention(name); if (level() === "narrow") setPanel("members", false); };
       const row = make("div", "member-row");
@@ -325,7 +342,12 @@
       name.type = "button";
       name.title = chat.personas ? membersOf(chat).join(", ") : "The whole class";
       name.onclick = () => { open(chat.id); if (level() === "narrow") setPanel("sidebar", false); };
-      if (isDirect(chat)) name.prepend(avatar(membersOf(chat)[0]));
+      if (isDirect(chat)) {
+        const her = membersOf(chat)[0];
+        name.prepend(avatar(her));
+        const { bond } = standingOf(her);
+        if (bond) name.append(make("span", "chat-bond", `♥${bond.closeness}`));
+      }
       item.append(name);
       if (chat.pinned) item.append(make("span", "chat-pin", "📌"));
       if (state.unread.has(chat.id)) item.append(make("span", "dot"));
@@ -755,6 +777,10 @@
       renderMap();
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       if (moved) renderMembers();  // "also in the Classroom" in the member list too
+    } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed
+      state.roster = event.roster;
+      renderMembers();
+      renderChats();
     } else if (event.type === "models") {
       receiveModels(event);
     } else if (event.type === "message") {

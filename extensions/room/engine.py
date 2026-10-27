@@ -259,7 +259,9 @@ class RoomEngine(Engine):
 
     # ---- participants and input ------------------------------------------------------------------
     def _names(self, persona) -> list[re.Pattern]:
-        names = {persona.name, persona.display_name, *self.aliases.get(persona.name, [])}
+        # Her names, the other names she is called by (Persona.aliases: "Luna" for GPT) and this room's own.
+        names = {persona.name, persona.display_name, *getattr(persona, "aliases", ()),
+                 *self.aliases.get(persona.name, [])}
         return [re.compile(rf"(?<![A-Za-z]){re.escape(name)}(?![A-Za-z])", re.I) for name in names if name]
 
     def participants(self, session: Session, text: str) -> tuple[list[str], list[str]]:

@@ -37,6 +37,7 @@ from ..workspace.tools import ToolError, inside
 
 STATIC = re.compile(r"^[a-z0-9_-]+\.(js|css|png|svg)$")
 AVATAR = re.compile(r"^[a-z0-9_-]{1,40}$")
+PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 TASK_ID = re.compile(r"^t-[a-z0-9]{4,40}$")
 LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
 OUTBOX_LIMIT = 2000  # messages waiting for one page before it is taken as gone
@@ -230,15 +231,31 @@ class WorkbenchUI(Interface):
                 return web.FileResponse(path)
         raise web.HTTPNotFound()
 
+    def _pictures(self) -> dict[str, Path]:
+        """The students' own pictures (Persona.pictures, from the core's personas: contracts 1.9), by name key."""
+        personas = getattr(self.port, "personas", None) if self.port is not None else None
+        found: dict[str, Path] = {}
+        for view in personas() if callable(personas) else ():
+            avatar = (view.get("pictures") or {}).get("avatar")
+            if avatar and Path(avatar).suffix.lower() in PICTURES and Path(avatar).is_file():
+                for name in (view.get("name"), view.get("display_name")):
+                    key = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+                    if key:
+                        found.setdefault(key, Path(avatar))
+        return found
+
     async def _avatar(self, request):
         key = request.match_info["key"]
         if not AVATAR.match(key):
             raise web.HTTPNotFound()
-        for directory in self.avatar_dirs:
-            for suffix in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        for directory in self.avatar_dirs:  # pictures dropped here win over the students' own
+            for suffix in PICTURES:
                 path = directory / f"{key}{suffix}"
                 if path.is_file():
                     return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
+        path = self._pictures().get(key)
+        if path is not None:
+            return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
         raise web.HTTPNotFound()
 
     async def _file(self, request):
@@ -609,7 +626,7 @@ class WorkbenchUI(Interface):
     def _state(self) -> dict:
         team = self._team()
         avatars = sorted({path.stem for directory in self.avatar_dirs for path in directory.iterdir()
-                          if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif")})
+                          if path.suffix.lower() in PICTURES} | set(self._pictures()))
         return {"title": str(self.config.get("title") or "Club Room"), "user": {"name": self.user_name},
                 "team": team, "roles": self.team.roles, "avatars": avatars, "projects": self._projects(),
                 "tasks": [self._task_view(task) for task in self.board.tasks()],

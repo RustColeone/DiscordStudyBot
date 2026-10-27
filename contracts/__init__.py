@@ -10,18 +10,24 @@ from contracts.interface import PLACE_STATUS, Interface, InterfacePort, Operatio
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
 from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter, ModelError, ModelRequest,
                               ModelResult, Models, NotConfigured, ToolCall, ToolSpec)
-from contracts.stores import Store
+from contracts.stores import Facts, Store
+from contracts.watchers import Exchange, WatchContext, Watcher
 
 # 1.8: 1.7 plus prompt parts (PromptPart, PartContext, Persona.parts, Contributions.prompt_parts, Session.prompt).
-CONTRACTS_VERSION = "1.8"
+# 1.9: 1.8 plus watchers (Watcher, Exchange, WatchContext, Contributions.watchers), facts (Facts,
+#      ExtensionContext.facts, InterfacePort.facts), InterfacePort.personas, Persona.aliases, .formerly, .pictures,
+#      and PartContext.engine.
+CONTRACTS_VERSION = "1.9"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",
     "Action", "Activity", "Address", "Command", "Option", "Capability", "Contributions", "CONTRACTS_VERSION", "DIARY_KINDS", "Delivery", "Diary",
     "DiaryNote", "Display", "Engine",
-    "EngineSpec", "Event", "Extension", "ExtensionContext", "FileRef", "Handler", "History", "HistoryItem",
+    "EngineSpec", "Event", "Exchange", "Extension", "ExtensionContext", "Facts", "FileRef", "Handler", "History",
+    "HistoryItem",
     "HistorySummary",
     "Interface", "InterfacePort", "PLACE_STATUS", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
     "PART_PLACES", "PartContext", "Persona", "PromptPart", "Reply", "Request", "Risk", "TIER_ORDER", "RunYield", "SHUTDOWN", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolCall", "ToolResult", "ToolSpec", "Tools",
+    "WatchContext", "Watcher",
 ]

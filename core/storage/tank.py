@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,6 +78,47 @@ class Tank:
 
     def store(self, scope: str) -> ScopedStore:
         return ScopedStore(self.db, "kv", scope)
+
+    def rename_persona(self, old: str, new: str, display_name: str) -> dict[str, int]:
+        """Move what is filed under persona `old` to `new` (Persona.formerly): her memory and every module's stores
+        scoped by her, her diary notes, the runs she is in, and her name on what she said. What `new` already has
+        wins. Returns how many of each were moved (all zero once done)."""
+        moved = {"stores": 0, "notes": 0, "runs": 0, "messages": 0}
+        with self.db.transaction() as db:
+            for row in db.query("SELECT DISTINCT scope FROM kv WHERE scope=? OR scope LIKE 'extension:% {%'",
+                                ("persona:" + old,)):
+                scope = row["scope"]
+                if scope == "persona:" + old:
+                    target = "persona:" + new
+                else:
+                    head, _, parts = scope.partition(" ")
+                    try:
+                        scoped = json.loads(parts)
+                    except ValueError:
+                        continue
+                    if not isinstance(scoped, dict) or scoped.get("persona") != old:
+                        continue
+                    target = head + " " + json.dumps({**scoped, "persona": new}, ensure_ascii=False, sort_keys=True)
+                db.execute("INSERT OR IGNORE INTO kv(scope, key, value) SELECT ?, key, value FROM kv WHERE scope=?",
+                           (target, scope))
+                moved["stores"] += db.execute("DELETE FROM kv WHERE scope=?", (scope,)).rowcount
+            moved["notes"] = db.execute("UPDATE OR IGNORE diary SET persona=? WHERE persona=?", (new, old)).rowcount
+            db.execute("DELETE FROM diary WHERE persona=?", (old,))  # notes `new` already had under the same key
+            for row in db.query("SELECT id, personas, assignment FROM runs WHERE personas LIKE ?",
+                                ("%" + json.dumps(old) + "%",)):
+                personas = loads(row["personas"], [])
+                if old not in personas:
+                    continue
+                assignment = loads(row["assignment"], {})
+                if isinstance(assignment.get("personas"), list):
+                    assignment["personas"] = [new if name == old else name for name in assignment["personas"]]
+                db.execute("UPDATE runs SET personas=?, assignment=? WHERE id=?",
+                           (dumps([new if name == old else name for name in personas]), dumps(assignment), row["id"]))
+                moved["runs"] += 1
+            moved["messages"] = db.execute(
+                "UPDATE messages SET sender_name=? WHERE direction='out' AND lower(sender_name)=lower(?)",
+                (display_name, old)).rowcount
+        return moved
 
     def record_message(self, address: str, direction: str, text: str, *, kind: str = "text",
                        sender_id: str = "", sender_name: str = "", message_id: str | None = None,

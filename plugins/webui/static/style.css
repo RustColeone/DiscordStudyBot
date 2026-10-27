@@ -124,6 +124,9 @@ button.member:hover { background: color-mix(in srgb, var(--paper) 75%, transpare
 .member-text { min-width: 0; }
 .member-name { font-weight: 700; color: var(--ci); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .member-status { font-size: .78rem; color: var(--muted); }
+.member-real { font-weight: 400; color: var(--muted); font-size: .85em; }
+.member-bond { font-size: .74rem; color: var(--ci); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-bond { margin-left: auto; padding-left: 6px; font-size: .72rem; color: var(--muted); }
 .member.is-typing .avatar { animation: ring 1.2s ease-in-out infinite; }
 .member.is-typing .member-status { color: var(--ci); font-weight: 600; }
 .member.is-speaking { background: color-mix(in srgb, var(--c) 16%, var(--paper)); }

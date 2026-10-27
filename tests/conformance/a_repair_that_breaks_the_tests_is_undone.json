@@ -2,7 +2,7 @@
  "name": "a repair that breaks the tests is undone",
  "config": {
   "team": {
-   "luna": false,
+   "gpt": false,
    "claude": false,
    "gemini": false,
    "grok": false,

@@ -1,0 +1,17 @@
+# GPT: one student. extension.py reads every folder with a student.yml (see ../README.md).
+name: gpt                   # the folder's name; engines and assignments use it
+display_name: GPT
+aliases: [Luna]             # other names that call on her ("Luna, ..."): she was Luna before Luna and Sol were one
+formerly: [luna]            # her persona name before: what was kept under it is hers (moved on the next start)
+order: 1                    # where she stands in lists (and the room's default rotation)
+models:                     # her own models, preferred in this order (Sol, gpt-6.1-sol, is her strong model in the
+  - {provider: openai, model: gpt-6-luna}    # Classroom; `$model gpt openai/gpt-6.1-sol` picks it for a chat)
+fallback: 2                 # her first model is everyone else's 2nd fallback
+pictures:                   # files in this folder, for the pages (kind: avatar, square; card, 3:4)
+  avatar: avatar.png
+prompt:                     # her prompt: these files in order
+  - prompt.md
+  - ../shared/school.md        # the club and the five members
+  - ../shared/public.md        # speak directly, no visible reasoning
+  - ../shared/math.md          # LaTeX delimiters
+  - ../shared/conversation.md  # chatting with someone she knows

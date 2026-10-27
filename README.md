@@ -48,7 +48,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 
 | | |
 |---|---|
-| Chat | The assistant engine (one persona), or the **room**: Luna, Gemini, Claude, DeepSeek and Grok sharing one work board, handing each other jobs, in parallel where independent |
+| Chat | The assistant engine (one persona), or the **room**: GPT, Gemini, Claude, DeepSeek and Grok sharing one work board, handing each other jobs, in parallel where independent |
 | Memory | Personas keep short notes about each person per conversation; `$memory` shows, forgets or clears yours |
 | Images | Attached and recent images are shown to the models; `$draw <prompt>` (Gemini or OpenAI) |
 | Web | `$search`, `$read <url>`, image search, Google Maps, `$wolfram` |

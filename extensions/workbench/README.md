@@ -37,7 +37,7 @@ no access to anything. From Discord it is the same harness, remotely.
    that file to the core, so every classmate with a key joins in; `--key NAME` (repeat it for more) hands only the
    keys you name, from the files or your shell. No other key, token or password of your shell reaches the core. A
    file you name with `--env` wins over the harness's own `.env`. `--also webui --also room` brings MomoChat
-   next door too; `--core FILE` adds core settings (other modules' settings, say: its relative paths are read from
+   next door too, with the students (who talk there, and whose pictures both pages show); `--core FILE` adds core settings (other modules' settings, say: its relative paths are read from
    the file's folder, its modules add to the Classroom's, and its assignments stay); `--print-config` shows what it
    would run.
 
@@ -177,7 +177,7 @@ flowchart TB
 sequenceDiagram
     autonumber
     participant Y as You
-    participant R as Router (Luna)
+    participant R as Router (GPT)
     participant D as Drafter (cheap)
     participant T as Tests
     participant J as Judge (other family)
@@ -302,11 +302,11 @@ than the drafter when one can answer, otherwise from another seat.
 
 | Role | Default order | Tier |
 | --- | --- | --- |
-| router (sorts, announces) | Luna, Claude, Gemini, DeepSeek, Grok | cheap |
-| drafter | DeepSeek, Gemini, Grok, Luna, Claude | cheap |
-| judge (cascade) | Gemini, Luna, DeepSeek, Claude, Grok | cheap |
-| strong (takes over) | Claude, Luna, Gemini, DeepSeek, Grok | strong |
-| critic (critique) | Claude, Luna, Gemini, DeepSeek, Grok | strong |
+| router (sorts, announces) | GPT, Claude, Gemini, DeepSeek, Grok | cheap |
+| drafter | DeepSeek, Gemini, Grok, GPT, Claude | cheap |
+| judge (cascade) | Gemini, GPT, DeepSeek, Claude, Grok | cheap |
+| strong (takes over) | Claude, GPT, Gemini, DeepSeek, Grok | strong |
+| critic (critique) | Claude, GPT, Gemini, DeepSeek, Grok | strong |
 
 Seats without a key are left out quietly (the engine asks the core, contracts 1.6). When a role's list runs out,
 its sibling role steps in (strong ↔ drafter, judge ↔ critic), then anyone else in the club; a reviewer is never the
@@ -414,7 +414,7 @@ replies in the thread are follow-ups, and approvals reach your DM with buttons. 
 assignments:
   "discord:123456789012345678":            # a channel for tasks
     engine: workbench
-    personas: [luna, claude, deepseek, gemini, grok]   # the seats you use (flash, pro, …)
+    personas: [gpt, claude, deepseek, gemini, grok]    # the seats you use (flash, pro, …)
     budget: {model_calls: 120, tool_calls: 400, seconds: 3600}
     options: {project: harness}             # its project (or start a message with "harness: …")
 admission:

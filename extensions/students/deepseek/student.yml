@@ -5,6 +5,7 @@ order: 4
 models:
   - {provider: deepseek, model: deepseek-flash}
 fallback: 1
+pictures: {avatar: avatar.png}
 prompt:
   - whale.md                 # who she is (Whale-chan's character)
   - prompt.md                # her part in the club

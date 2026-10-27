@@ -12,6 +12,7 @@ from aiohttp import web
 from contracts import Address, Reply, Request, Sender
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
 
+STUDENTS = ("gpt", "gemini", "claude", "deepseek", "grok")
 PLUGIN = ROOT / "plugins" / "webui"
 
 
@@ -58,10 +59,11 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def start(self, settings=None):
-        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN)]
+        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "students"), str(PLUGIN)]
         self.core = await start_core(self.tmp, {
             "extensions": paths,
             "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo", **(settings or {})}},
+            "profiles": {name: [{"provider": "fake", "model": name}] for name in STUDENTS},
             "assignments": {"webui:*": {"engine": "probe", "personas": ["p"]}}})
         self.web = iface(self.core, "webui")
         self.base = f"http://127.0.0.1:{self.web.port_number}"
@@ -168,7 +170,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         await self.start()
         ws, state = await self.socket()
         self.assertEqual((state["user"]["name"], state["default"]), ("Leo", "classroom"))
-        self.assertEqual(state["classmates"], ["Luna", "Gemini", "Claude", "DeepSeek", "Grok"])
+        self.assertEqual(state["classmates"], ["GPT", "Gemini", "Claude", "DeepSeek", "Grok"])
         self.assertIn("help", [command["name"] for command in state["commands"]])
         await self.say(ws, "echo hello class")
         answer, seen = await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text")
@@ -285,10 +287,10 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((event["type"], event["run_id"], event["text"]), ("progress", "r1", "Luna is responding…"))
         ws2, state = await self.socket()
         self.assertEqual([item["run_id"] for item in state["progress"]], ["r1"])
-        await web.deliver(Reply(Address("webui", "classroom"), "text", text="Hi!", run_id="r1", speaker="Luna"))
+        await web.deliver(Reply(Address("webui", "classroom"), "text", text="Hi!", run_id="r1", speaker="GPT"))
         cleared, seen = await self.until(ws, lambda e: e["type"] == "progress_clear")
         message, _ = await self.until(ws, lambda e: e["type"] == "message")
-        self.assertEqual((message["item"]["speaker"], message["item"]["text"]), ("Luna", "Hi!"))
+        self.assertEqual((message["item"]["speaker"], message["item"]["text"]), ("GPT", "Hi!"))
         self.assertEqual(web.state()["progress"], [])
         await ws.close()
         await ws2.close()
@@ -326,19 +328,52 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         folder = self.tmp / "plugin"
         (folder / "avatars").mkdir(parents=True)
         (folder / "static").symlink_to(PLUGIN / "static")
-        (folder / "avatars" / "Luna.PNG").write_bytes(b"\x89PNG\r\n\x1a\nluna")
+        (folder / "avatars" / "GPT.PNG").write_bytes(b"\x89PNG\r\n\x1a\nmine")  # one of yours wins over hers
         (folder / "avatars" / "notes.txt").write_text("not a picture")
         web.folder = folder
         ws, state = await self.socket()
-        self.assertEqual(state["avatars"], ["luna"])
-        async with self.http.get(f"{self.base}/avatars/luna") as response:
+        self.assertEqual(state["avatars"], ["claude", "deepseek", "gemini", "gpt", "grok"])  # the students' own too
+        async with self.http.get(f"{self.base}/avatars/gpt") as response:
+            self.assertEqual((response.status, await response.read()), (200, b"\x89PNG\r\n\x1a\nmine"))
+        async with self.http.get(f"{self.base}/avatars/gemini") as response:  # from extensions/students/gemini
             self.assertEqual((response.status, response.headers["Content-Type"]), (200, "image/png"))
+            self.assertEqual(await response.read(), (ROOT / "extensions" / "students" / "gemini" / "avatar.png").read_bytes())
         for path in ("/avatars/notes", "/avatars/..%2Fstatic%2Fapp", "/static/..%2Finterface.py", "/static/login.html"):
             async with self.http.get(self.base + path) as response:
                 self.assertEqual(response.status, 404, path)
         await ws.close()
 
-    # ---- guards ---------------------------------------------------------------------------------
+    async def test_the_students_names_come_from_the_core_and_a_former_name_is_hers(self):
+        from plugins.webui.store import Store as WebStore
+        old = WebStore(self.tmp / "data" / "extensions" / "webui" / "webui.db")  # a page from before GPT was GPT
+        old.ensure("dm-luna", "Luna", ["luna"])
+        old.add("dm-luna", {"kind": "text", "text": "Hi.", "speaker": "Luna", "at": 1.0})
+        old.add("dm-luna", {"kind": "text", "text": "Hey.", "speaker": "Claude", "at": 2.0})
+        old.close()
+        web = await self.start({"personas": ["luna", "claude"]})
+        self.assertEqual((web.personas, web.classmates), (["gpt", "claude"], ["GPT", "Claude"]))
+        self.assertEqual(web.store.conversation("dm-luna")["personas"], ["gpt"])
+        self.assertEqual([item["speaker"] for item in web.store.messages("dm-luna")], ["GPT", "Claude"])
+        await self.core.stop()
+        self.core = None
+        web = await self.start({"personas": ["gpt"], "classmates": ["Lulu"]})  # names of the page's own win
+        self.assertEqual(web.classmates, ["Lulu"])
+
+    async def test_the_roster_says_where_each_student_stands_with_you(self):
+        await self.start({"personas": ["gpt", "claude"], "places_poll_s": 2})
+        facts = self.core.manager.facts.handle("companion")
+        facts.set("gpt", "alias", "Lulu", person=("webui", "creator"))
+        facts.set("gpt", "bond", {"role": "friend", "closeness": 55}, person=("webui", "creator"))
+        facts.set("gpt", "bond", {"role": "creator", "closeness": 100}, person=("chat", "creator"))  # another page's
+        ws, state = await self.socket()
+        gpt, claude = state["roster"]
+        self.assertEqual((gpt["alias"], gpt["bond"], gpt["mood"]), ("Lulu", {"role": "friend", "closeness": 55}, None))
+        self.assertEqual((claude["alias"], claude["bond"]), (None, None))
+        facts.set("claude", "mood", {"value": 80, "face": "good", "feelings": []}, person=("webui", "creator"))
+        event, _ = await self.until(ws, lambda e: e["type"] == "roster")
+        self.assertEqual(event["roster"][1]["mood"]["face"], "good")
+        await ws.close()
+
     async def test_other_sites_and_rebound_names_are_refused_and_pages_carry_a_strict_policy(self):
         await self.start()
         async with self.http.get(f"{self.base}/") as response:
@@ -450,8 +485,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.core = await start_core(self.tmp, {
             "extensions": paths,
             "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo"}},
-            "profiles": {name: [{"provider": "fake", "model": name}]
-                         for name in ("luna", "gemini", "claude", "deepseek", "grok")}}, FakeAdapter(handler=model))
+            "profiles": {name: [{"provider": "fake", "model": name}] for name in STUDENTS}},
+            FakeAdapter(handler=model))
         self.web = iface(self.core, "webui")
         self.base = f"http://127.0.0.1:{self.web.port_number}"
         return spoke
@@ -462,22 +497,23 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
     async def test_a_new_chat_has_the_classmates_picked_for_it_and_one_makes_a_direct_chat(self):
         spoke = await self.start_room()
         ws, state = await self.socket()
-        self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek"})
+        self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek", "alias": None, "bond": None,
+                                              "mood": None})
         self.assertEqual(self.assignment("classroom")["options"],
                          {"history_limit": 40, "compact": True, "chime_in": True, "diary_scope": "webui"})
         await ws.send_json({"type": "new", "conversation": "chat-two", "title": "New chat",
-                            "personas": ["claude", "luna"]})
+                            "personas": ["claude", "gpt"]})
         await self.say(ws, "hello you two", conversation="chat-two")  # sent at once: it waits for the setup
         answer, seen = await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text")
         chats = next(e for e in seen if e["type"] == "conversations")["items"]
-        self.assertEqual(next(chat for chat in chats if chat["id"] == "chat-two")["personas"], ["luna", "claude"])
+        self.assertEqual(next(chat for chat in chats if chat["id"] == "chat-two")["personas"], ["gpt", "claude"])
         assigned = self.assignment("chat-two")
         self.assertEqual((assigned["pattern"], assigned["engine"], assigned["personas"]),
-                         ("webui:chat-two", "room", ["luna", "claude"]))
+                         ("webui:chat-two", "room", ["gpt", "claude"]))
         self.assertEqual(assigned["options"]["diary_scope"], "webui")  # everything else as the web UI's
         self.assertEqual(assigned["budget"]["model_calls"], 40)
         await settle(self.core)
-        self.assertEqual(set(spoke), {"Luna", "Claude"})  # Luna in turn; Claude may chime in
+        self.assertEqual(set(spoke), {"GPT", "Claude"})  # GPT in turn; Claude may chime in
         self.assertEqual([item["kind"] for item in self.web.store.messages("chat-two")],
                          ["user", "text", "text"])  # the quiet $call shows nowhere
         spoke.clear()
@@ -494,12 +530,12 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         await self.start_room()
         ws, _ = await self.socket()
         await ws.send_json({"type": "new", "conversation": "chat-all", "title": "New chat",
-                            "personas": ["grok", "luna", "gemini", "claude", "deepseek"]})
+                            "personas": ["grok", "gpt", "gemini", "claude", "deepseek"]})
         await self.until(ws, lambda e: e["type"] == "conversations")
         self.assertEqual(self.assignment("chat-all")["pattern"], "webui:*")
         self.assertEqual(self.web.store.conversation("chat-all")["personas"],
-                         ["luna", "gemini", "claude", "deepseek", "grok"])
-        for chosen in (["luna", "root"], [], "luna", [{"x": 1}]):
+                         ["gpt", "gemini", "claude", "deepseek", "grok"])
+        for chosen in (["gpt", "root"], [], "gpt", [{"x": 1}]):
             await ws.send_json({"type": "new", "conversation": "chat-bad", "title": "x", "personas": chosen})
             error, _ = await self.until(ws, lambda e: e["type"] == "error")
             self.assertIn("Pick classmates", error["text"])
@@ -509,25 +545,25 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
     async def test_deleting_a_chat_removes_its_own_assignment(self):
         await self.start_room()
         ws, _ = await self.socket()
-        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        await ws.send_json({"type": "new", "conversation": "dm-gpt", "title": "GPT", "personas": ["gpt"]})
         await self.until(ws, lambda e: e["type"] == "conversations")
         for _ in range(50):
-            if self.assignment("dm-luna")["pattern"] == "webui:dm-luna":
+            if self.assignment("dm-gpt")["pattern"] == "webui:dm-gpt":
                 break
             await asyncio.sleep(0.05)
-        self.assertEqual(self.assignment("dm-luna")["personas"], ["luna"])
-        await ws.send_json({"type": "delete", "conversation": "dm-luna"})
+        self.assertEqual(self.assignment("dm-gpt")["personas"], ["gpt"])
+        await ws.send_json({"type": "delete", "conversation": "dm-gpt"})
         await self.until(ws, lambda e: e["type"] == "deleted")
         for _ in range(50):
-            if self.assignment("dm-luna")["pattern"] == "webui:*":
+            if self.assignment("dm-gpt")["pattern"] == "webui:*":
                 break
             await asyncio.sleep(0.05)
-        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:*")
-        self.assertIsNone(self.web.store.conversation("dm-luna"))  # the answer did not bring the chat back
+        self.assertEqual(self.assignment("dm-gpt")["pattern"], "webui:*")
+        self.assertIsNone(self.web.store.conversation("dm-gpt"))  # the answer did not bring the chat back
         self.assertEqual(self.web.store.assigned(), [])
         # A chat the core cannot give those classmates (here: an engine for one persona) is not kept.
         self.core.manager.set_assignment("webui:*", {"engine": "probe", "personas": ["p"]})
-        await ws.send_json({"type": "new", "conversation": "chat-pair", "title": "x", "personas": ["luna", "grok"]})
+        await ws.send_json({"type": "new", "conversation": "chat-pair", "title": "x", "personas": ["gpt", "grok"]})
         error, _ = await self.until(ws, lambda e: e["type"] == "error")
         self.assertIn("Couldn't start that chat", error["text"])
         self.assertIsNone(self.web.store.conversation("chat-pair"))
@@ -541,13 +577,13 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.2)  # the message arrives while this runs
             return "simulated failure"
         self.web._assign = failing
-        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        await ws.send_json({"type": "new", "conversation": "dm-gpt", "title": "GPT", "personas": ["gpt"]})
         # The same page's message is handled after the failed setup (the chat is gone by then); another
         # page's arrives while it is still running.
         other, _ = await self.socket()
         await asyncio.sleep(0.05)
-        await self.say(other, "only for Luna", conversation="dm-luna", id="meanwhile")
-        await self.say(ws, "only for Luna", conversation="dm-luna", id="queued")
+        await self.say(other, "only for GPT", conversation="dm-gpt", id="meanwhile")
+        await self.say(ws, "only for GPT", conversation="dm-gpt", id="queued")
         ack, _ = await self.until(other, lambda e: e["type"] == "ack")
         self.assertEqual((ack["ok"], ack["reason"]), (False, "chat_not_ready"))
         ack, seen = await self.until(ws, lambda e: e["type"] == "ack")
@@ -555,8 +591,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("simulated failure", next(e for e in seen if e["type"] == "error")["text"])
         await settle(self.core)
         self.assertEqual(spoke, [])
-        self.assertIsNone(self.web.store.conversation("dm-luna"))  # not re-created with the whole class
-        self.assertFalse(self.core.tank.recent_messages("webui:dm-luna", 5))
+        self.assertIsNone(self.web.store.conversation("dm-gpt"))  # not re-created with the whole class
+        self.assertFalse(self.core.tank.recent_messages("webui:dm-gpt", 5))
         await other.close()
         await ws.close()
 
@@ -579,27 +615,27 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             return await submit(request)
         self.web.port.submit = slow_core
         ws, _ = await self.socket()
-        await ws.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
+        await ws.send_json({"type": "new", "conversation": "dm-gpt", "title": "GPT", "personas": ["gpt"]})
         error, _ = await self.until(ws, lambda e: e["type"] == "error")
         self.assertIn("timeout", error["text"])
-        self.assertIsNone(self.web.store.conversation("dm-luna"))
-        self.assertEqual(self.web.store.assigned(), ["dm-luna"])  # it may still land
+        self.assertIsNone(self.web.store.conversation("dm-gpt"))
+        self.assertEqual(self.web.store.assigned(), ["dm-gpt"])  # it may still land
         release.set()
         await asyncio.gather(*held)
         for _ in range(60):
             if not self.web.store.assigned():
                 break
             await asyncio.sleep(0.05)
-        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
-        self.assertIsNone(self.web.store.conversation("dm-luna"))  # its answer did not bring the chat back
+        self.assertEqual((self.assignment("dm-gpt")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        self.assertIsNone(self.web.store.conversation("dm-gpt"))  # its answer did not bring the chat back
         await ws.close()
 
     async def test_at_start_only_this_pages_own_leftover_assignments_are_removed(self):
         await self.start_room()
-        mine = {"engine": "room", "personas": ["luna"]}
+        mine = {"engine": "room", "personas": ["gpt"]}
         for chat in ("dm-gone", "dm-kept", "set-by-hand"):
             self.core.manager.set_assignment(f"webui:{chat}", mine)
-        self.web.store.ensure("dm-kept", "Luna", ["luna"])
+        self.web.store.ensure("dm-kept", "GPT", ["gpt"])
         self.web.store.mark_assigned("dm-gone")
         self.web.store.mark_assigned("dm-kept")
         await self.web._tidy()
@@ -623,25 +659,25 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         await self.start_room()
         a, _ = await self.socket()
         b, _ = await self.socket()
-        await a.send_json({"type": "new", "conversation": "dm-luna", "title": "Luna", "personas": ["luna"]})
-        await b.send_json({"type": "delete", "conversation": "dm-luna"})
+        await a.send_json({"type": "new", "conversation": "dm-gpt", "title": "GPT", "personas": ["gpt"]})
+        await b.send_json({"type": "delete", "conversation": "dm-gpt"})
         await self.until(b, lambda e: e["type"] == "deleted")
         for _ in range(60):
-            if self.assignment("dm-luna")["pattern"] == "webui:*" and not self.web.store.assigned():
+            if self.assignment("dm-gpt")["pattern"] == "webui:*" and not self.web.store.assigned():
                 break
             await asyncio.sleep(0.05)
-        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
-        self.assertIsNone(self.web.store.conversation("dm-luna"))
+        self.assertEqual((self.assignment("dm-gpt")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        self.assertIsNone(self.web.store.conversation("dm-gpt"))
         await a.close()
         await b.close()
 
     async def test_at_start_a_chat_missing_its_assignment_gets_it_again(self):
         await self.start_room()
-        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # a setup cut off by a crash: the chat, no assignment
-        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:*")
+        self.web.store.ensure("dm-gpt", "GPT", ["gpt"])  # a setup cut off by a crash: the chat, no assignment
+        self.assertEqual(self.assignment("dm-gpt")["pattern"], "webui:*")
         await self.web._tidy()
-        self.assertEqual((self.assignment("dm-luna")["pattern"], self.assignment("dm-luna")["personas"]),
-                         ("webui:dm-luna", ["luna"]))
+        self.assertEqual((self.assignment("dm-gpt")["pattern"], self.assignment("dm-gpt")["personas"]),
+                         ("webui:dm-gpt", ["gpt"]))
 
     async def test_bad_events_and_parameters_are_refused_without_breaking_anything(self):
         await self.start({"max_upload_mb": 0.01})
@@ -685,20 +721,20 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_chat_whose_setup_a_crash_cut_off_is_repaired_before_its_first_message(self):
         spoke = await self.start_room()
-        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # the chat, but no assignment: setup never finished
+        self.web.store.ensure("dm-gpt", "GPT", ["gpt"])  # the chat, but no assignment: setup never finished
         ws, _ = await self.socket()
-        await self.say(ws, "just you and me", conversation="dm-luna")  # before the start-up sweep runs
+        await self.say(ws, "just you and me", conversation="dm-gpt")  # before the start-up sweep runs
         await self.until(ws, lambda e: e["type"] == "message" and e["item"]["kind"] == "text"
-                         and e["item"]["conversation"] == "dm-luna")
+                         and e["item"]["conversation"] == "dm-gpt")
         await settle(self.core)
-        self.assertEqual(spoke, ["Luna"])
-        self.assertEqual(self.assignment("dm-luna")["pattern"], "webui:dm-luna")
+        self.assertEqual(spoke, ["GPT"])
+        self.assertEqual(self.assignment("dm-gpt")["pattern"], "webui:dm-gpt")
         await ws.close()
 
     async def test_a_chat_deleted_while_its_repair_waits_is_not_brought_back_by_a_queued_message(self):
         from contracts import SubmitResult
         spoke = await self.start_room()
-        self.web.store.ensure("dm-luna", "Luna", ["luna"])  # needs its repair on the first message
+        self.web.store.ensure("dm-gpt", "GPT", ["gpt"])  # needs its repair on the first message
         release, submit, held = asyncio.Event(), self.web.port.submit, []
 
         async def slow_core(request):  # the repair's setup is held until the chat is deleted elsewhere
@@ -712,28 +748,28 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.web.port.submit = slow_core
         a, _ = await self.socket()
         b, _ = await self.socket()
-        await self.say(a, "only for Luna", conversation="dm-luna", id="queued")
+        await self.say(a, "only for GPT", conversation="dm-gpt", id="queued")
         await asyncio.sleep(0.1)
-        await b.send_json({"type": "delete", "conversation": "dm-luna"})
+        await b.send_json({"type": "delete", "conversation": "dm-gpt"})
         await self.until(b, lambda e: e["type"] == "deleted")
         release.set()
         ack, _ = await self.until(a, lambda e: e["type"] == "ack")
         self.assertEqual((ack["ok"], ack["reason"]), (False, "unknown_chat"))
         await asyncio.gather(*held)
         for _ in range(60):
-            if self.assignment("dm-luna")["pattern"] == "webui:*" and not self.web.store.assigned():
+            if self.assignment("dm-gpt")["pattern"] == "webui:*" and not self.web.store.assigned():
                 break
             await asyncio.sleep(0.05)
         await settle(self.core)
-        self.assertEqual((spoke, self.web.store.conversation("dm-luna")), ([], None))
-        self.assertEqual((self.assignment("dm-luna")["pattern"], self.web.store.assigned()), ("webui:*", []))
+        self.assertEqual((spoke, self.web.store.conversation("dm-gpt")), ([], None))
+        self.assertEqual((self.assignment("dm-gpt")["pattern"], self.web.store.assigned()), ("webui:*", []))
         await a.close()
         await b.close()
 
     async def test_deleting_a_chat_from_before_the_record_still_removes_its_assignment(self):
         await self.start_room()
-        self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["luna"]})
-        self.web.store.ensure("dm-old", "Luna", ["luna"])  # made by an older version: not in `assigned`
+        self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["gpt"]})
+        self.web.store.ensure("dm-old", "GPT", ["gpt"])  # made by an older version: not in `assigned`
         ws, _ = await self.socket()
         await ws.send_json({"type": "delete", "conversation": "dm-old"})
         await self.until(ws, lambda e: e["type"] == "deleted")
@@ -758,7 +794,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         contributions = extension.setup(Context())
         self.assertEqual(contributions.assignments["webui:*"]["engine"], "room")
         self.assertEqual(contributions.assignments["webui:*"]["personas"],
-                         ["luna", "gemini", "claude", "deepseek", "grok"])
+                         ["gpt", "gemini", "claude", "deepseek", "grok"])
         self.assertFalse(contributions.admission["webui:*"]["require_mention_in_groups"])
 
 

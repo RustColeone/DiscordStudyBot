@@ -132,7 +132,7 @@
   ],
   "said": [
    [
-    "Luna",
+    "GPT",
     "DeepSeek drafts it, Gemini checks it, and Claude steps in only if needed."
    ],
    [
@@ -144,7 +144,7 @@
     "Done... mostly. One test is being difficult."
    ],
    [
-    "Luna",
+    "GPT",
     "Claude is taking over from DeepSeek: the tests fail (Ran 8 tests in N.Ns · FAILED (failures=1))"
    ],
    [
@@ -156,7 +156,7 @@
     "Sunday now sorts last: `Meeting.key` uses the day's position in `DAYS` (Monday 0 ... Sunday 6) instead of the `% 7` shift that put Sunday first. DeepSeek's draft used `% 8`, which moved Sunday but made Monday 1; her new tests caught it. All tests pass now."
    ],
    [
-    "Luna",
+    "GPT",
     "Ready for your review: 2 files (+14 −2). Tests: Ran 8 tests in N.Ns · OK. Tick every item on the checklist, approve it, then give the final approval to land it. Or tell me what to change."
    ],
    [
@@ -164,8 +164,8 @@
     "Approved <approval>: workbench.review → failed."
    ],
    [
-    "Luna",
-    "Not yet: 5 item(s) on the checklist are not ticked. Look at each one, tick it (the boxes in the lab, or `$check <task> all` once you have), and approve the new request."
+    "GPT",
+    "Not yet: 5 item(s) on the checklist are not ticked. Look at each one, tick it (the boxes in the Classroom, or `$check <task> all` once you have), and approve the new request."
    ],
    [
     "",

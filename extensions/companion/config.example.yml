@@ -1,7 +1,14 @@
 # Companion settings. Copy to config.yml (git-ignored); extension_config.companion in core.yml overrides it.
 # It needs mneme-llm 0.2 or newer (pip install -U mneme-llm); without it the module adds nothing.
 
-# personas: [luna, gemini, claude, deepseek, grok]   # whose companion it keeps (left out: every persona)
+# personas: [gpt, gemini, claude, deepseek, grok]   # whose companion it keeps (left out: every persona)
+# engines: [room, assistant]    # whose messages are conversation (the Classroom's reports teach her nothing of you)
+# learn: true                   # after each of her messages: her mood, notes worth keeping, a day of contact
+# notes: true                   # keep notes, and give her those that fit each message
+# mood: true                    # judge her mood after each exchange; tell her its news once
+# met_role: acquaintance        # the role someone gets when they first talk with her ("": leave them without one)
+# writer_profile: deepseek      # the model profile for mneme-llm's own calls (left out: her own)
+# reflect_after_notes: 5        # rewrite her impression of a person once a day, once she has this many notes
 # language: zh                  # the language of the lines it adds to prompts (en or zh; mneme-llm's default: en)
 # platforms: {whale_chan: discord}   # interfaces that share people: one Discord user is one person on both bots
 # roles:                        # who people are to every student it keeps: creator (one), family, friend, acquaintance

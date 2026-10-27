@@ -49,6 +49,32 @@ class Store:
         with self._lock:
             self._db.close()
 
+    def rename_persona(self, former, name: str, display_name: str) -> int:
+        """A student renamed (Persona.formerly): her former names in the chats' lists, and her bubbles spoken under a
+        former name, are hers. Returns how many chats and bubbles changed (0 once done)."""
+        former = {str(item) for item in former}
+        folded = {item.casefold() for item in former}
+        changed = 0
+        with self._lock:
+            for row in self._db.execute("SELECT id, personas FROM conversations WHERE personas IS NOT NULL"
+                                        ).fetchall():
+                personas = json.loads(row["personas"])
+                if any(item in former for item in personas):
+                    renamed = list(dict.fromkeys(name if item in former else item for item in personas))
+                    self._db.execute("UPDATE conversations SET personas=? WHERE id=?",
+                                     (json.dumps(renamed), row["id"]))
+                    changed += 1
+            for old in former:  # (LIKE ignores case, as the speaker's name is compared)
+                for row in self._db.execute("SELECT id, item FROM messages WHERE item LIKE ?",
+                                            ("%" + old + "%",)).fetchall():
+                    item = json.loads(row["item"])
+                    if str(item.get("speaker") or "").casefold() in folded:
+                        item["speaker"] = display_name
+                        self._db.execute("UPDATE messages SET item=? WHERE id=?",
+                                         (json.dumps(item, ensure_ascii=False), row["id"]))
+                        changed += 1
+        return changed
+
     # ---- conversations ----------------------------------------------------------------------------
     @staticmethod
     def _row(row) -> dict[str, Any]:

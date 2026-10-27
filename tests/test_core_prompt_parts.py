@@ -436,26 +436,27 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         return iface(self.core)
 
     async def test_each_character_gets_the_parts_core_yml_adds_to_it(self):
-        script = Script(Luna=[room_turn("Hi!")], Gemini=[room_turn("Hey.")])
+        # core.yml still names GPT by her former name (Persona.formerly): its parts are hers.
+        script = Script(GPT=[room_turn("Hi!")], Gemini=[room_turn("Hey.")])
         chat = await self.start(script, {"luna": {"parts": [{"name": "quirk", "text": "Luna loves puns."},
                                                              {"text": "Luna had tea.", "place": "turn"}]}})
         for text in ("luna, hi", "gemini, hi"):
             await chat.say(text)
             await settle(self.core)
-        luna, gemini = script.prompts["Luna"][0], script.prompts["Gemini"][0]
-        self.assertIn("Your name here is Luna.\n\nLuna loves puns.", luna[0]["content"])
-        self.assertNotIn("Luna had tea.", luna[0]["content"])
-        self.assertIn("Luna had tea.", luna[-1]["content"])
+        gpt, gemini = script.prompts["GPT"][0], script.prompts["Gemini"][0]
+        self.assertIn("Your name here is GPT.\n\nLuna loves puns.", gpt[0]["content"])
+        self.assertNotIn("Luna had tea.", gpt[0]["content"])
+        self.assertIn("Luna had tea.", gpt[-1]["content"])
         self.assertNotIn("Luna loves puns", "\n".join(message["content"] for message in gemini))
-        self.assertEqual(self.core.manager.personas["luna"].profile, "luna")  # the rest of her is the room's
+        self.assertEqual(self.core.manager.personas["gpt"].profile, "gpt")  # the rest of her is the students'
 
     async def test_the_system_prompt_holds_no_time_so_it_stays_the_same_turn_to_turn(self):
-        script = Script(Luna=[room_turn("Hi!"), room_turn("Again!")])
+        script = Script(GPT=[room_turn("Hi!"), room_turn("Again!")])
         chat = await self.start(script)
-        for text in ("luna, hi", "luna, again"):
+        for text in ("gpt, hi", "luna, again"):
             await chat.say(text)
             await settle(self.core)
-        first, second = script.prompts["Luna"][0], script.prompts["Luna"][1]
+        first, second = script.prompts["GPT"][0], script.prompts["GPT"][1]
         self.assertNotIn("The current time is", first[0]["content"])
         self.assertIn("[This turn's context", first[-1]["content"])
         self.assertIn("The current time is", first[-1]["content"])

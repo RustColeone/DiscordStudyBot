@@ -3,8 +3,9 @@
 Open http://<this computer>:4156 from any device at home. Whoever opens it is the bot's creator, so it
 answers only the local network, refuses other websites and DNS-rebinding names, and can ask for a
 passphrase once per browser (`passphrase`, or WEBUI_PASSPHRASE in .env). Conversations default to the
-shared room: Luna, Gemini, Claude, DeepSeek and Grok working together, each in their own bubble with
-their own picture (`avatars/<name>.png`). Markdown and LaTeX are shown as such; files go both ways.
+shared room: GPT, Gemini, Claude, DeepSeek and Grok working together, each in their own bubble with
+their own picture (from the students module, or `avatars/<name>.png`), and where each stands with you (the
+companion's alias, bond and mood). Markdown and LaTeX are shown as such; files go both ways.
 
 It contributes the `webui` interface and defaults for its own conversations (`webui:*` uses the room
 engine with the five classmates); core.yml settings win over these.
@@ -19,7 +20,8 @@ from contracts import Contributions, Extension, Setting
 
 from .interface import WebUI
 
-CLASSMATES = ["luna", "gemini", "claude", "deepseek", "grok"]
+# Who is in a chat by default; their names and pictures come from the core (the students module).
+CLASSMATES = ["gpt", "gemini", "claude", "deepseek", "grok"]
 # How the room behaves here (the assignment's `options`, merged under `assignment: {options: ...}`): a long
 # window with a rolling summary, classmates who chime in, and one diary scope for every web chat, so a
 # classmate remembers you across the class and your direct messages with her (notes stay filed per chat).

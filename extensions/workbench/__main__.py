@@ -2,7 +2,7 @@
 
     venv/bin/python -m extensions.workbench --env ../.env --key DEEPSEEK_API_KEY   # only that key from the file
     venv/bin/python -m extensions.workbench --demo     # no keys: a scripted club plays the practice task
-    venv/bin/python -m extensions.workbench --also webui --also room   # the classroom next door, too
+    venv/bin/python -m extensions.workbench --also webui --also room   # MomoChat next door (and the students)
 
 It writes a small core configuration (<data>/core/core.yml) and starts `python -m core` with it, under the core's
 supervisor, so the Classroom runs exactly as it does inside the bot. Settings come from extensions/workbench/config.yml
@@ -37,6 +37,15 @@ def read_env(path: Path, only: set[str] | None = None) -> dict[str, str]:
         if not only or key in only:
             found[key] = value.strip().strip("\"'")
     return found
+
+
+def also(names: list[str]) -> list[str]:
+    """The modules asked for with --also, with the students before any module that talks (the room, MomoChat): they
+    are who talks there, and their pictures are what the pages show."""
+    names = list(dict.fromkeys(names))
+    if "students" not in names and {"room", "webui", "assistant"} & set(names):
+        names.insert(0, "students")
+    return names
 
 
 def load_config(paths: list[Path]) -> dict:
@@ -105,8 +114,9 @@ def core_config(arguments) -> tuple[dict, dict[str, str]]:
             keys[name] = os.environ[name]
     config = {"data_dir": str(data / "core"),        # the core's own stores: runs, approvals, history
               "env_files": [],                        # keys come only from what this launcher hands over
-              # the others first, as in the bot (alphabetical there): the room's classmates are the ones who speak
-              "modules": {"dirs": [], "paths": [*(str(module_path(name)) for name in arguments.also), str(HERE)]},
+              # the others first, as in the bot (alphabetical there): the students are the ones who speak
+              "modules": {"dirs": [], "paths": [*(str(module_path(name)) for name in also(arguments.also)),
+                                                str(HERE)]},
               "extension_config": {"workbench": lab}}
     generated = list(config["modules"]["paths"])
     for path in arguments.core:  # more core settings (other modules' extension_config, owners, ...)

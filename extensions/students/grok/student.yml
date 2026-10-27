@@ -4,8 +4,8 @@ display_name: Grok
 order: 5
 models:
   - {provider: grok, model: grok-4-fast}
-# No `fallback`: her model needs its own key, so it is no one else's fallback. Without the key, Luna's list answers.
-falls_back_to: luna
+# No `fallback`: her model needs its own key, so it is no one else's fallback. Without the key, GPT's list answers.
+falls_back_to: gpt
 providers:                   # a provider she brings (the others are built into the core)
   grok:
     kind: openai_compatible  # xAI speaks the OpenAI API
@@ -16,6 +16,7 @@ providers:                   # a provider she brings (the others are built into 
     # $model offers her recent language models (not grok-imagine's pictures and videos).
     models_since: '2026-06-01'
     models_exclude: [imagine]
+pictures: {avatar: avatar.png}
 prompt:
   - prompt.md
   - ../shared/school.md        # the club and the five members

@@ -100,6 +100,13 @@ class Port:
     def approval_status(self, approval_id: str) -> str | None:
         return self._gateway.approval_status(self.name, str(approval_id))
 
+    def personas(self):
+        return self._gateway.manager.persona_views()
+
+    def facts(self, persona: str, sender_id: str | None = None):
+        person = (self.name, str(sender_id)) if sender_id not in (None, "") else None
+        return self._gateway.manager.facts.read(str(persona), person)
+
     def log(self, event: str, **fields: Any) -> None:
         self._gateway.audit.record("interface", interface=self.name, detail=event, **fields)
 

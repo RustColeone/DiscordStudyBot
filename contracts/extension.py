@@ -11,6 +11,8 @@ from contracts.capability import Capability
 from contracts.engine import Engine, Persona, PromptPart
 from contracts.interface import Interface
 from contracts.models import AdapterFactory
+from contracts.stores import Facts
+from contracts.watchers import Watcher
 
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -21,6 +23,7 @@ class ExtensionContext(Protocol):
     name: str
     config: Mapping[str, Any]
     data_dir: Path
+    facts: Facts  # added in 1.9: what this module publishes about personas, for interfaces (any time after setup)
 
     def log(self, event: str, **fields: Any) -> None: ...
 
@@ -39,7 +42,9 @@ class Contributions:
     overrides both, setting by setting.
 
     `adapters` adds provider kinds (kind → AdapterFactory) for APIs the built-in kinds do not speak; its
-    providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused."""
+    providers, and core.yml's, may then use `kind: <that kind>`. A kind that already exists is refused.
+
+    `watchers` (added in 1.9) see every persona's delivered messages, whichever engine she spoke in (see Watcher)."""
 
     interfaces: Sequence[Interface] = ()
     engines: Sequence[Engine] = ()
@@ -53,6 +58,7 @@ class Contributions:
     providers: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     adapters: Mapping[str, AdapterFactory] = field(default_factory=dict)
     prompt_parts: Sequence[PromptPart] = ()  # parts for every persona, or for those each part names
+    watchers: Sequence[Watcher] = ()
 
 
 @dataclass(frozen=True)

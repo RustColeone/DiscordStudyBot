@@ -11,7 +11,7 @@
     return node;
   };
   const PEOPLE = {
-    luna: { accent: "#c9d2de", ink: "#6f7c8e" }, gemini: { accent: "#9a86f2", ink: "#7a63de" },
+    gpt: { accent: "#c9d2de", ink: "#6f7c8e" }, gemini: { accent: "#9a86f2", ink: "#7a63de" },
     claude: { accent: "#e5896a", ink: "#c4694a" }, deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
     flash: { accent: "#3fb8e8", ink: "#1b88b8" }, pro: { accent: "#5868d8", ink: "#3f4cb8" },
     grok: { accent: "#e2b545", ink: "#a8801c" }, you: { accent: "#f0a04b", ink: "#b8741f" },

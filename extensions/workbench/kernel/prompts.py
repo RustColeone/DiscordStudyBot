@@ -445,10 +445,10 @@ LINES = {
                     "提醒：修复之后，{tester}仍然发现 {count} 个问题：{problems}。"),
     "revise_me": ("{drafter} is revising after my review.", "{drafter}根据我的审查进行修改。"),
     "revise_from_me": ("I'm revising after {critic}'s review.", "我根据{critic}的审查进行修改。"),
-    "arrived": ("Here we are in the lab. I brought what we talked about in the classroom.",
-                "到实验室了。教室里聊的内容我都带来了。"),
-    "arrived_with": ("Here we are in the lab, with {company}. I brought what we talked about in the classroom.",
-                     "到实验室了，{company}也来了。教室里聊的内容我都带来了。"),
+    "arrived": ("Here we are in the Classroom. I brought what we talked about in MomoChat.",
+                "到教室了。MomoChat 里聊的内容我都带来了。"),
+    "arrived_with": ("Here we are in the Classroom, with {company}. I brought what we talked about in MomoChat.",
+                     "到教室了，{company}也来了。MomoChat 里聊的内容我都带来了。"),
     "queued": ("Got it, I'll add that as soon as the current step is done.", "收到，等当前这一步完成后就加上。"),
     "followup": ("On it: building on the current change set.", "好的，在现有的改动上继续。"),
     "ready": ("Ready for your review: {stat}. {checks}", "可以审阅了：{stat}。{checks}"),
@@ -461,8 +461,8 @@ LINES = {
     "landed_branch": ("Committed as {commit} on its own branch {branch}; merge it when you like.",
                       "已提交为分支 {branch} 上的 {commit}，可以随时合并。"),
     "not_checked": ("Not yet: {count} item(s) on the checklist are not ticked. Look at each one, tick it (the boxes "
-                    "in the lab, or `$check {task} all` once you have), and approve the new request.",
-                    "还不行：检查清单上还有 {count} 项没有勾选。逐项看过并勾选（实验室里的勾选框，或看完后用 `$check {task} all`），"
+                    "in the Classroom, or `$check {task} all` once you have), and approve the new request.",
+                    "还不行：检查清单上还有 {count} 项没有勾选。逐项看过并勾选（教室里的勾选框，或看完后用 `$check {task} all`），"
                     "然后批准新的请求。"),
     "review_denied": ("Not approved, so nothing was applied. Tell me what to change, or discard the task.",
                       "没有批准，所以什么都没有应用。告诉我要改什么，或者放弃这个任务。"),

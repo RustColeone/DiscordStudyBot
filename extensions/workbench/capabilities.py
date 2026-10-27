@@ -9,9 +9,9 @@
 | `workbench.review` (`$review`) | write, never automatic | creator | the second check: "I looked at all of it" |
 | `workbench.land` (`$land`) | critical, never automatic, confirmed | creator | the final approval: the change set becomes a commit |
 | `workbench.discard` (`$discard`) | write | creator | throw a task's change set away |
-| `workbench.tasks` (`$tasks`) | read | creator, any conversation | the lab's logbook: what the club did there |
+| `workbench.tasks` (`$tasks`) | read | creator, any conversation | the Logbook: what the club did in the Classroom |
 | `workbench.projects` (`$projects`) | read | creator, any conversation | the projects the club may work in |
-| `workbench.invite` | prepare | creator, any conversation | an invitation to the lab: brief, notes, the chat's latest part; a link |
+| `workbench.invite` | prepare | creator, any conversation | an invitation to the Classroom: brief, notes, the chat's latest part; a link |
 
 Review, land and discard are `internal`: your `$commands`, never offered to a model.
 
@@ -378,11 +378,11 @@ class Workbench:
         return ToolResult.ok(f"Discarded {task['title']}; its worktree and branch are gone.")
 
     async def tasks(self, arguments, context) -> ToolResult:
-        """The lab's logbook, for anyone the creator talks with (the classroom remembers the lab through it)."""
+        """The Logbook, for anyone the creator talks with (MomoChat remembers the Classroom through it)."""
         limit = max(1, min(int(arguments.get("limit") or 10), 50))
         rows = self.board.search(str(arguments.get("query") or ""), str(arguments.get("project") or ""), limit)
         if not rows:
-            return ToolResult.ok("Nothing in the lab's logbook matches." if arguments.get("query") else "No tasks yet.")
+            return ToolResult.ok("Nothing in the Logbook matches." if arguments.get("query") else "No tasks yet.")
         lines = []
         for row in rows:
             data = row["data"]
@@ -399,10 +399,10 @@ class Workbench:
         return ToolResult.ok("\n".join(lines), data={"tasks": [row["id"] for row in rows]})
 
     async def invite(self, arguments, context) -> ToolResult:
-        """An invitation to the lab: a task waiting for the person, with the conversation's latest part, the classmate's
-        brief and her notes. It starts nothing; following the link (and starting it there) does."""
+        """An invitation to the Classroom: a task waiting for the person, with the conversation's latest part, the
+        classmate's brief and her notes. It starts nothing; following the link (and starting it there) does."""
         if context.address.interface == str(self.settings.get("interface", "workbench")):
-            return ToolResult.fail("You are in the lab already.", "here_already")
+            return ToolResult.fail("You are in the Classroom already.", "here_already")
         projects = self.registry.all()
         project = str(arguments.get("project") or "").strip().lower()
         if project and project not in projects:
@@ -415,7 +415,7 @@ class Workbench:
                        else "sample" if not real and "sample" in projects else "")  # else: picked on arrival
         brief = str(arguments.get("brief") or "").strip()
         if not brief:
-            return ToolResult.fail("Say in the brief what the lab should do.", "no_brief")
+            return ToolResult.fail("Say in the brief what the club should do in the Classroom.", "no_brief")
         who = str(arguments.get("classmate") or "").strip()
         lead = self.team.seat_for(who) if self.team is not None else None
         crew, unknown, keyless = [], [], []
@@ -440,10 +440,11 @@ class Workbench:
         link = self.link(task_id, "")
         where = f" in {project}" if project else ""
         company = f" Coming along: {', '.join(self.team.seats[name].name for name in crew)}." if crew else ""
-        missing = (f" Not in the lab's team, so not coming: {', '.join(unknown)}." if unknown else "") + (
+        missing = (f" Not in the Classroom's team, so not coming: {', '.join(unknown)}." if unknown else "") + (
             f" No model key here, so they can't come: {', '.join(keyless)}." if keyless else "")
-        return ToolResult.ok(f"Invitation to the lab ready{where}: {link or task_id}.{company}{missing} Give the person "
-                             "this link in your next message so they can follow you; nothing starts until they do.",
+        return ToolResult.ok(f"Invitation to the Classroom ready{where}: {link or task_id}.{company}{missing} Give the "
+                             "person this link in your next message so they can follow you; nothing starts until they "
+                             "do.",
                              data={"task": task_id, "link": link, "project": project, "crew": crew})
 
     def _has_key(self, seat, context) -> bool:
@@ -454,7 +455,7 @@ class Workbench:
         return self.team.ready.get(seat.persona) is not False
 
     def _excerpt(self, context) -> list[dict]:
-        """The latest part of the calling conversation (commands left out): the section that moves to the lab."""
+        """The latest part of the calling conversation (commands left out): what moves to the Classroom."""
         history = getattr(context, "history", None)
         if history is None:
             return []
@@ -601,21 +602,21 @@ def build(workbench: Workbench) -> list[Capability]:
                    dict(TASK), (), Risk.WRITE, internal=True,
                    command=Command("discard", "Discard this conversation's open task", (task_option,),
                                    template="[{task}]"), command_argument="task", **common),
-        Capability("workbench.tasks", "The lab's logbook: what the club did in the lab (tasks with their status, "
+        Capability("workbench.tasks", "The Logbook: what the club did in the Classroom (tasks with their status, "
                    "outcome and summary), newest first. query: words to look for; project: one project's tasks.",
                    guarded(w.tasks), {"query": {"type": "string"}, "project": {"type": "string"},
                                       "limit": {"type": "integer"}},
-                   (), Risk.READ, command=Command("tasks", "The lab's logbook: recent tasks, or those matching words",
+                   (), Risk.READ, command=Command("tasks", "The Logbook: recent tasks, or those matching words",
                                                   (Option("query", "Words to look for"),), template="[{query}]"),
                    command_argument="query", **common),
         Capability("workbench.invite",
-                   "Take the person to the lab, where the club changes code in one of their projects (fix, add, "
+                   "Take the person to the Classroom, where the club changes code in one of their projects (fix, add, "
                    "build, refactor, test). Use it when they want such work done, not for what you can answer here. "
                    "Ask in your message whether they want to come along (for example: 'I think we need to go to the "
-                   "lab for this, do you want to come with me?'). It only prepares an invitation and returns a link to "
-                   "give them; nothing starts until they follow it. brief: what the lab should do, with every decision, "
-                   "name and example from this conversation; notes: what you know about how they like such work "
-                   "done; project: one of workbench.projects if known; title: a short name; classmate: your name; "
+                   "Classroom for this, do you want to come with me?'). It only prepares an invitation and returns a "
+                   "link to give them; nothing starts until they follow it. brief: what the club should do there, with "
+                   "every decision, name and example from this conversation; notes: what you know about how they "
+                   "like such work done; project: one of workbench.projects if known; title: a short name; classmate: your name; "
                    "companions: classmates you would like to bring along (names), when the work wants more hands or "
                    "another view; the person can change who comes.",
                    guarded(w.invite), {"brief": {"type": "string"}, "title": {"type": "string"},

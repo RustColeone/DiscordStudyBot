@@ -2,7 +2,7 @@
 
 The room is an engine in which several personas share every request in a conversation. Each character
 speaks in her own voice, uses tools and hands focused jobs to the others on a shared work board. Jobs
-that do not depend on each other run in parallel. Its usual characters are the students (Luna, Gemini, Claude,
+that do not depend on each other run in parallel. Its usual characters are the students (GPT, Gemini, Claude,
 DeepSeek and Grok), who live in their own module, [`extensions/students`](../students), with their prompts and
 models. The room only runs them.
 
@@ -38,7 +38,7 @@ compact: true
 compact_every: 20
 compact_profile: default
 max_tokens: 1500
-aliases: {claude: [Haiku]}      # other names people call a persona by
+aliases: {}                     # more names that call on a persona, beyond her own aliases
 ```
 
 | Key | Default | Meaning |
@@ -50,7 +50,7 @@ aliases: {claude: [Haiku]}      # other names people call a persona by
 | `compact_every` | 20 | How many messages must have scrolled out of the window before the summary is rewritten (one model call). |
 | `compact_profile` | `default` | The model profile that writes the summary. |
 | `max_tokens` | 1500 | `max_tokens` of each model turn. |
-| `aliases` | `{claude: [Haiku]}` | Extra names per persona that count as addressing her. |
+| `aliases` | `{}` | More names per persona that count as addressing her, in this room only. Her own other names are the persona's `aliases` (a student's `student.yml`: Claude is also Haiku, GPT is also Luna). |
 
 On/off settings accept `true`/`false`, `yes`/`no`, `on`/`off` and `1`/`0`, so `chime_in: "false"` is off. A
 number that is not a number (`history_limit: abc`) falls back to its default instead of failing the run; the
@@ -66,7 +66,7 @@ Assign the engine to a conversation in `core.yml`. The persona order is also the
 assignments:
   "discord:234567890123456789":
     engine: room
-    personas: [luna, gemini, claude, deepseek, grok]
+    personas: [gpt, gemini, claude, deepseek, grok]
     budget: {model_calls: 40, tool_calls: 24, seconds: 900}   # a busy room makes many model calls
     options: {instructions: "Help with the physics homework."}
 ```
@@ -84,8 +84,8 @@ Discord study channel and a lively web chat:
 
 ```yaml
 assignments:
-  "discord:234567890123456789": {engine: room, personas: [luna, claude], options: {history_limit: 20}}
-  "webui:*": {engine: room, personas: [luna, gemini, claude, deepseek, grok],
+  "discord:234567890123456789": {engine: room, personas: [gpt, claude], options: {history_limit: 20}}
+  "webui:*": {engine: room, personas: [gpt, gemini, claude, deepseek, grok],
               options: {history_limit: 40, chime_in: true, diary_scope: webui}}
 ```
 
@@ -95,9 +95,10 @@ other engines to use, and `python -m core --check` reports any assignment still 
 
 ## Using it
 
-* **Who answers.** Characters the message calls on answer: named at its start ("Luna, ..." or "Hey Luna and
-  Gemini: ..."), at its end ("..., Luna?") or with `@` (by name, display name or alias, case-insensitive,
-  as a whole word, ignoring text in quotes or code blocks). Someone named only in passing ("Luna, what did
+* **Who answers.** Characters the message calls on answer: named at its start ("GPT, ..." or "Hey GPT and
+  Gemini: ..."), at its end ("..., GPT?") or with `@` (by name, display name or alias, case-insensitive,
+  as a whole word, ignoring text in quotes or code blocks; "Luna, ..." still calls GPT, one of her `aliases`).
+  Someone named only in passing ("GPT, what did
   DeepSeek and I do?") is *mentioned*: once the answer is out she may add her own word, as her choice, or
   stay silent. A message that names people without calling on anyone ("Can DeepSeek check this?") is for
   all of them. "大家", "你们", "各位", "everyone", "everybody", "you all", "you guys", "all of you" and "the

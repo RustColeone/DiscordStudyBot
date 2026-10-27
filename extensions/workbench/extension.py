@@ -27,8 +27,8 @@ from .workspace.projects import Registry
 from .workspace.worktree import Worktrees
 
 HERE = Path(__file__).resolve().parent
-# Pictures of the classmates: this module's own avatars/ first, then the web UI's, if it is next door.
-AVATARS = [HERE / "avatars", HERE.parents[1] / "plugins" / "webui" / "avatars"]
+# Pictures of the classmates dropped in this module's own avatars/; the students' own pictures come from the core.
+AVATARS = [HERE / "avatars"]
 # The providers the default team uses (as the core and the room define them; configured settings win).
 PROVIDERS = {
     "deepseek": {"kind": "openai_compatible", "base_url": "https://api.deepseek.com", "api_key_env": "DEEPSEEK_API_KEY",

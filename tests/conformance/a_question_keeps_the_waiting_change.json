@@ -2,7 +2,7 @@
  "name": "a question keeps the waiting change",
  "config": {
   "team": {
-   "luna": false,
+   "gpt": false,
    "claude": false,
    "gemini": false,
    "grok": false,

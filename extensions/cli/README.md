@@ -43,8 +43,8 @@ line and press Enter; blank lines are ignored, and `$help` and the other `$comma
 Replies look like:
 
 ```
-Luna> Hello!
-Luna · Work note> I will look it up first.
+GPT> Hello!
+GPT · Work note> I will look it up first.
   ... <a run's progress line>
 bot> [file notes.txt: /path/to/notes.txt] caption
 [waiting for the owner's approval 1a2b3c]

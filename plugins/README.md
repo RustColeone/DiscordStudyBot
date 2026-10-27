@@ -74,11 +74,12 @@ anywhere in core.yml, for example `"discord:123": {engine: chat, personas: [whal
 Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
 printed at startup) from a laptop or phone at home:
 
-* each chat is a conversation of the shared room by default: Luna, Gemini, Claude, DeepSeek and Grok,
-  each in their own bubble with their own picture (drop `luna.png` and so on into
-  [`webui/avatars/`](webui/avatars/README.md); until then, coloured initials);
+* each chat is a conversation of the shared room by default: GPT, Gemini, Claude, DeepSeek and Grok,
+  each in their own bubble with their own picture (the students module's; drop `gpt.png` and so on into
+  [`webui/avatars/`](webui/avatars/README.md) to use others);
 * the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
-  click someone, or type `@`, to ask them directly (`@Luna …` gets Luna's answer alone);
+  click someone, or type `@`, to ask them directly (`@GPT …` gets GPT's answer alone); with the companion,
+  each card also shows your name for her, her bond with you (♥ and her closeness) and her mood;
 * under each classmate, the model she answers with in this chat; click it (again to close) to choose
   another of the models the providers offer, or her own again (this is `$model`, for admins, asked in the
   background and kept per chat); each of her messages shows the model that wrote it;

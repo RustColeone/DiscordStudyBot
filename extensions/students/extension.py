@@ -1,7 +1,7 @@
-"""Students extension: the characters themselves, one folder each (persona prompt, display name, models).
+"""Students extension: the characters themselves, one folder each (persona prompt, display name, models, pictures).
 
 Every folder with a `student.yml` is a student. Engines (the room, the assistant, the workbench) and interfaces use
-them by name; this module only describes who they are and which models they prefer.
+them by name; this module only describes who they are, what they look like and which models they prefer.
 """
 
 from __future__ import annotations
@@ -29,8 +29,20 @@ def compose(folder: Path, files) -> str:
     return "".join(text)
 
 
+def pictures(folder: Path, given) -> dict[str, str]:
+    """Her `pictures:` (kind → file in her folder) as absolute paths; a missing file is left out until it exists."""
+    found = {}
+    for kind, name in dict(given or {}).items():
+        path = (folder / str(name)).resolve()
+        if folder.resolve() not in path.parents:
+            raise ValueError(f"{folder.name}: picture {name!r} is outside her folder")
+        if path.is_file():
+            found[str(kind)] = str(path)
+    return found
+
+
 def read_students(root: Path = HERE) -> list[dict]:
-    """Every student's `student.yml`, with her prompt composed, in `order`."""
+    """Every student's `student.yml`, with her prompt composed and her pictures found, in `order`."""
     found = []
     for folder in sorted(path for path in root.iterdir() if (path / "student.yml").is_file()):
         data = yaml.safe_load((folder / "student.yml").read_text(encoding="utf-8")) or {}
@@ -38,7 +50,8 @@ def read_students(root: Path = HERE) -> list[dict]:
             raise ValueError(f"{folder.name}/student.yml: `name` must be the folder's name")
         if not data.get("models"):
             raise ValueError(f"{folder.name}/student.yml: no `models`")
-        found.append({**data, "prompt": compose(folder, data.get("prompt") or ["prompt.md"])})
+        found.append({**data, "prompt": compose(folder, data.get("prompt") or ["prompt.md"]),
+                      "pictures": pictures(folder, data.get("pictures"))})
     return sorted(found, key=lambda data: (data.get("order", 1000), data["name"]))
 
 
@@ -74,7 +87,9 @@ def key_setting(provider: str, env: str, data: dict) -> Setting:
 
 def setup(context) -> Contributions:
     config = context.config
-    personas = [Persona(data["name"], data["display_name"], data["prompt"], profile=data["name"]) for data in STUDENTS]
+    personas = [Persona(data["name"], data["display_name"], data["prompt"], profile=data["name"],
+                        aliases=tuple(data.get("aliases") or ()), formerly=tuple(data.get("formerly") or ()),
+                        pictures=data["pictures"]) for data in STUDENTS]
     # The students' own providers and profiles; this module's config.yml `providers:` (key by key) and `profiles:`
     # override them, and core.yml overrides both.
     providers = {}
@@ -88,5 +103,5 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("students", setup, contracts="1", version="1",
-                      description="The students: one folder each with her prompt and models",
+                      description="The students: one folder each with her prompt, models and pictures",
                       settings=tuple(key_setting(*item) for item in KEYS))

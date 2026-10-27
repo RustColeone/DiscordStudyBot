@@ -159,6 +159,7 @@ class SessionHandle:
         self.tools = ToolsHandle(manager, record.id)
         self.history = HistoryHandle(manager, self.address)
         self._module = manager.origin_of("engine:" + record.engine)
+        self._engine = record.engine
 
     def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False):
         return module_store(self._manager, self._module, self.address, self.trigger.sender,
@@ -184,7 +185,8 @@ class SessionHandle:
             raise ValueError("A session can only render the prompt of its own personas")
         if place not in PART_PLACES:
             raise ValueError(f"place is one of {', '.join(PART_PLACES)}")
-        return self._manager.render_prompt(match, place, PartContext(match, self.address, self.trigger, self.owner))
+        return self._manager.render_prompt(match, place, PartContext(match, self.address, self.trigger, self.owner,
+                                                                     self._engine))
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)
@@ -261,3 +263,30 @@ class ToolContextHandle:
 
 def model_error_result(error: ModelError) -> ToolResult:
     return ToolResult.fail(str(error), error.kind)
+
+
+class WatcherModels(ModelsHandle):
+    """A watcher's models: counted in the run's usage, not against its budget (the run may be over)."""
+
+    async def generate(self, request: ModelRequest) -> ModelResult:
+        return await self._manager.generate(self._run_id, request, request.profile or self._default_profile,
+                                            watcher=True)
+
+
+class WatchContextHandle:
+    """Implements contracts.WatchContext for one exchange and one watcher's module."""
+
+    def __init__(self, manager: "Manager", module: str, exchange):
+        self._manager, self._module, self._exchange = manager, module, exchange
+        self.models = WatcherModels(manager, exchange.run_id, exchange.persona.profile)
+        self.history = ReadingHistory(HistoryHandle(manager, exchange.address))
+        self.facts = manager.facts.handle(module)
+
+    def store(self, *, conversation: bool = False, persona: bool = False, person: bool = False):
+        exchange = self._exchange
+        return module_store(self._manager, self._module, exchange.address, exchange.trigger.sender,
+                            [exchange.persona.name], conversation=conversation,
+                            persona=exchange.persona.name if persona else None, person=person)
+
+    def log(self, event: str, **fields: Any) -> None:
+        self._manager.audit.record("watcher", extension=self._module, detail=event, **fields)

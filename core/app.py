@@ -11,6 +11,7 @@ from core.gateway.gateway import Gateway
 from core.loader import LoadedExtension, load_extension
 from core.manager.manager import Manager
 from core.manager.policy import Permissions, check_extension_permissions
+from core.manager.renames import adopt_former_names
 from core.manager.secrets import Secrets
 from core.providers.registry import Providers
 from core.storage.bottle import Bottle
@@ -55,7 +56,7 @@ class Core:
         names = set()
         for path in config.modules():
             loaded = await load_extension(path, lambda name: config.extension_config.get(name, {}),
-                                          config.data_dir / "extensions", self.audit.record)
+                                          config.data_dir / "extensions", self.audit.record, self.manager.facts.handle)
             name = loaded.extension.name
             if name in names:
                 raise ConfigError(f"Two modules are named {name!r}; exclude one (`modules: {{exclude: [...]}}`)")
@@ -70,12 +71,15 @@ class Core:
                 self.manager.register_persona(persona, name)
             for part in loaded.contributions.prompt_parts:
                 self.manager.register_prompt_part(part, name)
+            for watcher in loaded.contributions.watchers:
+                self.manager.register_watcher(watcher, name)
             self._register_defaults(loaded)
             self.extensions.append(loaded)
             self.audit.record("extension_loaded", extension=name, path=str(path), builtin=config.builtin(path),
                               interfaces=[i.name for i in loaded.contributions.interfaces],
                               engines=[e.spec.name for e in loaded.contributions.engines],
-                              capabilities=[c.name for c in loaded.contributions.capabilities])
+                              capabilities=[c.name for c in loaded.contributions.capabilities],
+                              watchers=[w.name for w in loaded.contributions.watchers])
         # Configured profiles may use providers contributed by any loaded module.
         for profile, candidates in config.profiles.items():
             self.providers.add_profile(profile, candidates)
@@ -84,6 +88,7 @@ class Core:
         self.manager.secrets = self._secrets()
         from core.setup import Setup
         self.manager.setup_desk = Setup(config)
+        adopt_former_names(self.manager)  # (Persona.formerly) before the assignments are checked
         problems = self.manager.problems()
         if config.control is not None and config.control.interface not in self.gateway.interfaces:
             problems.append(f"control route {config.control} uses an interface that is not loaded")

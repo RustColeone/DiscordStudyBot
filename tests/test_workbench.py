@@ -26,7 +26,7 @@ from extensions.workbench.workspace.worktree import LandError, Worktrees
 
 SUNDAY = "Meetings on Sunday are listed first instead of last. Fix it and add a test."
 TEAM = {  # the scripted club: two families, so reviewers come from another one
-    "team": {"luna": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
+    "team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
              "drafty": {"name": "Drafty", "family": "alpha", "cheap": ["alpha/a-small"], "strong": ["alpha/a-large"]},
              "checky": {"name": "Checky", "family": "beta", "cheap": ["beta/b-small"], "strong": ["beta/b-large"]}},
     "roles": {"router": ["checky"], "drafter": ["drafty", "checky"], "judge": ["checky", "drafty"],
@@ -65,7 +65,7 @@ def route(kind="change", size="small", risk="low"):
 
 
 class Club:
-    """The lab in the real core, with only the workbench module (as `python -m extensions.workbench` runs it), in a
+    """The Classroom in the real core, with only the workbench module (as `python -m extensions.workbench` runs it), in a
     temporary folder; every provider answered by the scripted `adapter`."""
 
     def __init__(self, tmp: Path, adapter, **config):
@@ -417,9 +417,9 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(totals["cost"])  # no prices configured
 
     async def test_the_narrator_speaks_of_her_own_part_in_the_first_person(self):
-        club = await self.club(DemoAdapter(), roles={"strong": ["luna", "claude"]})  # Luna leads and steps in
+        club = await self.club(DemoAdapter(), roles={"strong": ["gpt", "claude"]})  # GPT leads and steps in
         task = await club.new(SUNDAY)
-        said = [text for who, text in club.said(task) if who == "Luna"]
+        said = [text for who, text in club.said(task) if who == "GPT"]
         self.assertEqual(said[0], "DeepSeek drafts it, Gemini checks it, and I'll step in only if needed.")
         self.assertTrue(said[1].startswith("I'm taking over from DeepSeek: the tests fail"), said[1])
 
@@ -427,7 +427,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         club = await self.club(DemoAdapter())
         task = await club.new(SUNDAY, crew=["grok"])
         said = club.said(task)
-        self.assertEqual(said[0], ("Luna", "Grok drafts it, Gemini checks it, and Claude steps in only if needed."))
+        self.assertEqual(said[0], ("GPT", "Grok drafts it, Gemini checks it, and Claude steps in only if needed."))
         self.assertEqual(next(step for step in club.board.steps(task) if step["id"] == "r1.draft.1")["seat"], "grok")
         # The page knows who can come (here every key is known from the start), and keeps it for the next start.
         self.assertTrue(all(seat["ready"] for seat in club.page._state()["team"]))
@@ -848,7 +848,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_module_runs_a_task_through_the_core(self):
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder)
-            team = {"team": {"luna": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
+            team = {"team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
                              "drafty": {"name": "Drafty", "family": "alpha", "cheap": ["fake/drafty"]},
                              "checky": {"name": "Checky", "family": "beta", "cheap": ["fake/checky"]}},
                     "roles": {"router": ["checky"], "drafter": ["drafty"], "judge": ["checky"], "strong": ["checky"],
@@ -896,7 +896,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         """The core says which profiles have a key (Models.ready, contracts 1.6), so nobody is announced who can't come."""
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder)
-            team = {"team": {"luna": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
+            team = {"team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
                              "nokey": {"name": "Nokey", "family": "gamma", "cheap": ["keyless/k-1"]},
                              "drafty": {"name": "Drafty", "family": "alpha", "cheap": ["fake/drafty"]},
                              "checky": {"name": "Checky", "family": "beta", "cheap": ["fake/checky"]}},
@@ -929,7 +929,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         """As from Discord: the conversation's assignment names the project; the creator approves where they asked."""
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder)
-            team = {"team": {"luna": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
+            team = {"team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
                              "drafty": {"name": "Drafty", "family": "alpha", "cheap": ["fake/drafty"]},
                              "checky": {"name": "Checky", "family": "beta", "cheap": ["fake/checky"]}},
                     "roles": {"router": ["checky"], "drafter": ["drafty"], "judge": ["checky"], "strong": ["checky"],
@@ -973,7 +973,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
                 await core.stop()
 
     async def test_a_trip_from_the_classroom_to_the_lab_and_back(self):
-        """A classmate invites you; the lab starts from what you talked about; the result goes back to the chat."""
+        """A classmate invites you; the Classroom starts from what you talked about; the result goes back to the chat."""
         class Recording(DemoAdapter):
             def __init__(self):
                 self.seen = []
@@ -984,7 +984,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         adapter = Recording()
         with tempfile.TemporaryDirectory() as folder:
             tmp = Path(folder)
-            team = {"team": {"luna": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
+            team = {"team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,
                              "drafty": {"name": "Drafty", "family": "alpha", "cheap": ["fake/drafty"], "also": ["pat"]},
                              "checky": {"name": "Checky", "family": "beta", "cheap": ["fake/checky"]}},
                     "roles": {"router": ["checky"], "drafter": ["drafty"], "judge": ["checky"], "strong": ["checky"],
@@ -1029,13 +1029,13 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
                 task = board.task(task["id"])
                 self.assertEqual(task["status"], "review")
                 spoken = [item["text"] for item in board.messages(task["id"]) if item.get("speaker") == "Drafty"]
-                self.assertTrue(spoken[0].startswith("Here we are in the lab, with Checky."), spoken[0])
-                presence = page.presence()                                     # the visit: both in the lab
+                self.assertTrue(spoken[0].startswith("Here we are in the Classroom, with Checky."), spoken[0])
+                presence = page.presence()                                     # the visit: both in the Classroom
                 self.assertEqual({person["key"] for person in presence["people"]}, {"drafty", "checky"})
-                self.assertIn("pat", presence["away"])                         # Pat's classroom self came along
+                self.assertIn("pat", presence["away"])                         # Pat's MomoChat self came along
                 self.assertEqual(presence["people"][0]["doing"], "waiting for your check")
                 brief = next(messages for name, messages in adapter.seen if name == "workbench_turn")[1]["content"]
-                self.assertIn("The conversation in the classroom", brief["content"] if isinstance(brief, dict) else brief)
+                self.assertIn("The conversation in MomoChat", brief["content"] if isinstance(brief, dict) else brief)
                 self.assertIn("regression test with every fix", brief)
                 await page.port.submit(Request(id="check-all", address=Address("workbench", task["id"]),
                                                sender=Sender("creator", "Leo"), text="$check all", received_at=time.time(),
@@ -1053,15 +1053,15 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(board.task(task["id"])["status"], "landed")
                 await page._report(None, task["id"])
                 await wait()
-                report = chat.texts("room")[-1] if "Back from the lab" in chat.texts("room")[-1] else \
-                    next(text for text in chat.texts("room") if "Back from the lab" in text)
+                report = chat.texts("room")[-1] if "Back from the Classroom" in chat.texts("room")[-1] else \
+                    next(text for text in chat.texts("room") if "Back from the Classroom" in text)
                 self.assertIn("landed as", report)
-                self.assertIn("In the lab: Checky, Drafty.", report)  # who was really there
+                self.assertIn("In the Classroom: Checky, Drafty.", report)  # who was really there
                 recorded = [item.text for item in core.manager.tank.recent_messages("chat:room", 50)]
-                self.assertTrue(any("Back from the lab" in text for text in recorded))       # the classroom knows it
+                self.assertTrue(any("Back from the Classroom" in text for text in recorded))       # MomoChat knows it
                 self.assertEqual(board.task(task["id"])["data"]["reported"]["to"], "chat:room")
                 self.assertEqual(page.presence()["away"], [])                  # back in class with the result
-                await chat.say("$tasks sunday", sender="boss", name="Boss")                 # the lab's logbook
+                await chat.say("$tasks sunday", sender="boss", name="Boss")                 # the Logbook
                 await wait()
                 self.assertIn(task["id"], chat.texts("room")[-1])
             finally:
