@@ -8,10 +8,12 @@
   <link rel="stylesheet" href="static/style.css">
   <link rel="icon" type="image/png" href="favicon.ico">
   <script defer src="static/markdown.js"></script>
+  <script defer src="static/places.js"></script>
   <script defer src="static/app.js"></script>
 </head>
 <body>
   <div class="app" id="app">
+    <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
     <div class="scrim" id="scrim" hidden></div>
 
     <aside class="sidebar" id="sidebar" aria-label="Tasks">
@@ -26,7 +28,7 @@
       <nav class="tasks" id="tasks"></nav>
       <div class="sidebar-foot">
         <button class="foot-button" id="open-projects" type="button">📁 Projects</button>
-        <button class="foot-button" id="open-team" type="button">👥 The club</button>
+        <button class="foot-button" id="open-team" type="button">👥 Students</button>
       </div>
       <div class="me" id="me"></div>
     </aside>
@@ -107,7 +109,7 @@
 
   <div class="dialog" id="team-dialog" role="dialog" aria-modal="true" aria-labelledby="team-title" hidden>
     <div class="dialog-card">
-      <div class="dialog-head"><span id="team-title">The club</span>
+      <div class="dialog-head"><span id="team-title">Students</span>
         <button class="icon-button" data-close type="button" aria-label="Close">✕</button></div>
       <div class="dialog-hint">Who does what. For each role the first classmate who can answer takes it; a reviewer
         comes from another model family than the drafter when one is here. Change it under <code>team:</code> and
@@ -120,5 +122,6 @@
 
   <div class="viewer" id="viewer" hidden><img alt=""></div>
   <div class="toast" id="toast" hidden></div>
+  <script type="application/json" id="places-data">{{places}}</script>
 </body>
 </html>

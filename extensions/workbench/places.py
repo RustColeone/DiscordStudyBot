@@ -13,6 +13,10 @@ import re
 import time
 from typing import Callable
 
+# This page's entries in every page's places bar (paths relative to its link), sorted among all places' by `order`.
+VIEWS = [{"name": "Classroom", "icon": "📝", "path": "", "order": 30},
+         {"name": "Students", "icon": "👥", "path": "#students", "order": 40},
+         {"name": "Logbook", "icon": "📖", "path": "#logbook", "order": 50}]
 DOING = {"review": "waiting for your check", "approved": "waiting for the final approval", "landed": "just landed it",
          "answered": "answered", "failed": "waiting for you"}
 
@@ -62,5 +66,5 @@ def lab_place(board, team, link: Callable[[str, str], str], visit_minutes: float
         people.append({"key": persona, "name": seat.name, "avatar": seat.avatar or persona, **visit})
     note = " · ".join(part for part in (f"{busy} at work" if busy else "", f"{ready} for you to check" if ready else "")
                       if part) or ("on a visit" if people else "quiet")
-    return {"place": {"name": "Lab", "icon": "🧪", "note": note}, "people": people, "away": sorted(guests - {""}),
-            "tickets": tickets[:6], "working": busy, "ready": ready}
+    return {"place": {"name": "Classroom", "icon": "📝", "note": note}, "people": people,
+            "away": sorted(guests - {""}), "tickets": tickets[:6], "working": busy, "ready": ready, "views": VIEWS}

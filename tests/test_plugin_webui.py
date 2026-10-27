@@ -99,17 +99,69 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         ws, state = await self.socket()
         self.assertIsNone(state["places"])  # nobody else published a place: no map
         seen = iface(self.core, "chat").port.directory()["webui"]
-        self.assertEqual((seen["status"]["place"]["name"], seen["link"]), ("Classroom", web_.address_shown))
+        self.assertEqual((seen["status"]["place"]["name"], seen["link"]), ("MomoChat", web_.address_shown))
         self.assertIn("deepseek", {person["key"] for person in seen["status"]["people"]})  # the classmates, published
         iface(self.core, "chat").port.publish(link="http://lab.local:4157/", status=lab)  # the lab, next door
         event, _ = await self.until(ws, lambda item: item["type"] == "places", limit=6)
         other = event["places"]["others"][0]
         self.assertEqual((other["interface"], other["tickets"][0]["title"], other["away"]), ("chat", "Add rooms", ["claude"]))
-        self.assertEqual(event["places"]["here"]["place"]["name"], "Classroom")
+        self.assertEqual(event["places"]["here"]["place"]["name"], "MomoChat")
         ws2, state2 = await self.socket()
         self.assertEqual(state2["places"]["others"][0]["link"], "http://lab.local:4157/")  # a page opened later
         await ws.close()
         await ws2.close()
+
+    # ---- the places bar and the cafe --------------------------------------------------------------
+    async def test_the_page_publishes_its_views_for_every_places_bar(self):
+        web_ = await self.start()
+        ws, state = await self.socket()
+        self.assertEqual(state["here"]["link"], web_.address_shown)  # the bar is drawn even with no other place
+        self.assertEqual([(view["name"], view["path"], view["order"]) for view in state["here"]["views"]],
+                         [("Cafe", "cafe", 10), ("MomoChat", "", 20)])
+        published = iface(self.core, "chat").port.directory()["webui"]["status"]
+        self.assertEqual([view["name"] for view in published["views"]], ["Cafe", "MomoChat"])
+        async with self.http.get(f"{self.base}/") as response:  # the page comes with them, for its first paint
+            page = await response.text()
+        given = json.loads(page.split('id="places-data">', 1)[1].split("</script>", 1)[0])
+        self.assertEqual(([view["name"] for view in given["here"]["views"]], given["others"]), (["Cafe", "MomoChat"], []))
+        await ws.close()
+
+    async def test_the_cafe_shows_every_student_whether_she_can_answer_and_the_preset_rooms(self):
+        import shutil
+        from unittest.mock import patch
+        web_ = await self.start({"personas": ["p", "q"], "classmates": ["Pia</script><b>", "Quinn"]})
+        folder = self.tmp / "webui"  # a copy of the plugin's pages, with rooms of its own
+        shutil.copytree(PLUGIN / "static", folder / "static")
+        (folder / "rooms").mkdir()
+        (folder / "rooms" / "garden.png").write_bytes(b"\x89PNG fake")
+        (folder / "rooms" / "notes.txt").write_text("not a room")
+        (folder / "secret.png").write_bytes(b"\x89PNG outside")
+        web_.folder = folder
+        async with self.http.get(f"{self.base}/cafe") as response:
+            self.assertEqual(response.status, 200)
+            page = await response.text()
+        self.assertIn("<title>Cafe · ", page)
+        given = json.loads(page.split('id="cafe-data">', 1)[1].split("</script>", 1)[0])  # the data comes inside
+        self.assertEqual([item["display"] for item in given["students"]], ["Pia</script><b>", "Quinn"])
+        self.assertNotIn("Pia</script>", page)  # a name never ends the script that carries it
+        with patch.object(web_.port, "models_ready", lambda profile: profile == "p"):
+            async with self.http.get(f"{self.base}/api/cafe") as response:
+                data = await response.json()
+        self.assertEqual([(item["name"], item["display"], item["ready"]) for item in data["students"]],
+                         [("p", "Pia</script><b>", True), ("q", "Quinn", False)])  # one without a model still walks around
+        self.assertEqual((data["rooms"], [view["name"] for view in data["here"]["views"]]), (["garden.png"], ["Cafe", "MomoChat"]))
+        async with self.http.get(f"{self.base}/rooms/garden.png") as response:
+            self.assertEqual((response.status, response.headers["Content-Type"]), (200, "image/png"))
+        for name in ("notes.txt", "..%2Fsecret.png", "missing.png"):  # only listed pictures are served
+            async with self.http.get(f"{self.base}/rooms/{name}") as response:
+                self.assertEqual(response.status, 404, name)
+
+    async def test_the_cafe_asks_for_the_passphrase_first(self):
+        await self.start({"passphrase": "open sesame"})
+        async with self.http.get(f"{self.base}/cafe", allow_redirects=False) as response:
+            self.assertEqual((response.status, response.headers["Location"]), (303, "login"))
+        async with self.http.get(f"{self.base}/api/cafe") as response:
+            self.assertEqual(response.status, 401)
 
     # ---- talking --------------------------------------------------------------------------------
     async def test_a_message_reaches_the_engine_as_the_creator_and_the_answer_arrives_live_and_stays(self):

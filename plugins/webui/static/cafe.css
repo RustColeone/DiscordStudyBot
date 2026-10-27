@@ -1,0 +1,76 @@
+/* The cafe: a preset room (drawn here, or a picture from rooms/) with the students walking around in it. */
+.cafe-body { overflow: auto; background: var(--bg); }
+.cafe-body .places-nav { position: sticky; top: 0; z-index: 20; }
+.cafe { max-width: 1240px; margin: 0 auto; padding: 16px 20px 28px; display: flex; flex-direction: column; gap: 16px; }
+
+.cafe-scene { position: relative; height: clamp(320px, 62vh, 560px); border-radius: 22px; overflow: hidden;
+              border: 1px solid var(--line); background: var(--panel); }
+.cafe-room, .cafe-floor { position: absolute; inset: 0; }
+.cafe-room > * { position: absolute; }
+.cafe-room img.picture { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+@media (prefers-color-scheme: dark) { .cafe-room { filter: brightness(.82) saturate(.9); } }
+.cafe-room-name { position: absolute; left: 14px; top: 12px; z-index: 200; padding: 3px 12px; border-radius: 999px;
+                  background: color-mix(in srgb, var(--paper) 92%, transparent); font-size: .82rem; font-weight: 800; }
+
+/* drawn rooms: shapes standing in for the pictures to come */
+.room-wall { left: 0; right: 0; top: 0; height: 62%; }
+.room-trim { left: 0; right: 0; top: 60%; height: 2.5%; }
+.room-floor { left: 0; right: 0; bottom: 0; height: 37.5%; }
+.room-window { top: 10%; width: 17%; height: 36%; border: 8px solid #fffbf5; border-radius: 10px; }
+.room-window::before, .room-window::after { content: ""; position: absolute; background: #fffbf5; }
+.room-window::before { left: 50%; top: 0; bottom: 0; width: 6px; margin-left: -3px; }
+.room-window::after { top: 50%; left: 0; right: 0; height: 6px; margin-top: -3px; }
+.room-counter { right: 5%; bottom: 30%; width: 26%; height: 20%; border-radius: 10px 10px 4px 4px; background: #9b6a43;
+                box-shadow: inset 0 14px 0 #c08a5c; }
+.room-shelves { right: 4%; top: 7%; width: 32%; height: 52%; padding: 10px; box-sizing: border-box; border-radius: 8px;
+                background: #7a5536; display: flex; flex-direction: column; gap: 10px; }
+.room-books { flex: 1; border-radius: 3px; background: repeating-linear-gradient(90deg, #b5523f 0 12px, #46709f 12px 26px,
+              #d9a63e 26px 34px, #5e8a50 34px 48px, #7c62a8 48px 58px, #efe2d1 58px 62px); }
+.room-books:nth-child(2) { background-position: 23px 0; }
+.room-books:nth-child(3) { background-position: 41px 0; }
+.room-cloud { height: 40px; border-radius: 999px; background: #ffffff; opacity: .9; }
+.room-fence { left: 0; right: 0; top: 48%; height: 14%; border-top: 8px solid #f4f1ea;
+              background: repeating-linear-gradient(90deg, #f4f1ea 0 7px, transparent 7px 44px); }
+.room-table { width: 110px; height: 32px; border-radius: 50%; background: rgba(110, 70, 30, .28); }
+
+/* the students: a stand-in chibi (her avatar on a small body) until her own chibi art exists */
+.chibi { position: absolute; display: flex; flex-direction: column; align-items: center; padding: 0; border: 0;
+         background: transparent; color: var(--ink); cursor: pointer; transform: translateX(-50%); }
+.chibi:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 12px; }
+.chibi-figure { display: flex; flex-direction: column; align-items: center; }
+.chibi.is-left .chibi-face { transform: scaleX(-1); }
+.chibi.is-walking .chibi-figure { animation: chibi-bob .55s ease-in-out infinite; }
+.chibi-face { position: relative; z-index: 1; width: 58px; height: 58px; border-radius: 50%; border: 3px solid #ffffff;
+              object-fit: cover; object-position: 50% 20%; display: grid; place-items: center; font-weight: 900;
+              font-size: 1.4rem; color: #ffffff; box-shadow: 0 2px 6px rgba(0, 0, 0, .15); }
+.chibi-torso { width: 42px; height: 34px; margin-top: -10px; border-radius: 18px 18px 12px 12px; }
+.chibi-shadow { width: 50px; height: 8px; margin-top: 2px; border-radius: 50%; background: rgba(60, 40, 20, .2); }
+.chibi-name { margin-top: 3px; padding: 1px 8px; border-radius: 999px; background: #fffbf5; color: #3d3129;
+              font-size: .75rem; font-weight: 900; white-space: nowrap; }
+.chibi.is-away { opacity: .7; }
+@keyframes chibi-bob { 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .chibi.is-walking .chibi-figure { animation: none; } }
+
+.cafe-panels { display: flex; flex-wrap: wrap; gap: 16px; }
+.cafe-panel { flex: 1 1 340px; min-width: 0; background: var(--paper); border: 1px solid var(--line);
+              border-radius: var(--radius); padding: 14px 18px; }
+.cafe-panel h2 { margin: 0 0 10px; font-size: 1.05rem; }
+.cafe-hint { margin: 10px 0 0; font-size: .84rem; color: var(--muted); line-height: 1.45; }
+.room-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.room-choice { display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 12px; text-align: left;
+               border: 1px solid var(--line); background: var(--paper); font-size: .84rem; font-weight: 800; }
+.room-choice[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.room-choice:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.room-swatch { display: block; height: 62px; border-radius: 8px; overflow: hidden; background-size: cover; background-position: center; }
+.cafe-people { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.cafe-people li { display: flex; align-items: center; gap: 10px; font-size: .9rem; }
+.cafe-people .person-face { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; display: grid;
+                            place-items: center; color: #ffffff; font-weight: 900; flex: none; }
+.cafe-people .person-status { color: var(--muted); }
+.cafe-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; padding: 10px 16px;
+              border-radius: 14px; background: var(--ink); color: var(--paper); font-size: .9rem; box-shadow: var(--shadow); }
+@media (max-width: 760px) {
+  .cafe { padding: 10px 10px 20px; }
+  .chibi-face { width: 46px; height: 46px; }
+  .chibi-torso { width: 34px; height: 28px; margin-top: -8px; }
+}

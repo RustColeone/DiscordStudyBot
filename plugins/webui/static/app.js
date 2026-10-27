@@ -34,6 +34,12 @@
     // offer), the model that last answered for each classmate here, and whether `$model` is allowed at all.
     models: null, answered: new Map(), modelsAllowed: true, modelMenuFor: null,
   };
+  // The places bar from the places the page came with, until the server says more.
+  try {
+    const given = JSON.parse($("#places-data")?.textContent || "null");
+    if (given?.here) { state.places = given.others?.length ? given : null; state.here = given.here;
+                       window.renderPlaces?.($("#places-nav"), given, "MomoChat"); }
+  } catch { /* drawn when the server says hello */ }
   const messages = $("#messages");
   const input = $("#input");
   // A touch screen (a phone's on-screen keyboard): Return makes a new line and ➤ sends, as in phone chat apps.
@@ -178,8 +184,9 @@
     for (const name of members) {
       const spoke = (state.spoke.get(name) || 0) > Date.now() - 4000;
       const key = placeKey(name);
-      const where = key && visiting.has(key) ? `in the ${visiting.get(key).toLowerCase()}`
-        : key && tickets.has(key) ? `in class · has an invitation to the ${tickets.get(key).place.toLowerCase()}` : "in class";
+      // A student is in every place at once: here, and also wherever else she is working.
+      const where = key && visiting.has(key) ? `here · also in the ${visiting.get(key)}`
+        : key && tickets.has(key) ? `here · has an invitation to the ${tickets.get(key).place}` : "here";
       const card = paint(make("div", "member-card"), keyOf(name));
       const member = paint(make("button", "member"), keyOf(name));
       member.type = "button";
@@ -358,7 +365,7 @@
     const members = membersOf(current);
     $("#empty-title").textContent = isDirect(current) ? `Just you and ${members[0]}.`
       : current?.personas ? `${members.join(", ")} are here.` : "Everyone's here.";
-    input.placeholder = isDirect(current) ? `Message ${members[0]}…` : "Message the class…";
+    input.placeholder = isDirect(current) ? `Message ${members[0]}…` : "Message the club…";
   }
 
   function move(id, target, below) {
@@ -671,14 +678,13 @@
     if (!map) return;
     map.hidden = !places;
     if (!places) return;
-    const away = awayKeys(places);       // classmates visiting another place show there, not here
     const tickets = ticketsHere(places); // invitations to another place, held by classmates here
     const tile = (place, here) => {
       const node = make(here ? "div" : "a", `place${here ? " is-here" : ""}`);
       if (!here && place.link) { node.href = place.link; node.title = `Go to ${place.place.name}`; }
       node.append(make("span", "place-name", `${place.place.icon || "📍"} ${place.place.name}`));
       const faces = make("span", "place-faces");
-      const people = here ? (place.people || []).filter((person) => !away.has(person.key)) : place.people || [];
+      const people = place.people || [];  // a student is in every place at once: here, and wherever she works
       for (const person of people.slice(0, 6)) {
         const face = avatar(person.name, person.avatar || keyOf(person.name));
         face.title = person.title ? `${person.name} · ${person.doing || "working"} on “${person.title}”` : person.name;
@@ -717,10 +723,19 @@
       me.replaceChildren(avatar(s.user.name, "you"), make("span", "", s.user.name));
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
       state.places = s.places;
+      state.here = s.here;
       renderMap();
-      // A link to a chat (#<chat>, from the lab's "open the classroom", say) opens it.
-      const linked = decodeURIComponent(location.hash.slice(1));
+      window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
+      // A link to a chat (#<chat>, from the Classroom's "open the chat", say) opens it; #dm=<student>, from the
+      // cafe, opens the direct chat with her (started if there is none yet).
+      let linked = "";
+      try { linked = decodeURIComponent(location.hash.slice(1)); } catch { linked = ""; }
       if (linked) history.replaceState(null, "", location.pathname + location.search);
+      const direct = linked.startsWith("dm=") ? linked.slice(3) : "";
+      if (direct && state.roster.some((item) => item.name === direct)) {
+        startChat([direct]);
+        return;
+      }
       if (linked && linked !== state.current && state.conversations.some((chat) => chat.id === linked)) {
         open(linked);
         return;
@@ -738,7 +753,8 @@
       const moved = where(state.places) !== where(event.places);
       state.places = event.places;
       renderMap();
-      if (moved) renderMembers();  // "in the lab" in the member list too
+      window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
+      if (moved) renderMembers();  // "also in the Classroom" in the member list too
     } else if (event.type === "models") {
       receiveModels(event);
     } else if (event.type === "message") {

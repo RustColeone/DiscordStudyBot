@@ -326,6 +326,13 @@ Two seats can share a family, for example two DeepSeek models as two classmates 
 
 ## The classroom and the lab
 
+> **Renamed (2026-10-26).** The web UI's chat is now **MomoChat** and this page is the **Classroom**, with
+> **Students** (`#students`, the seats) and the **Logbook** (`#logbook`, the task list) as its other views; the web
+> UI also has a **Cafe**. Each page publishes its views in its directory status (`views`: name, icon, a path relative
+> to its link, `order`), and every page draws one places bar from them (`static/places.js`). A student is in every
+> place at once: the maps no longer take her out of one place while she works in another. The text below still
+> uses the old names.
+
 Two places, one club (the Codex route: chat and work are separate places that remember each other):
 
 - the **classroom** is the web UI on :4156, chatting with the classmates (the room engine);
@@ -362,7 +369,7 @@ sequenceDiagram
 **The mini map**, in both places: the classroom and the lab side by side, and who is in each. A **visit** lasts from
 the start of a task until you report back or it is closed (or `visit_minutes`, 30, after it last moved once nothing
 runs): the classmate who brought you, her crew and everyone who worked on it are in the lab meanwhile, at work or
-"waiting for your check", and the classroom personas they stand for (`also:`) are gone from class. An invitation
+"waiting for your check"; they stay in the classroom too (a student is in every place at once). An invitation
 you have not followed yet keeps her in class with a pulsing ring, and its ticket waits in the corridor (🎟️🚪);
 click a place (or the ticket) to go there. The lab serves it at `/api/presence`; the classroom's server asks for it
 on this machine every few seconds while a page is open (web UI setting `lab_presence`), so neither page reaches

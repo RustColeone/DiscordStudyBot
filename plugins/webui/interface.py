@@ -31,8 +31,10 @@ from contracts import Address, Delivery, Display, FileRef, Interface, Reply, Req
 from .store import Store
 
 DEFAULT_CONVERSATION = "classroom"
+DEFAULT_TITLE = "The club"  # the group chat every page opens first (its id stays "classroom")
 CONVERSATION_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 AVATAR_KEY = re.compile(r"^[a-z0-9_-]{1,40}$")
+ROOM_FILE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}\.(png|jpg|jpeg|webp|gif)$")  # a preset room picture in rooms/
 AVATAR_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
                 ".gif": "image/gif"}
 # Shown in the page itself; anything else is downloaded, never rendered (an HTML or SVG file could run script).
@@ -159,7 +161,7 @@ class WebUI(Interface):
     async def start(self, port) -> None:
         self.port = port
         self.store = Store(self.data_dir / "webui.db")
-        self.store.ensure(DEFAULT_CONVERSATION, "Classroom")
+        self.store.ensure(DEFAULT_CONVERSATION, DEFAULT_TITLE)
         # Whoever opens the page is the creator; approvals they start come back to the page. With no other
         # interface offering one, the classroom also becomes the control route.
         port.set_owners([self.user_id], control=Address(self.name, DEFAULT_CONVERSATION), fallback=True)
@@ -168,7 +170,8 @@ class WebUI(Interface):
         app.add_routes([
             web.get("/", self._index), web.get("/login", self._login_page), web.post("/login", self._login),
             web.get("/static/{name}", self._static), web.get("/avatars/{key}", self._avatar),
-            web.get("/favicon.ico", self._favicon),
+            web.get("/favicon.ico", self._favicon), web.get("/cafe", self._cafe),
+            web.get("/api/cafe", self._cafe_state), web.get("/rooms/{name}", self._room),
             web.get("/files/{file_id}", self._file), web.get("/api/history", self._history),
             web.post("/api/upload", self._upload), web.get("/ws", self._socket)])
         self._runner = web.AppRunner(app, access_log=None)
@@ -194,10 +197,17 @@ class WebUI(Interface):
             self._spawn(self._watch_places())
 
     def place(self) -> dict:
-        """The classroom as a place (contracts.PLACE_STATUS): the classmates, for any interface's map."""
-        return {"place": {"name": "Classroom", "icon": "🏫", "note": ""},
+        """MomoChat as a place (contracts.PLACE_STATUS): the students, for any interface's map. `views` are this
+        page's entries in every page's places bar, which sorts all places' views by `order` (paths relative to the
+        published link)."""
+        return {"place": {"name": "MomoChat", "icon": "💬", "note": ""},
                 "people": [{"key": place_key(item["name"]), "name": item["display"],
-                            "avatar": avatar_key(item["name"])} for item in self.roster]}
+                            "avatar": avatar_key(item["name"])} for item in self.roster],
+                "views": [{"name": "Cafe", "icon": "☕", "path": "cafe", "order": 10},
+                          {"name": "MomoChat", "icon": "💬", "path": "", "order": 20}]}
+
+    def here(self) -> dict:
+        return {"interface": self.name, "link": self.address_shown, **self.place()}
 
     def _places(self) -> dict | None:
         """The classroom and the other places in the directory; None when no other place is published."""
@@ -262,7 +272,7 @@ class WebUI(Interface):
             return self._refuse(request, "origin", "Cross-site requests are refused.")
         public = request.path in ("/login", "/static/style.css", "/favicon.ico")
         if self.passphrase and not public and not self._signed_in(request):
-            if request.method == "GET" and request.path == "/":
+            if request.method == "GET" and request.path in ("/", "/cafe"):  # the pages: sign in first
                 raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path (/chat/login)
             return self._secured(web.Response(status=401, text="Sign in first."))
         return self._secured(await handler(request))
@@ -369,8 +379,19 @@ class WebUI(Interface):
     # ---- pages and files ----------------------------------------------------------------------------
     async def _index(self, request: web.Request) -> web.Response:
         page = (self.folder / "static" / "index.html").read_text(encoding="utf-8")
-        return web.Response(text=page.replace("{{title}}", self._html(self.title)), content_type="text/html",
-                            headers={"Cache-Control": "no-cache"})
+        places = self._places() or {"here": self.here(), "others": []}  # for the places bar's first paint
+        return web.Response(text=self._fill(page, title=self._html(self.title), places=self._json(places)),
+                            content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    @staticmethod
+    def _json(value) -> str:
+        """JSON to put inside a page's <script type="application/json">: it never ends the tag."""
+        return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c")
+
+    @staticmethod
+    def _fill(page: str, **values: str) -> str:
+        """A page with its {{name}} holes filled, in one pass (a value never fills another's hole)."""
+        return re.sub(r"\{\{(\w+)\}\}", lambda match: values.get(match.group(1), match.group(0)), page)
 
     async def _static(self, request: web.Request) -> web.StreamResponse:
         name = request.match_info["name"]
@@ -400,6 +421,42 @@ class WebUI(Interface):
                     return web.FileResponse(path, headers={"Content-Type": AVATAR_TYPES[path.suffix.lower()],
                                                            "Cache-Control": "max-age=300"})
         raise web.HTTPNotFound()
+
+    # ---- the cafe: the students walking around a preset room; a tap opens her chat ------------------------
+    async def _cafe(self, request: web.Request) -> web.Response:
+        """The page with its data inside (`{{data}}`, JSON the script reads at once), so the room and the students
+        are there on the first paint."""
+        page = (self.folder / "static" / "cafe.html").read_text(encoding="utf-8")
+        return web.Response(text=self._fill(page, title=self._html(self.title), data=self._json(self.cafe())),
+                            content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    def rooms(self) -> list[str]:
+        """The preset room pictures in `rooms/` (beside the drawn ones the page has), by file name."""
+        folder = self.folder / "rooms"
+        if not folder.is_dir():
+            return []
+        return sorted(path.name for path in folder.iterdir()
+                      if path.suffix.lower() in AVATAR_TYPES and ROOM_FILE.fullmatch(path.name.lower()) and path.is_file())
+
+    async def _room(self, request: web.Request) -> web.StreamResponse:
+        name = request.match_info["name"]
+        if name in self.rooms():
+            path = self.folder / "rooms" / name
+            return web.FileResponse(path, headers={"Content-Type": AVATAR_TYPES[path.suffix.lower()],
+                                                   "Cache-Control": "max-age=300"})
+        raise web.HTTPNotFound()
+
+    def cafe(self) -> dict:
+        """Who is in the cafe (every student: she is anywhere at once), whether she can answer yet (her model profile
+        is named after her, as the room's are), the rooms, and the places for the places bar."""
+        ready = getattr(self.port, "models_ready", None) if self.port is not None else None
+        students = [{**item, "avatar": avatar_key(item["name"]),
+                     "ready": bool(ready(item["name"])) if callable(ready) else True} for item in self.roster]
+        return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
+                "here": self.here(), "places": self._places()}
+
+    async def _cafe_state(self, request: web.Request) -> web.Response:
+        return web.json_response(self.cafe(), headers={"Cache-Control": "no-cache"})
 
     async def _file(self, request: web.Request) -> web.StreamResponse:
         record = self.store.file(request.match_info["file_id"])
@@ -475,7 +532,7 @@ class WebUI(Interface):
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
                 "classmates": self.classmates, "roster": self.roster, "avatars": self.avatars(), "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
-                "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb,
+                "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb, "here": self.here(),
                 "places": self._places() if self.map and self.port is not None and
                 callable(getattr(self.port, "directory", None)) else None}
 
@@ -656,7 +713,7 @@ class WebUI(Interface):
         for key in [key for key, event in self._progress.items() if event["conversation"] == conversation]:
             self._progress.pop(key, None)
         if not self.store.conversations():
-            self.store.ensure(DEFAULT_CONVERSATION, "Classroom")
+            self.store.ensure(DEFAULT_CONVERSATION, DEFAULT_TITLE)
         self.port.log("chat_deleted")
         await self._broadcast({"type": "deleted", "conversation": conversation,
                                "items": self.store.conversations()})

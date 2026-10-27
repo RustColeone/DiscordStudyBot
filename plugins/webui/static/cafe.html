@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Cafe · {{title}}</title>
+  <link rel="stylesheet" href="static/style.css">
+  <link rel="stylesheet" href="static/cafe.css">
+  <link rel="icon" type="image/png" href="favicon.ico">
+  <link rel="apple-touch-icon" href="favicon.ico">
+  <script defer src="static/places.js"></script>
+  <script defer src="static/cafe.js"></script>
+</head>
+<body class="cafe-body">
+  <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
+  <main class="cafe">
+    <section class="cafe-scene" id="scene" aria-label="The cafe">
+      <div class="cafe-room" id="room" aria-hidden="true"></div>
+      <div class="cafe-floor" id="floor"></div>
+      <span class="cafe-room-name" id="room-name"></span>
+    </section>
+    <div class="cafe-panels">
+      <section class="cafe-panel" aria-labelledby="deco-title">
+        <h2 id="deco-title">Decorate: pick a room</h2>
+        <div class="room-list" id="room-list" role="group" aria-label="Rooms"></div>
+        <p class="cafe-hint">Rooms are preset pictures for now: drop more into the web UI's <code>rooms/</code> folder.
+          Tap a student to chat with her in MomoChat.</p>
+      </section>
+      <section class="cafe-panel" aria-labelledby="here-title">
+        <h2 id="here-title">Everyone is here, wherever else they are</h2>
+        <ul class="cafe-people" id="people"></ul>
+      </section>
+    </div>
+  </main>
+  <div class="cafe-toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <script type="application/json" id="cafe-data">{{data}}</script>
+</body>
+</html>

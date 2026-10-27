@@ -1019,7 +1019,7 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(presence["people"], [])
                 page._publish()                                                # what other interfaces see
                 seen = iface(core, "chat").port.directory()["workbench"]
-                self.assertEqual((seen["link"], seen["status"]["place"]["name"]), (page.url, "Lab"))
+                self.assertEqual((seen["link"], seen["status"]["place"]["name"]), (page.url, "Classroom"))
                 await page.port.submit(Request(id="accept", address=Address("workbench", task["id"]),
                                                sender=Sender("creator", "Leo"), text=SUNDAY, received_at=time.time(),
                                                display=page.display, extra={"task": task["id"], "project": "sample"}))
@@ -1269,7 +1269,10 @@ class VerifyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await http.get(url + "/static/app.js")).status, 404)
             state = await (await http.get(url + "/api/state")).json()
             self.assertEqual(state["page"], False)
-            self.assertEqual(state["places"]["here"]["place"]["name"], "Lab")
+            self.assertEqual(state["places"]["here"]["place"]["name"], "Classroom")
+            # its entries in every page's places bar (the web UI's Cafe and MomoChat come before them)
+            self.assertEqual([(view["name"], view["path"], view["order"]) for view in state["places"]["here"]["views"]],
+                             [("Classroom", "", 30), ("Students", "#students", 40), ("Logbook", "#logbook", 50)])
 
 
 # ---- `club`, the lab from a terminal --------------------------------------------------------------------------

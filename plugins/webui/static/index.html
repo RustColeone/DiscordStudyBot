@@ -14,10 +14,12 @@
           integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg"
           crossorigin="anonymous"></script>
   <script defer src="static/markdown.js"></script>
+  <script defer src="static/places.js"></script>
   <script defer src="static/app.js"></script>
 </head>
 <body>
   <div class="app" id="app">
+    <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
     <!-- Inside the app: the app is fixed (a stacking context of its own), so the scrim must stack among its
          panels (below them, above the chat), not over the whole app. -->
     <div class="scrim" id="scrim" hidden></div>
@@ -42,7 +44,7 @@
       <header class="topbar">
         <button class="icon-button" id="toggle-sidebar" type="button" aria-label="Chats" aria-pressed="false"
                 title="Chats">☰</button>
-        <div class="chat-title" id="chat-title" title="Rename">Classroom</div>
+        <div class="chat-title" id="chat-title" title="Rename">MomoChat</div>
         <div class="connection" id="connection" aria-live="polite"></div>
         <button class="icon-button members-button" id="toggle-members" type="button" aria-label="Classmates"
                 aria-pressed="false" title="Classmates">👥</button>
@@ -65,7 +67,7 @@
           <label class="icon-button attach" title="Attach files">
             📎<input type="file" id="file-input" multiple hidden>
           </label>
-          <textarea id="input" rows="1" placeholder="Message the class…" aria-label="Message"></textarea>
+          <textarea id="input" rows="1" placeholder="Message…" aria-label="Message"></textarea>
           <button class="send" id="send" type="submit" aria-label="Send">➤</button>
         </div>
       </form>
@@ -73,7 +75,7 @@
 
     <aside class="members" id="members" aria-label="Classmates">
       <div class="members-head">
-        <span id="members-title">In class</span>
+        <span id="members-title">In this chat</span>
         <button class="icon-button only-narrow" id="close-members" type="button" aria-label="Close">✕</button>
       </div>
       <div class="member-list" id="member-list"></div>
@@ -84,6 +86,7 @@
   <div class="menu" id="chat-menu" role="menu" hidden></div>
   <div class="menu model-menu" id="model-menu" role="menu" hidden></div>
   <div class="viewer" id="viewer" hidden><img alt=""></div>
+  <script type="application/json" id="places-data">{{places}}</script>
   <div class="picker" id="picker" role="dialog" aria-modal="true" aria-labelledby="picker-title" hidden>
     <form class="picker-card" id="picker-form">
       <div class="picker-title" id="picker-title">New chat</div>

@@ -210,7 +210,9 @@ class WorkbenchUI(Interface):
     async def _index(self, request):
         html = (self.static / "index.html").read_text(encoding="utf-8")
         title = str(self.config.get("title") or "Club Room")
-        html = html.replace("{{title}}", _escape(title))
+        places = json.dumps(self.places(), ensure_ascii=False).replace("<", "\\u003c")  # (never ends the tag)
+        html = re.sub(r"\{\{(title|places)\}\}",
+                      lambda match: _escape(title) if match.group(1) == "title" else places, html)  # in one pass
         return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
     async def _static(self, request):

@@ -150,7 +150,7 @@
         return;
       }
       case "task": return taskChanged(event.task);
-      case "places": state.places = event.places; state.links = event.links || {}; renderMap(); return;
+      case "places": state.places = event.places; state.links = event.links || {}; renderMap(); renderPlaces(); return;
       case "step": {
         const step = event.step;
         if (!state.loaded.has(step.task)) return;
@@ -226,6 +226,7 @@
     state.links = data.links || {};
     if (data.workflows) WORKFLOWS = data.workflows.map((item) => [item.name, item.title, item.text]);
     renderMap();
+    renderPlaces();
     state.tasks = new Map(data.tasks.map((task) => [task.id, task]));
     state.progress = new Map(Object.entries(data.progress || {}).map(([task, runs]) =>
       [task, new Map(runs.map((run) => [run.run_id, run]))]));
@@ -242,7 +243,26 @@
     renderProjects();
     renderTeam();
     open(state.current, false);
+    showView();
   }
+
+  // ---- the places bar: this page is the Classroom; #students and #logbook are its other views ----------------
+  const VIEW_OF = { students: "Students", logbook: "Logbook" };
+  const viewOf = () => VIEW_OF[location.hash.slice(1)] || "Classroom";
+  function renderPlaces() {
+    if (state.places) window.renderPlaces?.($("#places-nav"), state.places, viewOf());
+  }
+  function showView() {
+    const view = viewOf();
+    if (view === "Students") { openDialog("team"); refreshPrices(); }
+    else if (view === "Logbook") { setPanel("sidebar", true); $("#filter").value = ""; renderSidebar(); $("#filter").focus(); }
+    renderPlaces();
+  }
+  window.addEventListener("hashchange", () => { if (VIEW_OF[location.hash.slice(1)]) showView(); else renderPlaces(); });
+  try {  // the places bar from the places the page came with, until the server says hello
+    const given = JSON.parse($("#places-data")?.textContent || "null");
+    if (given?.here) window.renderPlaces?.($("#places-nav"), given, viewOf());
+  } catch { /* drawn at hello */ }
 
   function taskChanged(task) {
     const before = state.tasks.get(task.id);
@@ -386,7 +406,7 @@
     return link ? `${link.replace(/\/$/, "")}/#${encodeURIComponent(rest.join(":"))}` : "";
   }
 
-  // The mini map: the places, who is in each (people away visiting another place show there), and the corridor
+  // The mini map: the places, who is in each (a student is in every place at once), and the corridor
   // with the invitations waiting for you.
   function personFace(person) {
     if (state.seats.has(person.key)) return avatar(person.key, true);
@@ -405,14 +425,13 @@
     const places = state.places;
     if (!map || !places) return;
     map.hidden = false;
-    const away = new Set([places.here, ...(places.others || [])].flatMap((place) => place.away || []));
     const tickets = new Map((places.here.tickets || []).filter((ticket) => ticket.key).map((ticket) => [ticket.key, ticket]));
     const tile = (place, here) => {
       const node = make(here ? "div" : "button", `place${here ? " is-here" : ""}`);
       if (!here) { node.type = "button"; node.title = `Go to ${place.place.name}`; node.onclick = () => { if (place.link) location.href = place.link; }; }
       node.append(make("span", "place-name", `${place.place.icon || "📍"} ${place.place.name}`));
       const faces = make("span", "place-faces");
-      const people = here ? place.people || [] : (place.people || []).filter((person) => !away.has(person.key));
+      const people = place.people || [];  // a student is in every place at once
       for (const person of people.slice(0, 6)) {
         const face = personFace(person);
         face.title = person.title ? `${person.name} · ${person.doing || "working"} on “${person.title}”` : person.name;
@@ -547,7 +566,7 @@
   }
   const center = (node) => { const row = make("div", "row row-center"); row.append(node); return row; };
 
-  // Arriving from the classroom: what she brought, the brief to start from, where and how.
+  // Arriving from a chat: what she brought, the brief to start from, where and how.
   function arrivalCard(task) {
     const invited = task.data?.invited || {};
     const seat = seatOf(invited.lead) || seatOf(invited.by);
@@ -564,10 +583,10 @@
       image.alt = "";
       face.append(image);
     }
-    head.append(face, make("span", "grow", `${who} brought you to the lab`),
+    head.append(face, make("span", "grow", `${who} brought you to the Classroom`),
                 make("span", "chip st-invited", placeName(invited.from)));
     card.append(head, make("div", "card-body", "Nothing has started yet. Check the brief she wrote, pick the " +
-      "project and how to work, then start. You can go back to the classroom any time."));
+      "project and how to work, then start. You can go back to the chat any time."));
     if ((invited.excerpt || []).length) {
       const details = make("details", "excerpt");
       details.append(make("summary", "", `The conversation she brought (${invited.excerpt.length} messages)`));
@@ -617,7 +636,7 @@
     card.append(make("div", "section-title", `Who comes along with ${seat?.name || who}`),
                 crewPicker(draft.crew, seat?.persona));
     const buttons = make("div", "buttons");
-    const start = make("button", "action action-primary", "Start in the lab");
+    const start = make("button", "action action-primary", "Start the session");
     start.type = "button";
     start.onclick = () => {
       if (!draft.text.trim() || !draft.project) { toast("The brief and a project are needed to start."); return; }
@@ -635,7 +654,7 @@
     return center(card);
   }
 
-  // Done in the lab: take the result back to where it came from, where the conversation goes on.
+  // Done in the Classroom: take the result back to where it came from, where the conversation goes on.
   function backCard(task) {
     const data = task.data || {};
     if (!task.own || !(task.actions || []).includes("report")
@@ -651,7 +670,7 @@
     const report = make("button", "action action-primary", "Report back");
     report.type = "button";
     report.onclick = () => { send({ type: "report", task: task.id }); buttons.replaceChildren(make("span", "decided", "Sending…")); };
-    const stay = make("button", "action", "Stay in the lab");
+    const stay = make("button", "action", "Stay in the Classroom");
     stay.type = "button";
     stay.onclick = () => card.remove();
     buttons.append(report, stay);

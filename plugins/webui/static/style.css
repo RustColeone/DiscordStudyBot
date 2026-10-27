@@ -39,10 +39,10 @@ kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 6p
 /* The visible area, not the screen: app.js sets --app-top/--app-height from the visual viewport, so a phone's
    keyboard shrinks the app (header and composer stay in view) instead of covering or scrolling it. */
 .app { display: grid; position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-height, 100dvh);
-       grid-template-columns: auto minmax(0, 1fr) auto; }
-.sidebar { grid-column: 1; width: var(--sidebar-w); position: relative; }
-.room { grid-column: 2; }
-.members { grid-column: 3; width: var(--members-w); position: relative; }
+       grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); }
+.sidebar { grid-column: 1; grid-row: 2; width: var(--sidebar-w); position: relative; }
+.room { grid-column: 2; grid-row: 2; }
+.members { grid-column: 3; grid-row: 2; width: var(--members-w); position: relative; }
 body:not(.show-sidebar) .sidebar, body:not(.show-members) .members { display: none; }
 .icon-button[aria-pressed="true"] { background: var(--panel); }
 .resizer { position: absolute; top: 0; bottom: 0; width: 9px; cursor: col-resize; z-index: 4; touch-action: none; }
@@ -373,3 +373,19 @@ a.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line))
 .door { display: flex; align-items: center; gap: 1px; text-decoration: none; font-size: .7rem; animation: door 1.6s ease-in-out infinite; }
 .door .avatar { width: 20px; height: 20px; font-size: .6rem; }
 @keyframes door { 50% { opacity: .45; } }
+
+/* the places bar (places.js): every place's views across the top, this page's marked */
+.places-nav { grid-column: 1 / -1; grid-row: 1; display: flex; justify-content: center; gap: 4px; padding: 5px 10px;
+              background: var(--paper); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.places-nav[hidden] { display: none; }
+.places-tab { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 76px; padding: 5px 10px;
+              border-radius: 14px; color: var(--ink); text-decoration: none; font-size: .78rem; font-weight: 800; }
+.places-tab:hover { background: var(--panel); }
+.places-tab.is-current { background: var(--panel); box-shadow: inset 0 -3px 0 var(--accent); }
+.places-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.places-icon { font-size: 1.15rem; line-height: 1.25; }
+@media (max-width: 760px) {
+  .places-nav { justify-content: space-between; padding: 4px 6px; }
+  .places-tab { flex: 1; min-width: 0; padding: 4px 2px; font-size: .68rem; }
+}
+body.keyboard-open .places-nav { display: none; }  /* typing on a phone: every line counts */

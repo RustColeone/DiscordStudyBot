@@ -112,6 +112,9 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | [`static/markdown.js`](static/markdown.js) | A small Markdown renderer that escapes the text first and adds only its own tags (links only to http/https); math is typeset by KaTeX when loaded; `@Name` becomes a chip. |
 | [`static/style.css`](static/style.css) | Layout and theme (light and dark). |
 | [`avatars/`](avatars/README.md) | Classmates' pictures, served at `/avatars/<key>`. |
+| [`static/cafe.html`](static/cafe.html), [`static/cafe.js`](static/cafe.js), [`static/cafe.css`](static/cafe.css) | The cafe: every student walking around a room (drawn, or a picture from `rooms/`); a tap opens her direct chat (`/#dm=<persona>`). The page comes with its data (`{{data}}`, JSON that never ends its script tag). |
+| [`static/places.js`](static/places.js) | The places bar on both pages: every place's `views` from the core's directory, sorted by `order` (the workbench keeps a copy). |
+| [`rooms/`](rooms/README.md) | The cafe's preset room pictures, served at `/rooms/<file>`. |
 
 ### HTTP routes
 
@@ -121,6 +124,9 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | `GET /login`, `POST /login` | Sign-in page and form, only meaningful with a passphrase. |
 | `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
 | `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif). |
+| `GET /cafe` | The cafe page, with its data inside (`no-cache`); signed out, it goes to the sign-in page. |
+| `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, avatar, ready}], avatars, rooms, here, places}`. `ready` asks `models_ready` for the profile named after her (the room's are). |
+| `GET /rooms/{name}` | Only a picture `rooms/` lists (nothing else, and never outside it). |
 | `GET /favicon.ico` | `static/favicon.png`. |
 | `GET /files/{file_id}` | A stored upload or delivered file (below). |
 | `GET /api/history?conversation=&after=` | A chat's stored messages: the latest 300, or those after a message ID (not a whole number from 0 to 2^63-1: 400). |
