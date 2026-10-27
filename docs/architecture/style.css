@@ -22,6 +22,9 @@ a { color: var(--accent); }
        background: var(--paper); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 800; font-size: 1.1rem; color: var(--ink); text-decoration: none; }
 .brand span { color: var(--muted); font-weight: 600; }
+.top-links { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.guide-link { font-weight: 700; text-decoration: none; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); }
+.guide-link:hover { text-decoration: underline; }
 .search { position: relative; width: min(420px, 55vw); }
 .search input { width: 100%; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
                 color: var(--ink); font: inherit; }
@@ -137,3 +140,5 @@ a { color: var(--accent); }
 .graph .grp:focus { outline: none; }
 .graph .grp.current .grp-box { stroke: var(--accent); stroke-width: 2.6; }
 .graph .grp { transition: opacity .15s; }
+.graph .k-guide { --b: #c9681c; }
+.graph .k-guide .card { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }

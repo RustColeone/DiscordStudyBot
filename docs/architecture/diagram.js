@@ -10,15 +10,17 @@
   // The letter on each kind of box.
   const BADGE = { module: "M", folder: "D", file: "F", class: "C", function: "ƒ", method: "ƒ", section: "§",
                   external: "↗", gateway: "G", manager: "M", providers: "P", store: "DB", startup: "S",
-                  supervisor: "S", contracts: "K" };
+                  supervisor: "S", contracts: "K", guide: "?" };
 
   // ---- describing a chart ---------------------------------------------------------------------------------
   class Chart {
     // compact: each box laid out on its own and the boxes packed tight; edges crossing between boxes are drawn as
     // curves (a file's classes and sections). Otherwise ELK routes every edge through the groups (the top map).
-    constructor(direction = "RIGHT", { compact = false } = {}) {
+    // overview: it opens fitted whole, however small (the system, the guide)
+    constructor(direction = "RIGHT", { compact = false, overview = false } = {}) {
       this.direction = direction;
       this.compact = compact;
+      this.overview = overview;
       this.nodes = [];
       this.groups = [];
       this.edges = [];
@@ -292,7 +294,7 @@
     const down = chart.direction === "DOWN";
     const first = chart.nodes.map((node) => where.get(node.id)).filter(Boolean)
       .sort((a, b) => (down ? a.y - b.y || a.x - b.x : a.x - b.x || a.y - b.y))[0] || null;
-    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, first,
+    return { svg, world, bounds: { x: 0, y: 0, width: bounds.width, height: bounds.height }, first, overview: chart.overview,
              current: current ? where.get(current.id) : null,
              targets: new Map(items.filter((item) => item.target).map((item) => [item.id, item.target])) };
   }
@@ -402,7 +404,7 @@
     }
     start() {  // the current box centred; else the whole diagram if it stays readable, else its beginning at 70%
       if (this.current) { this.focusOn(this.current, Math.max(0.85, Math.min(1, this.fitScale()))); return; }
-      if (this.fitScale() >= 0.55) { this.fit(1); return; }
+      if (this.overview || this.fitScale() >= 0.55) { this.fit(1); return; }
       this.begin(0.7);
     }
   }
@@ -428,7 +430,7 @@
     view.onZoom = onZoom;
     // The same diagram (a click inside it): exactly where the user was. Another one: at the user's zoom.
     if (before && before.structure === structure) view.set(before.view.scale, before.view.x, before.view.y);
-    else if (before) view.keep(before.view.scale);
+    else if (before && !picture.overview) view.keep(before.view.scale);
     else view.start();
     last = { structure, view };
     return view;
