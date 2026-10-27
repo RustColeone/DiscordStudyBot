@@ -630,6 +630,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         steps = {step["id"]: step for step in club.board.steps(task)}
         self.assertEqual(steps["r1.single.1"]["seat"], "drafty")       # her turn stays hers
         self.assertEqual(steps["r1.single.2"]["seat"], "checky")       # the rest is Checky's
+        from extensions.workbench import views                          # both are on the session's strip
+        self.assertEqual(set(views.task_view(club.board, club.task(task), "workbench:")["people"]), {"drafty", "checky"})
         self.assertEqual(len(steps["r1.single.1"]["data"]["actions"]), 1)
         self.assertEqual(len(steps["r1.single.1"]["data"]["calls"]), 1)
         self.assertTrue(any("got stuck" in text for _, text in club.said(task)))

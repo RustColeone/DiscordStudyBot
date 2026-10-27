@@ -132,7 +132,8 @@ def report_text(board, team, task: dict, link: Callable[[str], str] = lambda tas
 
 
 def task_view(board, task: dict, own_prefix: str, state: Callable[[str], str | None] | None = None) -> dict[str, Any]:
-    """A task as the frontends get it: its fields, the data they show, the approval it waits for, what they can do."""
+    """A task as the frontends get it: its fields, the data they show, the approval it waits for, what they can do, and
+    who took part (`people`: the classmate who brought it, her crew, then everyone who worked a step, in that order)."""
     data = task.get("data") or {}
     keep = ("request", "route", "change", "validation", "review", "summary", "totals", "plan", "branch", "base",
             "worktree", "landed", "failure", "ticks", "reviewed", "baseline", "baseline_failed", "rounds", "by",
@@ -145,4 +146,8 @@ def task_view(board, task: dict, own_prefix: str, state: Callable[[str], str | N
     view["own"] = task["address"].startswith(own_prefix)
     view["approval"] = approval(board, task, state)
     view["actions"] = actions(task, view["approval"])
+    invited = data.get("invited") or {}
+    view["people"] = list(dict.fromkeys(person for person in (
+        invited.get("lead") or "", *(data.get("crew", invited.get("crew")) or ()),
+        *(step["seat"] for step in board.steps(task["id"]))) if isinstance(person, str) and person))
     return view

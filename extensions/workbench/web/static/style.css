@@ -460,3 +460,75 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
   .places-tab { flex: 1; min-width: 0; padding: 4px 2px; font-size: .68rem; }
 }
 body.keyboard-open .places-nav { display: none; }
+
+/* the Classroom: every session a strip, as when choosing a stage, with who took part faintly on its right */
+.sessions { grid-column: 1 / -1; grid-row: 2; overflow-y: auto; padding: 22px clamp(14px, 4vw, 48px) 40px; }
+.sessions[hidden] { display: none; }
+body.view-list .sidebar, body.view-list .room, body.view-list .inspector { display: none !important; }
+.sessions-head, .sessions-tools, .strips { max-width: 1100px; margin-left: auto; margin-right: auto; }
+.sessions-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px; }
+.sessions-heading h1 { margin: 0; font-size: 1.9rem; }
+.sessions-heading p { margin: 4px 0 0; color: var(--muted); }
+.add-session { display: inline-flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 22px; border: 0;
+               border-radius: 16px; background: var(--accent); color: var(--accent-ink); font-weight: 900; font-size: 1.05rem;
+               box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent); }
+.add-session:hover { filter: brightness(1.05); }
+.add-session:focus-visible, .add-fab:focus-visible, .session-tab:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.sessions-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+                  margin-top: 18px; margin-bottom: 14px; }
+.session-tabs { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 999px; background: var(--panel); }
+.session-tab { border: 0; background: transparent; border-radius: 999px; min-height: 40px; padding: 6px 14px;
+               font-weight: 800; color: var(--muted); }
+.session-tab[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: var(--shadow); }
+.session-count { margin-left: 6px; font-size: .78rem; opacity: .8; }
+.sessions-search { min-height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line);
+                   background: var(--paper); color: var(--ink); font: inherit; width: min(280px, 100%); }
+.strips { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.strip { position: relative; width: 100%; min-height: 104px; display: flex; align-items: center; gap: 18px;
+         padding: 14px 22px 14px 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper);
+         color: var(--ink); text-align: left; overflow: hidden; isolation: isolate;
+         transition: transform .15s, box-shadow .15s, border-color .15s; }
+.strip:hover { transform: translateX(4px); box-shadow: var(--shadow); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.strip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+/* the students who took part: tall slices of their pictures, fading in from the left */
+.strip-art { position: absolute; top: 0; right: 0; bottom: 0; width: 56%; display: flex; justify-content: flex-end;
+             z-index: -1; pointer-events: none; opacity: .42;
+             -webkit-mask-image: linear-gradient(to right, transparent, #000 60%); mask-image: linear-gradient(to right, transparent, #000 60%); }
+.strip-face { flex: none; height: 100%; width: 140px; margin-left: -34px; display: grid; place-items: center; overflow: hidden;
+              background: var(--c, var(--panel)); color: #ffffff; font-size: 3rem; font-weight: 900;
+              clip-path: polygon(24% 0, 100% 0, 76% 100%, 0 100%); }
+.strip-face:first-child { margin-left: 0; }
+.strip-face img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; }
+.strip-no { flex: none; width: 64px; font-size: 2.3rem; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums;
+            color: color-mix(in srgb, var(--ink) 28%, transparent); }
+.strip.is-unread .strip-no { color: var(--accent); }
+.strip-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.strip-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .8rem; }
+.strip-project { color: var(--muted); font-weight: 700; }
+.strip-title { font-size: 1.12rem; font-weight: 900; line-height: 1.25; overflow: hidden; display: -webkit-box;
+               -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+.strip-meta { font-size: .84rem; color: var(--muted); }
+.strip-go { flex: none; font-size: 1.8rem; color: var(--muted); }
+.strips-empty { display: flex; flex-direction: column; gap: 4px; align-items: center; padding: 36px 18px; text-align: center;
+                border: 2px dashed var(--line); border-radius: 18px; color: var(--muted); }
+.strips-empty b { color: var(--ink); font-size: 1.1rem; }
+.add-fab { display: none; position: fixed; right: 18px; bottom: 22px; z-index: 30; width: 60px; height: 60px; border-radius: 50%;
+           border: 0; background: var(--accent); color: var(--accent-ink); font-size: 2rem; font-weight: 900; box-shadow: var(--shadow); }
+.back-button { font-size: 1.6rem; line-height: 1; }
+@media (max-width: 640px) {
+  .sessions { padding: 14px 12px 96px; }
+  .sessions-heading h1 { font-size: 1.5rem; }
+  .add-session { display: none; }
+  .add-fab { display: block; }
+  .strip { gap: 10px; padding: 12px 14px 12px 12px; min-height: 92px; }
+  .strip:hover { transform: none; }
+  .strip-no { width: 36px; font-size: 1.45rem; }
+  .strip-art { width: 50%; opacity: .24; }  /* fainter: on a phone the text runs over the pictures */
+  .strip-face { width: 90px; margin-left: -24px; }
+  .strip-title, .strip-meta { text-shadow: 0 0 6px var(--paper), 0 0 2px var(--paper); }
+  .strip-go { display: none; }
+  .session-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
+  .session-tab { white-space: nowrap; }
+  .sessions-search { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .strip { transition: none; } .strip:hover { transform: none; } }

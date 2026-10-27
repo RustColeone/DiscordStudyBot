@@ -14,6 +14,23 @@
 <body>
   <div class="app" id="app">
     <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
+    <!-- The Classroom: every session a strip, as when choosing a stage; who took part, faintly, on its right. -->
+    <section class="sessions" id="sessions" aria-labelledby="sessions-title" hidden>
+      <header class="sessions-head">
+        <div class="sessions-heading">
+          <h1 id="sessions-title">Classroom</h1>
+          <p>Every session is its own strip. A student can sit in as many as you like, all at once.</p>
+        </div>
+        <button class="add-session" id="add-session" type="button"><span aria-hidden="true">＋</span> New session</button>
+      </header>
+      <div class="sessions-tools">
+        <div class="session-tabs" id="session-tabs" role="group" aria-label="Show"></div>
+        <input class="sessions-search" id="sessions-search" type="search" placeholder="Find a session…"
+               aria-label="Find a session">
+      </div>
+      <ol class="strips" id="strips"></ol>
+      <button class="add-fab" id="add-fab" type="button" aria-label="New session" title="New session">＋</button>
+    </section>
     <div class="scrim" id="scrim" hidden></div>
 
     <aside class="sidebar" id="sidebar" aria-label="Tasks">
@@ -23,8 +40,8 @@
         <button class="icon-button only-narrow" id="close-sidebar" type="button" aria-label="Close">✕</button>
       </div>
       <nav class="map" id="map" aria-label="Where everyone is" hidden></nav>
-      <button class="new-task" id="new-task" type="button">＋ New task</button>
-      <input class="filter" id="filter" type="search" placeholder="Find a task…" aria-label="Find a task">
+      <button class="new-task" id="new-task" type="button">＋ New session</button>
+      <input class="filter" id="filter" type="search" placeholder="Find a session…" aria-label="Find a session">
       <nav class="tasks" id="tasks"></nav>
       <div class="sidebar-foot">
         <button class="foot-button" id="open-projects" type="button">📁 Projects</button>
@@ -35,7 +52,9 @@
 
     <main class="room">
       <header class="topbar">
-        <button class="icon-button" id="toggle-sidebar" type="button" aria-label="Tasks" title="Tasks">☰</button>
+        <button class="icon-button back-button" id="back-to-sessions" type="button" aria-label="All sessions"
+                title="All sessions">‹</button>
+        <button class="icon-button" id="toggle-sidebar" type="button" aria-label="Sessions" title="Sessions">☰</button>
         <div class="heading">
           <div class="task-title" id="task-title">New task</div>
           <div class="task-meta" id="task-meta"></div>
@@ -122,6 +141,6 @@
 
   <div class="viewer" id="viewer" hidden><img alt=""></div>
   <div class="toast" id="toast" hidden></div>
-  <script type="application/json" id="places-data">{{places}}</script>
+  <script type="application/json" id="state-data">{{state}}</script>
 </body>
 </html>

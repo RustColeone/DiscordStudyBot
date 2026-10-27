@@ -330,8 +330,11 @@ Two seats can share a family, for example two DeepSeek models as two classmates 
 > **Students** (`#students`, the seats) and the **Logbook** (`#logbook`, the task list) as its other views; the web
 > UI also has a **Cafe**. Each page publishes its views in its directory status (`views`: name, icon, a path relative
 > to its link, `order`), and every page draws one places bar from them (`static/places.js`). A student is in every
-> place at once: the maps no longer take her out of one place while she works in another. The text below still
-> uses the old names.
+> place at once: the maps no longer take her out of one place while she works in another. The Classroom opens on its
+> **sessions**: one strip each (open ones first), numbered like stages, with the students who took part (the task's
+> `people`: who brought it, her crew, everyone who worked a step) faintly on its right, and **＋ New session**; a strip
+> opens the session, and ‹ goes back. The page comes with its first hello inside (`{{state}}`), so the strips are
+> there on the first paint. The text below still uses the old names.
 
 Two places, one club (the Codex route: chat and work are separate places that remember each other):
 

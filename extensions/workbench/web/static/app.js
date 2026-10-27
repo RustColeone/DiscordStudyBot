@@ -41,6 +41,7 @@
     set: (key, value) => { try { localStorage.setItem(key, value); } catch { /* private window */ } },
   };
   const state = {
+    view: "list", sessionTab: "all",  // the Classroom: its strips ("list") or one session ("task")
     title: "Club Room", user: { name: "You" }, team: [], seats: new Map(), byName: new Map(), roles: {},
     avatars: new Set(), projects: [], tasks: new Map(), current: store.get("workbench.task"), steps: new Map(),
     messages: new Map(), loaded: new Set(), progress: new Map(), unread: new Set(), ws: null, retry: 0, pending: [],
@@ -234,15 +235,16 @@
     const me = $("#me");
     me.replaceChildren(avatar("you", true), make("span", "", state.user.name));
     state.loaded.clear();
-    // A link to a task (#t-…, or #t-…/changes to open the inspector on a tab) wins over the last one open.
+    // A link to a session (#t-…, or #t-…/changes to open the inspector on a tab) opens it, #new starts one; otherwise
+    // the Classroom shows its sessions.
     const [linked, tab] = linkedTask();
-    if (linked && state.tasks.has(linked)) state.current = linked;
     if (["changes", "steps", "plan"].includes(tab)) { state.tab = tab; setPanel("inspector", true, false); }
-    if (state.current && !state.tasks.has(state.current)) state.current = null;
     renderSidebar();
     renderProjects();
     renderTeam();
-    open(state.current, false);
+    if (linked && state.tasks.has(linked)) open(linked, false);
+    else if (linked === "new") open(null, false);
+    else showList();
     showView();
   }
 
@@ -255,14 +257,94 @@
   function showView() {
     const view = viewOf();
     if (view === "Students") { openDialog("team"); refreshPrices(); }
-    else if (view === "Logbook") { setPanel("sidebar", true); $("#filter").value = ""; renderSidebar(); $("#filter").focus(); }
+    else if (view === "Logbook") { showList("done"); $("#sessions-search").focus(); }
     renderPlaces();
   }
+
+  // ---- the sessions: strips to choose from, open ones first, who took part faintly on each -----------------
+  const GROUPS = { all: "All", working: "Working", waiting: "Waiting for you", done: "Done" };
+  const groupOf = (task) => ["queued", "working"].includes(task.status) ? "working"
+    : ["review", "approved", "invited", "failed"].includes(task.status) ? "waiting" : "done";
+  const statusLine = (task) => task.status === "working" && task.phase ? task.phase
+    : task.status === "invited" ? `${task.data?.invited?.by || nameOf(task.data?.invited?.lead) || "A classmate"} is waiting`
+    : STATUS[task.status] || task.status;
+  function showList(tab) {
+    state.view = "list";
+    if (tab) state.sessionTab = tab;
+    document.body.classList.add("view-list");
+    $("#sessions").hidden = false;
+    if (!VIEW_OF[location.hash.slice(1)]) history.replaceState(null, "", location.pathname + location.search);
+    renderSessions();
+    renderPlaces();
+  }
+  function stripFace(seat) {
+    const picture = seat.avatar || seat.persona;
+    const face = paint(make("span", "strip-face"), seat.persona);
+    if (state.avatars.has(picture)) {
+      const image = make("img");
+      image.src = `avatars/${picture}`;
+      image.alt = "";
+      face.append(image);
+    } else {
+      face.textContent = (seat.name || "?").charAt(0).toUpperCase();
+    }
+    return face;
+  }
+  function strip(task, number) {
+    const item = make("li");
+    const button = make("button", `strip st-${task.status}${state.unread.has(task.id) ? " is-unread" : ""}`);
+    button.type = "button";
+    const people = (task.people || []).map((name) => state.seats.get(name)).filter(Boolean);
+    const art = make("span", "strip-art");
+    art.setAttribute("aria-hidden", "true");
+    art.append(...people.slice(0, 4).map(stripFace));
+    const top = make("span", "strip-top");
+    top.append(make("span", `chip st-${task.status}`, statusLine(task)), make("span", "strip-project", `📁 ${task.project}`));
+    const totals = task.data?.totals || {};
+    const ended = ["queued", "working"].includes(task.status) ? Date.now() / 1000 : task.updated;
+    const meta = [task.workflow ? task.workflow[0].toUpperCase() + task.workflow.slice(1) : "",
+                  people.map((seat) => seat.name).join(", "),
+                  totals.cost != null && totals.calls ? money(totals.cost) : "",
+                  totals.calls ? span(Math.max(0, ended - task.created)) : "", ago(task.updated)].filter(Boolean);
+    const body = make("span", "strip-body");
+    body.append(top, make("span", "strip-title", task.title), make("span", "strip-meta", meta.join(" · ")));
+    button.append(art, make("span", "strip-no", String(number).padStart(2, "0")), body, make("span", "strip-go", "›"));
+    button.onclick = () => open(task.id);
+    item.append(button);
+    return item;
+  }
+  function renderSessions() {
+    if (state.view !== "list") return;
+    const all = [...state.tasks.values()];
+    const numbers = new Map([...all].sort((a, b) => a.created - b.created).map((task, index) => [task.id, index + 1]));
+    const counts = { all: all.length, working: 0, waiting: 0, done: 0 };
+    for (const task of all) counts[groupOf(task)] += 1;
+    $("#session-tabs").replaceChildren(...Object.entries(GROUPS).map(([key, label]) => {
+      const tab = make("button", "session-tab");
+      tab.type = "button";
+      tab.setAttribute("aria-pressed", String(state.sessionTab === key));
+      tab.append(document.createTextNode(label), make("span", "session-count", String(counts[key])));
+      tab.onclick = () => { state.sessionTab = key; renderSessions(); };
+      return tab;
+    }));
+    const query = $("#sessions-search").value.trim().toLowerCase();
+    const shown = all.filter((task) => (state.sessionTab === "all" || groupOf(task) === state.sessionTab)
+      && (!query || task.title.toLowerCase().includes(query) || task.project.toLowerCase().includes(query)))
+      .sort((a, b) => (groupOf(a) === "done") - (groupOf(b) === "done") || b.updated - a.updated);
+    if (!shown.length) {
+      const empty = make("li", "strips-empty");
+      empty.append(make("b", "", all.length ? "Nothing here." : "No sessions yet."),
+                   make("span", "", all.length ? "Try another tab, or other words." : "Start one: pick the work, then the team."));
+      $("#strips").replaceChildren(empty);
+      return;
+    }
+    $("#strips").replaceChildren(...shown.map((task) => strip(task, numbers.get(task.id))));
+  }
+  $("#sessions-search").addEventListener("input", renderSessions);
+  $("#add-session").onclick = () => open(null);
+  $("#add-fab").onclick = () => open(null);
+  $("#back-to-sessions").onclick = () => showList();
   window.addEventListener("hashchange", () => { if (VIEW_OF[location.hash.slice(1)]) showView(); else renderPlaces(); });
-  try {  // the places bar from the places the page came with, until the server says hello
-    const given = JSON.parse($("#places-data")?.textContent || "null");
-    if (given?.here) window.renderPlaces?.($("#places-nav"), given, viewOf());
-  } catch { /* drawn at hello */ }
 
   function taskChanged(task) {
     const before = state.tasks.get(task.id);
@@ -270,6 +352,7 @@
     if (task.id !== state.current && before && before.status !== task.status) state.unread.add(task.id);
     if (document.hidden && task.status === "review" && before?.status !== "review") document.title = `● ${state.title}`;
     renderSidebar();
+    renderSessions();
     if (task.id === state.current) {
       renderHeader();
       renderComposer();
@@ -324,8 +407,11 @@
   // ---- opening a task -----------------------------------------------------------------------------
   async function open(taskId, remember = true) {
     state.current = taskId || null;
+    state.view = "task";
+    document.body.classList.remove("view-list");
+    $("#sessions").hidden = true;
     if (remember) store.set("workbench.task", state.current || "");
-    history.replaceState(null, "", state.current ? `#${state.current}` : location.pathname + location.search);
+    history.replaceState(null, "", state.current ? `#${state.current}` : "#new");
     if (taskId) state.unread.delete(taskId);
     state.expanded.clear();
     state.diff = null;
@@ -344,7 +430,7 @@
   function renderHeader() {
     const task = currentTask();
     const meta = $("#task-meta");
-    $("#task-title").textContent = task ? task.title : "New task";
+    $("#task-title").textContent = task ? task.title : "New session";
     if (!task) {
       meta.replaceChildren(make("span", "", "Describe the work, pick a project, and the club takes it from there."));
       return;
@@ -1579,5 +1665,9 @@
     toastTimer = setTimeout(() => { node.hidden = true; }, 3600);
   }
 
+  try {  // what the page came with, drawn at once; the server's hello follows with the same, live
+    const given = JSON.parse($("#state-data")?.textContent || "null");
+    if (given?.team) hello(given);
+  } catch { /* drawn at hello */ }
   connect();
 })();
