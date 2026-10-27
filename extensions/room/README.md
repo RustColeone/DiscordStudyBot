@@ -20,6 +20,7 @@ contract, read [`extensions/assistant`](../assistant) first; it is shorter.
 | Setting | `history_limit` | `number`, default 30: "Earlier messages every character reads word for word" |
 | Setting | `chime_in` | `boolean`, default false: "A group message naming no one: whose turn it is answers, the others may join in" |
 | Setting | `compact` | `boolean`, default true: "Fold messages older than history_limit into the chat's rolling summary" |
+| Setting | `diary` | `boolean`, default false: "Each character keeps notes about people in the core diary (off: the companion module keeps her memory)" |
 
 The characters, their prompts, their model profiles and Grok's provider are the students module's: see
 [`extensions/students`](../students). To give a character more (a personality of your own, a running joke, house
@@ -39,6 +40,7 @@ compact_every: 20
 compact_profile: default
 max_tokens: 1500
 aliases: {}                     # more names that call on a persona, beyond her own aliases
+diary: false                    # notes in the core diary too (the companion keeps each student's memory anyway)
 ```
 
 | Key | Default | Meaning |
@@ -51,6 +53,7 @@ aliases: {}                     # more names that call on a persona, beyond her 
 | `compact_profile` | `default` | The model profile that writes the summary. |
 | `max_tokens` | 1500 | `max_tokens` of each model turn. |
 | `aliases` | `{}` | More names per persona that count as addressing her, in this room only. Her own other names are the persona's `aliases` (a student's `student.yml`: Claude is also Haiku, GPT is also Luna). |
+| `diary` | false | Each character also keeps notes about people in the core diary, written inside her turn. Off since 2026-10-27: the companion module keeps what each student remembers (notes, mood, bond), the same in every engine, and two note keepers would say the same thing twice. |
 
 On/off settings accept `true`/`false`, `yes`/`no`, `on`/`off` and `1`/`0`, so `chime_in: "false"` is off. A
 number that is not a number (`history_limit: abc`) falls back to its default instead of failing the run; the
@@ -74,7 +77,8 @@ assignments:
 Assignment `options` the room reads: `instructions` (added to every character's system prompt),
 `owner_instructions` (added only when an owner sent the request), `max_steps`, `history_limit`,
 `chime_in`, `compact`, `compact_every`, `compact_profile`, `history_image_minutes` (default 30) and
-`diary: false`. The core reads `diary_scope` (a name: each character also reads her notes about a person
+`diary` (off unless set: the companion module keeps each student's memory). With `diary: true` the core reads
+`diary_scope` (a name: each character also reads her notes about a person
 from every conversation whose assignment uses the same name; notes stay filed where they were written, so
 the setting can change freely; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). The room does not read the assistant's `history_scope`
 or `quote`.
@@ -86,7 +90,7 @@ Discord study channel and a lively web chat:
 assignments:
   "discord:234567890123456789": {engine: room, personas: [gpt, claude], options: {history_limit: 20}}
   "webui:*": {engine: room, personas: [gpt, gemini, claude, deepseek, grok],
-              options: {history_limit: 40, chime_in: true, diary_scope: webui}}
+              options: {history_limit: 40, chime_in: true}}
 ```
 
 To turn it off for one conversation, assign that conversation another engine or set `enabled: false`.
@@ -128,8 +132,10 @@ other engines to use, and `python -m core --check` reports any assignment still 
 * **Models.** `$model` lists each character's model in the conversation; an admin can choose one per
   character with `$model <persona> <provider>/<model>` and undo it with `$model <persona> reset`. The
   core records on each reply which provider and model wrote it.
-* **Diaries.** Each character keeps her own notes about each person; `$memory` shows and forgets them.
-* **Limits.** At most 5 actions and 4 new jobs per turn, 2 diary notes per turn, `max_steps` turns per
+* **Memory.** What a character remembers of each person is the companion module's (her notes, mood and bond,
+  in every engine). The room's own diary is off; with `diary: true` each character also keeps notes in the core
+  diary, which `$memory` shows and forgets.
+* **Limits.** At most 5 actions and 4 new jobs per turn, 2 diary notes per turn (with the diary on), `max_steps` turns per
   run. When a character cannot go on she says so with a fixed sentence, in Chinese if the latest message
   contains Chinese characters and in English otherwise; the others continue.
 
@@ -195,6 +201,8 @@ and whose model to name on the reply. The schema (`turn_schema`) is strict JSON:
  "jobs": [{"id": "verify", "character": "claude", "instruction": "...", "after": ["opening-1"]}],
  "diary": [{"key": "study.subject", "kind": "fact|episode|reflection", "note": "...", "importance": 3}]}
 ```
+
+(`diary` is in the instructions and the schema only when the diary is on.)
 
 `status`, `message`, `actions` and `jobs` are required; `character` is an enum of the session's
 personas. `pass` (stay silent) is accepted only on an optional job, with no actions or jobs; it
@@ -298,11 +306,10 @@ are shown only when an owner sent the request. Diary notes are private to each c
   in `session.store(conversation=True)` (the module's store for this conversation).
 * **Rolling summary**: the core's per-conversation summary (`session.history.summarize`); an admin can
   remove it with `$memory clear summary`.
-* **Diaries**: each character's notes about the person who sent the request, filed in that conversation
-  and read there, or also in every conversation of the same `diary_scope`.
+* **Diaries** (only with `diary: true`): each character's notes about the person who sent the request, filed
+  in that conversation and read there, or also in every conversation of the same `diary_scope`.
   Only notes of importance 3 or more are written; the core enforces the rest (at most 200 notes per
-  persona and person; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)). Turn off with
-  `diary: false`.
+  persona and person; see [Diaries](../../docs/core/EXTENSIONS.md#diaries)).
 
 ## Tests
 

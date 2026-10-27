@@ -2,7 +2,7 @@
 # It needs mneme-llm 0.2 or newer (pip install -U mneme-llm); without it the module adds nothing.
 
 # personas: [gpt, gemini, claude, deepseek, grok]   # whose companion it keeps (left out: every persona)
-# engines: [room, assistant]    # whose messages are conversation (the Classroom's reports teach her nothing of you)
+# engines: [room, assistant, chat]   # whose messages are conversation (chat: Whale-chan's; not the Classroom's)
 # learn: true                   # after each of her messages: her mood, notes worth keeping, a day of contact
 # notes: true                   # keep notes, and give her those that fit each message
 # mood: true                    # judge her mood after each exchange; tell her its news once
@@ -10,6 +10,12 @@
 # writer_profile: deepseek      # the model profile for mneme-llm's own calls (left out: her own)
 # reflect_after_notes: 5        # rewrite her impression of a person once a day, once she has this many notes
 # language: zh                  # the language of the lines it adds to prompts (en or zh; mneme-llm's default: en)
+# memory_language: Chinese      # notes also glossed in this language, so they are found whatever language you ask in
+# decisions: core               # core (her model) or luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
+# call_owner: 主人               # what her memory calls the bot's owner (left out: their name)
+# config: whale.toml            # a mneme-llm config file, read when her file is first made (relative to its data folder)
+# students:                     # a student's own settings, over the ones above
+#   whale_chan: {language: zh, memory_language: Chinese, decisions: luna, call_owner: 主人}
 # platforms: {whale_chan: discord}   # interfaces that share people: one Discord user is one person on both bots
 # roles:                        # who people are to every student it keeps: creator (one), family, friend, acquaintance
 #   "discord:123456789012345678": creator

@@ -1,7 +1,8 @@
 """Chat: an engine that behaves like a personal LLM web client (ChatGPT, Claude) inside the app.
 
 One conversation is one ongoing thread: the model sees the thread so far (up to a budget), images
-shared in it, and its own diary about the person. It answers in full Markdown at high effort and uses
+shared in it, and what she remembers of the person (the companion module's part; or, with `diary` on, her notes in
+the core diary). It answers in full Markdown at high effort and uses
 tools when they help, showing what it is doing as a progress line; only the answer is posted.
 Sending `/new` (or `/reset`) starts a fresh thread in that conversation; earlier messages stay in
 history but are no longer context.
@@ -16,11 +17,9 @@ answer or a speak-up, one JSON object (TURN_SCHEMA). The transcript keeps both f
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import datetime as dt
 import json
-import logging
 from typing import Any
 
 from contracts import Engine, EngineSpec, FileRef, ModelError, ModelRequest, RunYield, Session, ToolResult, ToolSpec
@@ -28,7 +27,6 @@ from contracts import Engine, EngineSpec, FileRef, ModelError, ModelRequest, Run
 from .speakup import MARK
 from .voice import speakable
 
-log = logging.getLogger("whale_chan")
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 NEW_THREAD = {"/new", "/reset", "/clear"}
 VOICE_TOOL = "whale_chan.speak"
@@ -211,12 +209,13 @@ class ChatEngine(Engine):
 
     def __init__(self, max_steps: int = 10, history_limit: int = 60, history_chars: int = 40000,
                  effort: str = "high", max_tokens: int = 8000, new_chat_text: str = "New chat started.",
-                 companion=None, voice: dict | None = None, call_owner: str | None = None, tool_calls: bool = True):
+                 diary: bool = False, voice: dict | None = None, call_owner: str | None = None, tool_calls: bool = True):
         self.max_steps, self.history_limit, self.history_chars = max_steps, history_limit, history_chars
         self.effort, self.max_tokens, self.new_chat_text = effort, max_tokens, new_chat_text
-        # mneme-llm memory and mood (None: the core diary); voice: {speak_up, max_chars} or None (no voice)
-        self.companion, self.voice = companion, voice
-        self.call_owner = call_owner  # what her memory calls the bot's owner (their own name when None)
+        # Her memory and mood are the companion module's (its part, its watcher); `diary` keeps notes in the core
+        # diary instead (an assignment's `diary` option wins). voice: {speak_up, max_chars} or None (no voice).
+        self.diary, self.voice = diary, voice
+        self.call_owner = call_owner  # what her core diary calls the bot's owner (their own name when None)
         self.tool_calls = tool_calls  # her model's own function calls where it can make them
 
     def _person(self, session) -> str:
@@ -316,43 +315,14 @@ class ChatEngine(Engine):
             pass
         return RunYield.DONE
 
-    # ---- after the reply: her voice, then how it left her feeling and what to remember ------------------
-    def _complete(self, session: Session):
-        """A short, low-effort call to her model (or to `memory.writer_profile`), for mneme-llm's own work."""
-        profile = getattr(self.companion, "writer_profile", None)
-
-        async def complete(system: str, user: str) -> str:
-            result = await session.models.generate(ModelRequest(
-                [{"role": "system", "content": system}, {"role": "user", "content": user}], profile=profile,
-                effort="low", max_tokens=1500, timeout_s=60.0))  # reasoning models count their thinking too
-            return result.text
-        return complete
-
+    # ---- after the reply: her voice (what it left her feeling and what to remember: the companion's watcher) ------
     async def _after(self, session: Session, state: dict, text: str) -> None:
-        """Runs once per reply (a replayed run skips it): the reply as a voice message when wanted, then one
-        decision request for her mood and for anything worth remembering, then (at most daily) her impression
-        of the person. Messages that arrive meanwhile wait for the next run, so nothing is lost."""
+        """Runs once per reply (a replayed run skips it): the reply as a voice message when wanted."""
         if not text or state.get("after_done"):
             return
         state["after_done"] = True
         await session.save(state)
-        motive = self._speak_up(session)
-        await self._speak(session, state, text, bool(motive))
-        if self.companion is None or getattr(session, "origin", "person") == "routine" or not session.personas:
-            return
-        person = self._person(session)
-        her = session.personas[0].display_name
-        exchange = ([(f"({her}'s own thought)", motive)] if motive else [(person, session.trigger.text)]) + [(her, text)]
-        subject, complete = self.companion.subject(session.trigger.sender.id), self._complete(session)
-        try:
-            seen = await asyncio.wait_for(self.companion.observe(subject, exchange,
-                                                                 source="speak-up" if motive else "user",
-                                                                 person=person, complete=complete), 90)
-            if seen is not None and seen.error:
-                log.warning("notes not written for %s: %s", subject, seen.error)
-            await asyncio.wait_for(self.companion.reflect_if_due(subject, person=person, complete=complete), 60)
-        except Exception as error:  # memory and mood are a bonus; never let them fail the reply
-            log.info("after-reply memory skipped: %s: %s", type(error).__name__, str(error)[:200])
+        await self._speak(session, state, text, bool(self._speak_up(session)))
 
     def _voice_on(self, session: Session) -> bool:
         return self.voice is not None and \
@@ -667,37 +637,28 @@ class ChatEngine(Engine):
         return tuple(result[-6:])
 
     # ---- diary -----------------------------------------------------------------------------------
-    @staticmethod
-    def _diary(session: Session):
-        if session.options.get("diary", True) is False or not session.personas:
+    def _diary(self, session: Session):
+        """Her core diary, when it is on (off by default: the companion module keeps what she remembers)."""
+        wanted = session.options.get("diary", self.diary)
+        if wanted is False or str(wanted).strip().lower() in ("false", "no", "off", "0") or not session.personas:
             return None
         diary = session.diary(session.personas[0].name)
         return diary if diary.available else None
 
     async def _memory_block(self, session: Session) -> tuple[str, str]:
-        """("mneme-llm" or "core", her notes for this run). mneme-llm notes are written after the reply, so
-        the turn carries no diary; the core diary is written from the turn's `diary` field."""
+        """("core", her notes for this run) with the core diary on (written from the turn's `diary` field or her
+        `remember` calls); ("", "") otherwise, when the companion's part brings what she remembers."""
         diary = self._diary(session)
         if diary is None:
             return "", ""
         name = self._person(session)
         query = self._speak_up(session) or session.trigger.text
-        if self.companion is not None:
-            subject = self.companion.subject(session.trigger.sender.id)
-            try:
-                adopted = self.companion.adopt(subject, lambda: diary.recall("", 50))
-                if adopted:
-                    log.info("brought %d diary notes into mneme-llm for %s", adopted, subject)
-                block = await asyncio.wait_for(self.companion.block(subject, query, name, self._complete(session)), 30)
-                return "mneme-llm", block
-            except Exception as error:  # a broken memory file must not silence her: use the core diary
-                log.warning("mneme-llm unavailable, using the core diary: %s: %s", type(error).__name__, error)
         notes = [{"key": note.key, "kind": note.kind, "note": note.note} for note in diary.recall(query, 10)]
         return "core", DIARY_NOTES.format(name=name, notes=json.dumps(notes, ensure_ascii=False) if notes else
                                           "(none yet)")
 
     def _keep_notes(self, session: Session, state: dict, turn: dict) -> None:
-        """The core diary's notes, from the turn (mneme-llm keeps its own after the reply)."""
+        """The core diary's notes, from the turn (the companion keeps its own after the reply)."""
         diary = self._diary(session)
         if diary is None or state.get("memory_engine") != "core":
             return

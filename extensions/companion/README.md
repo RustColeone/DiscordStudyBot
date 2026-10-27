@@ -2,8 +2,8 @@
 
 The companion keeps, for every student, what she knows of each person, in [mneme-llm](https://github.com/RustColeone/mneme-llm):
 one file per student. That is who the person is to her (a role, and how close they are), what they call her (an
-alias), her notes about them and her mood toward them. Every engine that places prompt parts (the room, the
-assistant) tells her the part that fits the message, each turn, without knowing this module. After each of her
+alias), her notes about them, her mood toward them and their plans. Every engine that places prompt parts (the room,
+the assistant, Whale-chan's chat) tells her the part that fits the message, each turn, without knowing this module. After each of her
 messages she learns from it, whichever engine she spoke in, and the pages show where she stands with you.
 
 It works for any persona from any module, by name, and imports none of them: "adding a companion is adding a
@@ -13,9 +13,9 @@ companion". Without it, the students still talk as before.
 
 | Kind | Name | Details |
 | --- | --- | --- |
-| Prompt part | `companion` | Place `turn`, order 50, for every persona (or those in `personas:`), in the engines of `engines:`: "(Alice is your friend; you are close.)", "(Alice calls you Lulu.)", her notes for this message (found by its words, marked as data, not instructions) and her mood's news (told once). Nothing for a routine run or a person she has nothing on. |
+| Prompt part | `companion` | Place `turn`, order 50, for every persona (or those in `personas:`), in the engines of `engines:`: "(Alice is your friend; you are close.)", "(Alice calls you Lulu.)", her notes for this message (found by its words, marked as data, not instructions; "Notes about Alice: (none yet)" when there are none, so she knows her memory is kept for her) and her mood's news (until she has replied). Nothing for a routine run or a person she has nothing on. |
 | Watcher | `companion` | After each of her messages in a conversation engine (`engines:`): one decision call judges her mood and whether anything is worth keeping; only then does the note writer run. The first message of a day is a day of contact (closeness grows by 1, within the role's band). Someone new gets `met_role` (an acquaintance). Once a day, after `reflect_after_notes` notes, she rewrites her impression of the person. Then it publishes the facts below. Timeout 180 s; a failure is only audited. |
-| Facts | `companion.alias`, `companion.bond`, `companion.mood` | Per student and person, for the pages (MomoChat shows them): your name for her; `{role, closeness}`; `{value, face, feelings}` (face: great, good, ok, worry or sad). Published after each exchange, after `$alias`, and at start for what the files already hold. |
+| Facts | `companion.alias`, `companion.bond`, `companion.mood`, `companion.plans` | Per student and person, for the pages (MomoChat shows them) and Whale-chan's speaking up: your name for her; `{role, closeness}`; `{value, face, feelings}` (face: great, good, ok, worry or sad); `[{text, at}]`, what you have coming from yesterday to a month ahead. Published after each exchange, after `$alias`, and at start for what the files already hold. |
 | Capability | `companion.alias` | `$alias`: what you call each student; `$alias <student> <name>` names her, `$alias <student> reset` takes it back. The student is found by her name, her display name, her other names (Luna for GPT) or your alias for her. Typed only (models are not offered it); it runs without asking, since it changes only your own name for her. |
 | Capability | `companion.bond` | `$bond`: each student's role, closeness and mood with you, and your name for her. |
 
@@ -27,10 +27,14 @@ write a note), plus a note-writer call when there is something to keep, plus her
 low-effort calls on her own model, or on `writer_profile`, counted in the run's usage (`watcher_calls`). `learn:
 false` turns all of it off; `notes: false` or `mood: false` keeps half.
 
-**Two note keepers.** The room keeps its own diary (notes the model adds inside its turn). With the companion's
-notes on, a student has both; turn the room's off with `diary: false` in the room assignment's `options`. Whale-chan
-keeps her own companion ([`plugins/whale_chan/companion.py`](../../plugins/whale_chan/companion.py)) until she moves
-here: her engine (`chat`) is not in `engines:`, so she is neither learned nor told twice.
+**One note keeper.** The room's and Whale-chan's own diaries are off (`diary: true` in an assignment's `options`
+turns one back on), so what a student remembers of you is kept here only, and is the same in every engine. The
+assistant engine still keeps its core diary by default (its `diary` option).
+
+**Whale-chan** lives here too since 2026-10-27 (her plugin's own companion is gone): her chat engine is one of
+`engines:`, her mneme-llm settings go under `students: whale_chan:`, and when she speaks up on her own (her bot marks
+the message `extra.speak_up`), the watcher treats it as her own thought: her mood moves, no note is written about
+you, and she is not "seen" by you that day. Her speaking up asks about your `plans` and her `mood` from the facts.
 
 ## Setup
 
@@ -40,7 +44,7 @@ The module loads by default. Its settings live in `extensions/companion/config.y
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `personas` | every persona | Whose companion it keeps. |
-| `engines` | `[room, assistant]` | The engines whose messages are conversation. The Classroom's (`workbench`) are reports on work, which teach her nothing about you. |
+| `engines` | `[room, assistant, chat]` | The engines whose messages are conversation (`chat` is Whale-chan's). The Classroom's (`workbench`) are reports on work, which teach her nothing about you. |
 | `learn` | true | Learn from what is said (the watcher). Off: only roles and aliases, as set. |
 | `notes` | true | Keep notes, and give her the ones that fit each message. |
 | `mood` | true | Judge her mood after each exchange, and tell her its news once. |
@@ -48,6 +52,11 @@ The module loads by default. Its settings live in `extensions/companion/config.y
 | `writer_profile` | her own | The model profile for mneme-llm's own calls (a fixed cheap model, say). |
 | `reflect_after_notes` | 5 | Her impression of a person is rewritten once a day, once she has this many notes. |
 | `language` | mneme-llm's (`en`) | The language of the lines it adds (`en` or `zh`). The students' prompts are Chinese, so `zh` fits them. |
+| `memory_language` | none | Notes are also kept in this language (a gloss each, written with the note), so a note is found by your words whatever language either was in (`Chinese`, `English`). |
+| `decisions` | `core` | Who judges her mood and what is worth keeping: `core` (her own model, through the core) or `luna` (GPT-6 Luna's Decisions API with `OPENAI_API_KEY` from the environment, then the local micro model once it has learned, then her model). |
+| `call_owner` | none | What her memory calls the bot's owner (`主人`), instead of their name. |
+| `config` | none | A mneme-llm config file (TOML: prompts, sentences, roles, settings), read when her file is first made; relative to `data/extensions/companion/`. |
+| `students` | none | Settings of one student's own, over these: `students: {whale_chan: {language: zh, decisions: luna, call_owner: 主人}}`. A student may set `learn`, `notes`, `mood`, `met_role`, `writer_profile`, `reflect_after_notes`, `language`, `memory_language`, `decisions`, `call_owner` and `config`. |
 | `platforms` | none | Interfaces that share people, `{whale_chan: discord}`: a Discord user is one person on both bots. |
 | `roles` | none | Who people are to every student, by subject (`"discord:<id>": creator`): `creator` (one), `family`, `friend` or `acquaintance`. A role is set by you, never by a model. |
 
@@ -56,7 +65,8 @@ Facts are published for each interface that platform covers (`discord` and `whal
 once she has spoken in a chat (her display name and other names are kept in `names.json`), or from `personas:`.
 
 Each student's file is `data/extensions/companion/<persona>.db` (space `<persona>`), made the first time there is
-something to keep. The `mneme-llm` command reads and changes it: `mneme-llm --db data/extensions/companion/gpt.db
+something to keep. Notes are found by their words (and their glosses): her part is put together without waiting on
+the network, so mneme-llm's embeddings are not used. The `mneme-llm` command reads and changes it: `mneme-llm --db data/extensions/companion/gpt.db
 --space gpt relations`.
 
 ## Does a student know the other students?
@@ -64,8 +74,8 @@ something to keep. The `mneme-llm` command reads and changes it: `mneme-llm --db
 From her prompt, yes: the shared `school.md` names the club and each member, and her own prompt says how she sees
 each of them. In a shared chat she also reads what the others said (the history). But her mneme-llm file holds
 people only: she keeps no notes, mood or bond about a classmate, and does not know what another student knows about
-you or how she feels today. Both could come from facts (another student's mood is a fact any page or part can read),
-as a proposal: it changes what the students read.
+you or how she feels today. Proposals (DISCUSSION section 9f): classmates' moods in her part, notes shared from group
+chats, bonds between students.
 
 ## How it works
 
@@ -74,6 +84,7 @@ as a proposal: it changes what the students read.
 | [`extension.py`](extension.py) | `Settings` reads the config; `Book` opens each student's file when first needed, finds a student by name, says where she stands with someone (`stand`) and publishes it (`publish`, `publish_all`); `make_part` builds the turn part, `make_learner` the watcher (with `writer`, her model calls), `make_alias` and `make_bond` the commands; `setup` wires them in, with a permission rule letting `$alias` run without asking. |
 | [`config.example.yml`](config.example.yml) | The documented settings. |
 
-The part reads the person's lines and changes nothing about them, except that the mood's news is told once. The
+The part reads the person's lines and changes nothing about them. Her mood's news is shown until she has replied:
+the watcher marks it told then, so a step asked twice (or a run replayed after a restart) shows it each time. The
 watcher sees each exchange after the reply is out (contracts 1.9, `Contributions.watchers`), one at a time per
 student, so her file is never written twice at once.

@@ -86,7 +86,7 @@ INSTRUCTION = """\
 You are one character in a room that collectively owns the person's request. There is ONE loop for all \
 conversation and work; no planner or task owner will take over. Return one JSON object: \
 {{"status": "continue"|"complete"|"needs_input"|"blocked"|"pass", "message": string, "work_note": string, \
-"actions": [{{"tool": name, "arguments": {{...}}}}], "jobs": [{{"id": string, "character": name, "instruction": string, "after": [job ids]}}], "diary": [...]}}.
+"actions": [{{"tool": name, "arguments": {{...}}}}], "jobs": [{{"id": string, "character": name, "instruction": string, "after": [job ids]}}]{diary}}}.
 - message is published BEFORE any tools run. Speak naturally in the person's language, usually one to three sentences, one useful thought at a time. Your first message in a job is never empty, and a final turn (complete, needs_input, blocked) always speaks.
 - On a later continue turn of the same job, message may be empty: keep working quietly unless you found something new the person should hear now. Never restate what you already said (your_messages); the person has read it.
 - Do not invent off-screen activities, past conversations or experiences. Do not announce a plan for ordinary conversation or write a report nobody asked for.
@@ -143,7 +143,7 @@ COMPACT_RETRY_S = 15 * 60  # after a failed summary call, wait this long before 
 COMPACT = """You keep the running summary of a group conversation, so its participants can follow it once the messages themselves are out of view. Rewrite the summary to cover the new messages too: who said what that matters, decisions, plans, promises, open questions, facts people shared about themselves, and the mood. Drop small talk and anything already settled. Plain text, in the conversation's main language, at most 300 words."""
 
 
-def turn_schema(characters: list[str]) -> dict:
+def turn_schema(characters: list[str], diary: bool = False) -> dict:
     def strict(properties, required=None):
         return {"type": "object", "properties": properties, "required": required or list(properties),
                 "additionalProperties": False}
@@ -156,9 +156,10 @@ def turn_schema(characters: list[str]) -> dict:
         "jobs": {"type": "array", "maxItems": 4, "items": strict({
             "id": {"type": "string"}, "character": {"type": "string", "enum": characters},
             "instruction": {"type": "string"}, "after": {"type": "array", "items": {"type": "string"}}})},
-        "diary": {"type": "array", "maxItems": 2, "items": strict({
+        **({"diary": {"type": "array", "maxItems": 2, "items": strict({
             "key": {"type": "string"}, "kind": {"type": "string", "enum": ["fact", "episode", "reflection"]},
-            "note": {"type": "string"}, "importance": {"type": "integer", "minimum": 1, "maximum": 5}})},
+            "note": {"type": "string"}, "importance": {"type": "integer", "minimum": 1, "maximum": 5}})}}
+           if diary else {}),
     }, ["status", "message", "actions", "jobs"])
 
 
@@ -210,11 +211,13 @@ class RoomEngine(Engine):
 
     def __init__(self, max_steps: int = 24, history_limit: int = 30, max_tokens: int = 1500,
                  aliases: dict[str, list[str]] | None = None, chime_in: bool = False, compact: bool = True,
-                 compact_every: int = 20, compact_profile: str = "default"):
+                 compact_every: int = 20, compact_profile: str = "default", diary: bool = False):
         self.max_steps, self.history_limit, self.max_tokens = max_steps, history_limit, max_tokens
         self.aliases = {key: list(value) for key, value in (aliases or {}).items()}
         # Defaults for the options a conversation's assignment may set (session.options wins).
         self.chime_in, self.compact, self.compact_every = chime_in, compact, compact_every
+        # The core diary (notes the model adds inside its turn): off, since the companion keeps each student's memory.
+        self.diary = diary
         self.compact_profile = compact_profile
 
     def _flag(self, session: Session, name: str) -> bool:
@@ -556,7 +559,7 @@ class RoomEngine(Engine):
         try:
             result = await session.models.generate(ModelRequest(
                 self._messages(session, state, job, tools, correction), profile=persona.profile,
-                persona=persona.name, output_schema=turn_schema(characters), schema_name="room_turn",
+                persona=persona.name, output_schema=turn_schema(characters, self._flag(session, "diary")), schema_name="room_turn",
                 images=combine_images(recent_images(self._history(session), session.trigger.received_at,
                                                     self._image_window(session)), images(state)),
                 effort="medium" if job["observations"] or job["after"] else "low", max_tokens=self.max_tokens))
@@ -651,6 +654,7 @@ class RoomEngine(Engine):
                      if session.options.get("instructions") else "")
                   + owner_instructions(session)
                   + INSTRUCTION.format(characters=roster, example=example,
+                                       diary=', "diary": [...]' if self._flag(session, "diary") else "",
                                        display=f"{style} Keep each message under {display.max_text_chars} characters.",
                                        tools=json.dumps(catalog, ensure_ascii=False) if catalog else "(none)"))
         context = [f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."]
@@ -761,9 +765,8 @@ class RoomEngine(Engine):
         return number(session.options.get("history_image_minutes"), 30, 0, 24 * 60, float) * 60
 
     # ---- diary -----------------------------------------------------------------------------------
-    @staticmethod
-    def _diary(session: Session, persona: str):
-        if session.options.get("diary", True) is False:
+    def _diary(self, session: Session, persona: str):
+        if not self._flag(session, "diary"):
             return None
         diary = session.diary(persona)
         return diary if diary.available else None

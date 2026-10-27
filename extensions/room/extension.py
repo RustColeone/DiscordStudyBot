@@ -16,7 +16,8 @@ def setup(context) -> Contributions:
                         aliases=config.get("aliases") or {},
                         chime_in=flag(config.get("chime_in"), False), compact=flag(config.get("compact"), True),
                         compact_every=number(config.get("compact_every"), 20, 1, 1000),
-                        compact_profile=str(config.get("compact_profile") or "default"))
+                        compact_profile=str(config.get("compact_profile") or "default"),
+                        diary=flag(config.get("diary"), False))
     moved = [key for key in ("providers", "profiles") if key in config]
     if moved:  # the characters' models moved to the students module (2026-10-27)
         context.log("settings_moved", keys=moved, to="extensions/students/config.yml")
@@ -30,4 +31,6 @@ EXTENSION = Extension("room", setup, contracts="1", version="1",
     Setting("chime_in", "A group message naming no one: whose turn it is answers, the others may join in", "boolean",
             False),
     Setting("compact", "Fold messages older than history_limit into the chat's rolling summary", "boolean", True),
+    Setting("diary", "Each character keeps notes about people in the core diary (off: the companion module keeps "
+            "her memory)", "boolean", False),
 ))

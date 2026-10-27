@@ -27,7 +27,6 @@ port: 4156                      # open http://<this computer's address>:4156
 #     history_limit: 40         # messages read word for word; older ones go into the chat's summary
 #     compact: true
 #     chime_in: true            # a message naming no one: one answers, the others may join in
-#     diary_scope: webui        # classmates remember you across every web chat (notes stay filed per chat)
 
 # max_upload_mb: 50
 # max_text_chars: 20000          # longest message the page sends

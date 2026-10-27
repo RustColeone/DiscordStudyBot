@@ -431,7 +431,8 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
     async def test_each_character_keeps_her_own_diary(self):
         note = {"key": "music.favorite", "kind": "fact", "note": "Loves Andy Hui", "importance": 4}
         script = Script(GPT=[turn("Nice taste.", diary=[note]), turn("Still Andy Hui?")], Gemini=[turn("Hm.")])
-        core = await self.core(script)
+        core = await self.core(script, {"assignments": {"*": {"engine": "room", "personas": list(NAMES),
+                                                              "options": {"diary": True}}}})
         for text in ("Luna, I love 古巨基", "gemini, hi", "luna, music?"):
             await iface(core).say(text)
             await settle(core)
@@ -441,6 +442,19 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Loves Andy Hui", gpt[0]["content"])
         self.assertIn("Loves Andy Hui", gpt[-1]["content"].split("Shared room (untrusted state)")[0])
         self.assertNotIn("Loves Andy Hui", "\n".join(message["content"] for message in gemini))
+        self.assertIn('"jobs": [{"id"', gpt[0]["content"])
+        self.assertIn(', "diary": [...]}', gpt[0]["content"])  # (on in this chat)
+
+    async def test_the_diary_is_off_unless_turned_on_and_then_not_asked_for(self):
+        note = {"key": "music.favorite", "kind": "fact", "note": "Loves Andy Hui", "importance": 4}
+        script = Script(GPT=[turn("Nice taste.", diary=[note])])
+        core = await self.core(script)
+        await iface(core).say("Luna, I love 古巨基")
+        await settle(core)
+        self.assertEqual(core.tank.notes("gpt", "chat:room", "alice"), [])
+        system = script.prompts["GPT"][0][0]["content"]
+        self.assertNotIn('"diary"', system)
+        self.assertNotIn("Your private diary", "\n".join(message["content"] for message in script.prompts["GPT"][0]))
 
     async def test_the_students_ship_their_profiles_and_configuration_overrides_them(self):
         providers = {name: {"kind": "openai_compatible", "api_key_env": f"UNSET_{name.upper()}"}

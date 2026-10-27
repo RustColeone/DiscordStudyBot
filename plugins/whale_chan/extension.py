@@ -20,7 +20,6 @@ from pathlib import Path
 
 from contracts import Contributions, Extension, Persona, Setting
 
-from . import companion as companions
 from . import voice
 from .bot import WhaleChanBot
 from .engine import ChatEngine
@@ -53,17 +52,20 @@ WHALE = (
 MODELS = [{"provider": "deepseek", "model": "deepseek-flash"}]
 
 
-def make_companion(context, display_name: str):
-    """Her memory and mood in mneme-llm, or None for the core diary (not installed, or `memory.engine: core`)."""
-    memory = dict(context.config.get("memory") or {})
-    if str(memory.get("engine", "mneme-llm")) != "mneme-llm":
-        return None
-    if not companions.available():
-        context.log("mneme_llm_missing", hint="pip install mneme-llm for memory that outlives a model; "
-                                          "using the core diary")
-        return None
-    path = Path(memory.get("path") or Path(context.data_dir) / "mneme-llm.db")
-    return companions.Companion(path, context.config, name=display_name)
+# Her memory and mood moved to the companion module (2026-10-27): these settings are read there now, under
+# `students: whale_chan:` in extensions/companion/config.yml.
+MOVED = {"path", "space", "subject_prefix", "capture", "writer_profile", "reflect_after_notes", "daily_quota",
+         "embeddings", "meaning_micro", "language", "lang"}
+
+
+def memory_settings(context) -> bool:
+    """Whether her core diary is on (`memory: {engine: core}`); her mneme-llm settings are the companion's now."""
+    config = context.config
+    memory = dict(config.get("memory") or {})
+    moved = sorted(MOVED & set(memory)) + (["mood"] if config.get("mood") else [])
+    if moved:
+        context.log("settings_moved", keys=moved, to="extensions/companion/config.yml (students: whale_chan:)")
+    return str(memory.get("engine", "")) == "core"
 
 
 def setup(context) -> Contributions:
@@ -71,14 +73,14 @@ def setup(context) -> Contributions:
     name = str(config.get("interface", "whale_chan"))
     display_name = str(config.get("display_name", "鲸酱"))
     persona = Persona("whale_chan", display_name, str(config.get("prompt", WHALE)), profile="whale_chan")
-    companion = make_companion(context, display_name)
+    diary = memory_settings(context)
     speech = dict(config.get("voice") or {})
     speaking = speech.get("enabled", True) is not False
     engine = ChatEngine(max_steps=int(config.get("max_steps", 10)), history_limit=int(config.get("history_limit", 60)),
                         history_chars=int(config.get("history_chars", 40000)), effort=str(config.get("effort", "high")),
                         max_tokens=int(config.get("max_tokens", 8000)),
                         new_chat_text=str(config.get("new_chat_text", "🐳 好的主人，新的对话开始啦～")),
-                        companion=companion, call_owner=str(config.get("call_owner") or "") or None,
+                        diary=diary, call_owner=str(config.get("call_owner") or "") or None,
                         tool_calls=config.get("tool_calls", True) is not False,
                         voice={"speak_up": speech.get("speak_up", True), "max_chars": int(speech.get("max_chars", 400))}
                         if speaking else None)
@@ -93,11 +95,14 @@ def setup(context) -> Contributions:
     assignment = {"engine": "chat", "personas": ["whale_chan"],
                   "budget": {"model_calls": 30, "tool_calls": 24, "seconds": 1800},
                   **dict(config.get("assignment") or {})}
-    bot = WhaleChanBot(name, token, context.data_dir, config=config, companion=companion)
+    bot = WhaleChanBot(name, token, context.data_dir, config=config, persona=persona.name)
     return Contributions(**contributions, interfaces=[bot],
                          assignments={f"{name}:*": assignment},
                          admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": True}},
-                         permissions={f"{name}:*": {"tiers": {"write": "always-ask", "critical": "always-ask"}}})
+                         # The companion keeps what she remembers: the core's conversation notepad (basic.remember,
+                         # a write that asks you each time) would be a second, worse memory; core.yml may allow it.
+                         permissions={f"{name}:*": {"use": ["*", "!basic.remember", "!basic.notes"],
+                                                    "tiers": {"write": "always-ask", "critical": "always-ask"}}})
 
 
 EXTENSION = Extension("whale_chan", setup, contracts="1", version="1",
@@ -106,5 +111,6 @@ EXTENSION = Extension("whale_chan", setup, contracts="1", version="1",
     Setting("token", "鲸酱's own Discord bot token (a second application in the Developer Portal)", "secret",
             env="DISCORD_BOT_TOKEN_WHALE_CHAN", check=check_token),
     Setting("display_name", "Her name", "text", "鲸酱"),
-    Setting("call_owner", "What her memory calls the bot's owner (their Discord name if empty)", "text", ""),
+    Setting("call_owner", "What her core diary calls the bot's owner (their Discord name if empty; her memory's is "
+            "the companion's `call_owner`)", "text", ""),
 ))

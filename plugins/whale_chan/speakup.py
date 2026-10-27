@@ -9,8 +9,9 @@ Every `every_min` minutes a local dice roll decides; no model is called unless i
 
 She never speaks in quiet hours (1–8), within `cooldown_min` of her own last message, or again before they
 answered her last one. A hit becomes a message to her engine marked as her own impulse, with a motive:
-something they mentioned coming up (from memory), a feeling she still has (from mood), or a plain one for the
-time of day. With `dry_run` (the default) she only writes down what she would have done.
+something they mentioned coming up (the `plans` the companion module publishes), a feeling she still has (its
+`mood`), or a plain one for the time of day. With `dry_run` (the default) she only writes down what she would have
+done.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ MOTIVES = {
     "night": "快到睡觉的时间了，想跟{person}说说话",
     "quiet": "好久没跟{person}说话了，有点想{person}",
 }
+DAY = 86400
 FEELINGS = {"happy": "开心", "calm": "踏实", "sweet": "甜", "tender": "心疼", "worried": "担心", "sad": "难过",
             "jealous": "吃醋"}
 
@@ -138,19 +140,24 @@ def decide(person: Person, now: float, settings: Settings, rng: random.Random) -
     return Roll(roll < value, value, roll, f"rolled {roll:.1f} against {how}")
 
 
-def motive(companion, subject: str, name: str, now: float, settings: Settings, silent_h: float = 0.0) -> str:
-    """Why she wants to talk, in her own voice: an upcoming plan, a lingering feeling, a long silence, or the
-    time of day."""
-    if companion is not None:
-        try:
-            plans = companion.upcoming(subject, now)
-            if plans:
-                return MOTIVES["plan"].format(person=name, note=plans[0].text[:60])
-            feeling = companion.feeling(subject)
-            if feeling and feeling[0] in ("worried", "tender", "sad", "sweet"):
-                return MOTIVES["feeling"].format(person=name, feeling=FEELINGS[feeling[0]])
-        except Exception:
-            pass
+def fact(facts, name: str):
+    """A fact by its name, whichever module publishes it (`companion.plans` is `plans`)."""
+    return next((value for key, value in dict(facts or {}).items() if str(key).rsplit(".", 1)[-1] == name), None)
+
+
+def motive(facts, name: str, now: float, settings: Settings, silent_h: float = 0.0) -> str:
+    """Why she wants to talk, in her own voice: an upcoming plan (from yesterday to two days ahead), a lingering
+    feeling, a long silence, or the time of day. `facts` are what modules publish about her and this person."""
+    try:
+        plans = sorted((plan for plan in fact(facts, "plans") or ()
+                        if now - DAY <= float(plan.get("at") or 0) <= now + 2 * DAY), key=lambda plan: plan["at"])
+        if plans:
+            return MOTIVES["plan"].format(person=name, note=str(plans[0].get("text", ""))[:60])
+        feelings = (fact(facts, "mood") or {}).get("feelings") or []
+        if feelings and feelings[0][0] in ("worried", "tender", "sad", "sweet"):
+            return MOTIVES["feeling"].format(person=name, feeling=FEELINGS[feelings[0][0]])
+    except (AttributeError, TypeError, ValueError, KeyError, IndexError):
+        pass
     if silent_h >= 6:
         return MOTIVES["quiet"].format(person=name)
     hour = local(now, settings).hour
@@ -210,9 +217,9 @@ class SpeakUp:
     """The dice loop. `submit(user_id, name, motive)` hands a hit to the bot; everything else is local."""
 
     def __init__(self, settings: Settings, ledger: Ledger, submit, *, owners=lambda: (), names=lambda user: "",
-                 companion=None, clock=time.time, rng: random.Random | None = None):
+                 standing=lambda user: {}, clock=time.time, rng: random.Random | None = None):
         self.base, self.ledger, self.submit = settings, ledger, submit
-        self.owners, self.names, self.companion, self.clock = owners, names, companion, clock
+        self.owners, self.names, self.standing, self.clock = owners, names, standing, clock
         self.rng = rng or random.Random()
 
     @property
@@ -258,15 +265,13 @@ class SpeakUp:
         blocked = decide(person, now, settings, random.Random(0)) if value else None
         name = self.names(str(user)) or "主人"
         return {"line": round(value, 1), "how": how, "blocked": blocked.reason if blocked and blocked.roll is None
-                else "", "motive": motive(self.companion, self._subject(user), name, now, settings,
-                                          self._silent_h(person, now)),
+                else "", "motive": motive(self._facts(user), name, now, settings, self._silent_h(person, now)),
                 "enabled": settings.enabled, "dry_run": settings.dry_run, "misses": person.misses,
                 "unanswered": person.unanswered}
 
     async def _speak(self, user: str, now: float, dry: bool) -> dict:
         name = self.names(user) or "主人"
-        why = motive(self.companion, self._subject(user), name, now, self.settings,
-                     self._silent_h(self.ledger.person(user), now))
+        why = motive(self._facts(user), name, now, self.settings, self._silent_h(self.ledger.person(user), now))
         if dry:
             return {"dry_run": True, "motive": why}
         try:
@@ -283,5 +288,8 @@ class SpeakUp:
         last = max(person.her_last, person.their_last)
         return (now - last) / 3600 if last else 0.0
 
-    def _subject(self, user: str) -> str:
-        return self.companion.subject(user) if self.companion is not None else f"discord:{user}"
+    def _facts(self, user: str) -> dict:
+        try:
+            return dict(self.standing(str(user)) or {})
+        except Exception:  # a motive is a nicety: without facts she speaks of the time of day
+            return {}

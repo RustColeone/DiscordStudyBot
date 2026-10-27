@@ -27,6 +27,7 @@ class Exchange:
     run_id: str
     engine: str
     at: float
+    owner: bool = False  # the trigger's sender is an owner of its interface (as Session.owner)
 
     @property
     def person(self) -> tuple[str, str]:

@@ -238,7 +238,7 @@ from contracts import Contributions, Watcher
 
 async def learn(exchange, context):
     # exchange: address, persona (a Persona), text (what she said), trigger (the Request she answered), run_id,
-    # engine, at; exchange.person is (interface, sender id)
+    # engine, at, owner (the sender is an owner); exchange.person is (interface, sender id)
     if exchange.trigger.origin != "person":
         return
     result = await context.models.generate(...)          # her profile unless the request names one
@@ -262,6 +262,9 @@ def setup(context):
   `context.log(event, **fields)` writes to the audit log.
 * `personas` limits a watcher to those personas (none: every persona). `exchange.engine` lets a watcher keep to
   the engines whose messages are conversation (the companion skips the Classroom's reports).
+* A turn a persona starts on her own (Whale-chan speaking up) is submitted by her interface with
+  `extra["speak_up"]` holding her motive, which people cannot set; a watcher should read it as her own thought, not
+  as something the person said.
 
 ### Facts
 
@@ -277,7 +280,8 @@ them, so a fact is never a module's private state (that goes in its stores).
   with what is published about her and that person of this interface over it. It reads only its own people.
 * Pages look for the names they know, whichever module publishes them: `alias` (a string), `bond`
   (`{"role", "closeness"}`, 0 to 100), `mood` (`{"value", "face", "feelings"}`; `face` is great, good, ok, worry
-  or sad). Level and stamina are to follow the same way.
+  or sad), `plans` (`[{"text", "at"}]`, what the person has coming; Whale-chan's speaking up asks about them).
+  Level and stamina are to follow the same way.
 * Facts are kept in the tank (`core:facts`) and last across restarts. Publish again at start what your own data
   already holds, so a page shows it before anyone talks.
 
@@ -803,18 +807,19 @@ provider. The students' `config.yml` overrides them, and core.yml overrides both
 * Long conversations: the last `history_limit` messages word for word, older ones in the conversation's
   rolling summary (rewritten by one `compact_profile` call once `compact_every` have scrolled out), and
   `core.search_history` for their exact words.
-* Each turn returns `{status, message, work_note, actions, jobs, diary}`. The message is spoken
+* Each turn returns `{status, message, work_note, actions, jobs}`, and `diary` when the diary is on. The message is spoken
   (`speaker` set) before tools run; `work_note` is a short public explanation sent with label
   `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
   parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
 * Each character's system prompt is her prompt, display name and stable prompt parts, then the room's
-  rules; the time, her turn parts and her diary come in the turn's context, before the request, so for one
+  rules; the time, her turn parts (the companion's memory of the person among them) and, with the diary on, her
+  diary come in the turn's context, before the request, so for one
   speaker the system prompt stays the same from turn to turn. Give a character more personality in core.yml (`personas: gpt:
   parts:`, see [Prompt parts](#prompt-parts)) rather than by editing the module.
 * Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
   left out), the board, recent room messages, shared tool results, images (attached to the run's messages,
   sent in the conversation within `history_image_minutes`, 30, before the request, or returned by tools),
-  and only her own diary.
+  and only her own memory.
 * Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
   person's answer. Both keep the board in the run, so they survive restarts. New messages during a
   run answer waiting questions or open new jobs.
@@ -823,9 +828,10 @@ provider. The students' `config.yml` overrides them, and core.yml overrides both
   24) bounds the board. A failing persona reports it in the person's language; the others continue.
 * Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (30), `chime_in`
   (false), `compact` (true), `compact_every` (20), `compact_profile` (`default`), `max_tokens` (1500),
-  `aliases` (`{claude: [Haiku]}`). Assignment options: `instructions`, `owner_instructions`, `max_steps`,
-  `history_limit`, `chime_in`, `compact`, `compact_every`, `compact_profile`, `history_image_minutes`,
-  `diary: false`, and the core's `diary_scope`. Discord and the web UI differ only in these options.
+  `aliases` (`{}`; the students' own are on the personas), `diary` (false: the companion keeps each student's
+  memory). Assignment options: `instructions`, `owner_instructions`, `max_steps`, `history_limit`, `chime_in`,
+  `compact`, `compact_every`, `compact_profile`, `history_image_minutes`, `diary`, and with the diary on the
+  core's `diary_scope`. Discord and the web UI differ only in these options.
 * Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
 ### The included Discord interface

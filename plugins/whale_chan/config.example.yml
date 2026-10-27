@@ -32,39 +32,16 @@ models:
 # Tools as her model's own function calls where it can make them (DeepSeek, OpenAI); false: JSON steps only.
 # tool_calls: true
 
-# Her name, and what her memory calls the bot's owner (their Discord name when unset; others keep theirs).
+# Her name, and what her core diary (when on) calls the bot's owner (their Discord name when unset).
 # display_name: 鲸酱
 # call_owner: 主人
 
-# Her memory and mood live in mneme-llm (`venv/bin/pip install mneme-llm`, or `-e ../mneme-llm`): one SQLite file
-# any model can use, so switching models keeps what she knows and how she feels. Without mneme-llm installed she
-# uses the core's diary. Notes are written after each reply (one decision request asks whether anything is worth
-# keeping), never by her turn, and once a day she rewrites her short impression of each person.
+# Her memory and mood are the companion module's (extensions/companion/config.yml, under `students: whale_chan:`):
+#   students:
+#     whale_chan: {language: zh, memory_language: Chinese, decisions: luna, call_owner: 主人}
+# Here, only her core diary instead (off: the companion keeps what she remembers):
 # memory:
-#   engine: mneme-llm             # mneme-llm | core
-#   path: /somewhere/whale.db     # default: this module's data folder, mneme-llm.db
-#   space: whale_chan             # whose memory, inside the file
-#   subject_prefix: discord       # people are discord:<user id>
-#   capture: true                 # keep notes after replies
-#   writer_profile: whale_chan    # the model profile that writes notes (default: hers); a fixed, cheap one is ideal
-#   reflect_after_notes: 5        # rewrite her impression of someone once they have this many notes (daily)
-#   daily_quota: 8                # everyday notes per person per day (important ones always land)
-#   embeddings: openai            # find notes by meaning (OPENAI_API_KEY; $0.02 per million tokens) | off
-#   meaning_micro: true           # learn word centroids from the embeddings, for when they are unreachable
-#   language: English             # notes unified into this language by her model when meaning is degraded | null
-#   lang: en                      # her notes' headers and dates: en ("yesterday") or zh ("昨天")
-
-# How each reply left her feeling, judged after she answers (the reply is never delayed): GPT-6 Luna's
-# decisions first (OPENAI_API_KEY; about $0.00004 a reply), then the micro model once it has learned from
-# Luna, then her own chat model.
-# mood:
-#   enabled: true
-#   luna: true
-#   micro: true                   # false removes the micro model
-#   tell: event                   # event (what just moved her) | mood (only how she feels) | off
-#   baseline: 70                  # where her mood settles, 0-100
-#   floor: 0                      # the lowest it can go
-#   threshold: 0.6                # less sure than this: kept, but not told to her
+#   engine: core
 
 # Speaking up: now and then she messages you first (a local dice roll every 30 minutes; a model is only
 # called when it hits). Off until you turn it on; then it starts as a dry run that only writes down what it

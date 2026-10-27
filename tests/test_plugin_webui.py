@@ -500,7 +500,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek", "alias": None, "bond": None,
                                               "mood": None})
         self.assertEqual(self.assignment("classroom")["options"],
-                         {"history_limit": 40, "compact": True, "chime_in": True, "diary_scope": "webui"})
+                         {"history_limit": 40, "compact": True, "chime_in": True})
         await ws.send_json({"type": "new", "conversation": "chat-two", "title": "New chat",
                             "personas": ["claude", "gpt"]})
         await self.say(ws, "hello you two", conversation="chat-two")  # sent at once: it waits for the setup
@@ -510,7 +510,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         assigned = self.assignment("chat-two")
         self.assertEqual((assigned["pattern"], assigned["engine"], assigned["personas"]),
                          ("webui:chat-two", "room", ["gpt", "claude"]))
-        self.assertEqual(assigned["options"]["diary_scope"], "webui")  # everything else as the web UI's
+        self.assertEqual(assigned["options"]["chime_in"], True)  # everything else as the web UI's
         self.assertEqual(assigned["budget"]["model_calls"], 40)
         await settle(self.core)
         self.assertEqual(set(spoke), {"GPT", "Claude"})  # GPT in turn; Claude may chime in

@@ -96,8 +96,9 @@ class SimpleMessage:
 
 class WhaleChanBot(Interface):
     def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None,
-                 companion=None):
-        self.name, self.token = name, token
+                 persona: str = "whale_chan"):
+        self.name, self.token, self.persona = name, token, persona
+        self.port = None
         self.attachments = Path(data_dir) / "attachments"
         self.attachment_max = int(attachment_max_mb * 1024 * 1024)
         self.display = Display(markdown=True, edits=True, progress=True, quotes=True, files=True,
@@ -116,7 +117,12 @@ class WhaleChanBot(Interface):
         speak_up = dict(config.get("speak_up") or {})
         self.call_them = str(speak_up.get("call_them", "主人"))
         self.speak_up = SpeakUp(Settings.of(speak_up), Ledger(Path(data_dir) / "speak_up.json"), self._speak_up_submit,
-                                owners=lambda: self._owners, names=lambda user: self.call_them, companion=companion)
+                                owners=lambda: self._owners, names=lambda user: self.call_them, standing=self._standing)
+
+    def _standing(self, user: str) -> dict:
+        """What modules publish about her and this person (contracts 1.9): the companion's plans and mood."""
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        return dict(facts(self.persona, str(user))) if callable(facts) else {}
 
     async def start(self, port) -> None:
         self.port = port

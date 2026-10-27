@@ -129,6 +129,23 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         context = SimpleNamespace(config={"learn": False}, data_dir=self.tmp / "off", log=lambda *a, **k: None)
         self.assertEqual(module.setup(context).watchers, [])
 
+    async def test_each_student_may_have_settings_of_her_own(self):
+        script = room.Script(GPT=[room.turn("Noted.")], Gemini=[room.turn("Noted too.")])
+        mind = Mind(script)
+        chat = await self.start(mind, {"students": {"gemini": {"learn": False, "language": "zh"},
+                                                    "gpt": {"decisions": "nonsense", "memory_language": "English"}}})
+        await self.say(chat, "GPT, I love oolong tea")
+        await self.say(chat, "Gemini, I love oolong tea")
+        self.assertEqual(mind.judged, 1)  # GPT learns; Gemini does not
+        self.assertNotIn("companion.bond", self.facts("gemini"))
+        from core.loader import import_extension
+        _, module = import_extension(ROOT / "extensions" / "companion")
+        settings = module.Settings({"decisions": "LUNA", "config": "whale.toml",
+                                    "students": {"gpt": {"call_owner": "主人", "personas": ["x"]}}}, self.tmp)
+        self.assertEqual((settings.decisions, settings.config_file), ("luna", str(self.tmp / "whale.toml")))
+        self.assertEqual((settings.of("gpt").call_owner, settings.of("gpt").personas, settings.of("gemini").call_owner),
+                         ("主人", (), ""))  # (`personas` is not a student's own setting)
+
     async def test_the_pages_see_what_her_file_already_holds_at_start(self):
         import mneme_llm
         folder = self.tmp / "data" / "extensions" / "companion"

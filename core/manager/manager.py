@@ -1299,7 +1299,8 @@ class Manager:
                                      kind="note" if label else "text")
             if persona and not label and source == "run":
                 self._tell_watchers(Exchange(trigger.address, self.personas[persona], text, trigger, run_id,
-                                             record.engine, time.time()))
+                                             record.engine, time.time(),
+                                             record.origin != "routine" and self.is_owner(trigger)))
         return delivery
 
     # ---- watchers -----------------------------------------------------------------------------------

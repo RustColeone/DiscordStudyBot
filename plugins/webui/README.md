@@ -15,7 +15,7 @@ to connect the core to a new platform, especially one you host yourself.
 | Kind | Name | Details |
 | --- | --- | --- |
 | Interface | `webui` (renamable with the `interface` key) | `Display(markdown=True, edits=False, progress=True, quotes=False, files=True, max_upload_mb=50, max_text_chars=20000)`; the last two come from `max_upload_mb` and `max_text_chars`. No `operations`. |
-| Default assignment | `webui:*` | `{engine: room, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true, diary_scope: webui}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
+| Default assignment | `webui:*` | `{engine: room, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
 | Runtime assignments | `webui:<chat>` | One per chat started with some of the classmates (not all), set with `core.set_assignment` and removed with the chat (below). |
 | Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
 | Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the default chat (`classroom`) becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
@@ -99,10 +99,9 @@ chat's members.
 **How the room behaves here.** The web UI's assignment sets the room's `options`: each classmate reads
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
 (`compact`), a message naming no one gets an answer from whoever's turn it is while the others may chime
-in or stay silent (`chime_in`), and every web chat shares one diary scope (`diary_scope: webui`), so
-what GPT learns about you in the group chat she still knows in your direct messages with her. Each note
-stays filed in the chat it was written in; the scope only lets the others read it, so changing or removing
-it loses nothing. Change any of these under
+in or stay silent (`chime_in`). What GPT learns about you in the group chat she still knows in your
+direct messages with her, and on Discord: the companion module keeps one memory per student, whatever the
+chat. Change any of these under
 `assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).
 With `chime_in`, a message to the whole class can take up to five model calls.
 

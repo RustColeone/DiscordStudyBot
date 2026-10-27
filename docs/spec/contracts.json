@@ -544,6 +544,11 @@
     {
      "name": "at",
      "type": "float"
+    },
+    {
+     "name": "owner",
+     "type": "bool",
+     "default": false
     }
    ]
   },
