@@ -56,8 +56,8 @@ def settings(config: Mapping[str, Any]) -> dict:
 def assemble(context) -> tuple[Contributions, dict]:
     """Everything the module is made of (the tests use the parts directly)."""
     config = settings(context.config)
-    # Where the lab keeps its board, projects and worktrees: the module's data folder unless `data_dir` names one
-    # (the lab on its own keeps data/workbench). Absolute: git commands run from inside each project.
+    # Where the Classroom keeps its board, projects and worktrees: the module's data folder unless `data_dir` names one
+    # (the Classroom on its own keeps data/workbench). Absolute: git commands run from inside each project.
     data_dir = Path(config.get("data_dir") or context.data_dir).expanduser().resolve()
     demo = config.get("demo") is True
     if demo:  # the scripted club: each provider's models answered by the demo, families kept for the reviews
@@ -72,7 +72,7 @@ def assemble(context) -> tuple[Contributions, dict]:
     name = str(config["interface"])
     interfaces = []
     page = None
-    if config.get("api", True) is not False:  # the lab's interface: its API, and the page unless `web: false`
+    if config.get("api", True) is not False:  # the Classroom's interface: its API, and the page unless `web: false`
         page = WorkbenchUI(name, config, board, registry, trees, team, data_dir, AVATARS, prices, workbench)
         interfaces.append(page)
     engine = WorkbenchEngine(board, registry, team, config, link=page.link if page else None, prices=prices)
@@ -121,8 +121,8 @@ EXTENSION = Extension("workbench", setup, contracts="1", version="1",
             "their own worktree and the project's checkout; no home or temp folders, no other processes; Linux with "
             "bubblewrap, elsewhere they are refused)", "text", "all"),
     Setting("default_project", "Project for tasks that name none (Discord, say)", "text"),
-    Setting("data_dir", "Where the lab keeps its board, projects and worktrees (default: the module's data folder)",
-            "text"),
+    Setting("data_dir", "Where the Classroom keeps its board, projects and worktrees (default: the module's data "
+            "folder)", "text"),
     Setting("demo", "A scripted club that plays the practice task: no keys, no model calls", "boolean", False),
     Setting("artificial_analysis_api_key", "Artificial Analysis API key (free, artificialanalysis.ai) for model prices",
             "secret", env="ARTIFICIAL_ANALYSIS_API_KEY"),

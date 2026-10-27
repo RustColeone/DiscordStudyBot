@@ -48,7 +48,7 @@
     workflow: store.get("workbench.workflow", "auto"), project: store.get("workbench.project"),
     places: null, links: {}, arrival: new Map(),  // the mini map and where interfaces are; edits to an invitation
     crew: new Set(),  // who comes along on the next new task (nobody picked: the usual roles)
-    sent: new Map(),  // what was sent and not acknowledged yet (to give it back if the lab refuses it)
+    sent: new Map(),  // what was sent and not acknowledged yet (to give it back if the Classroom refuses it)
     tab: store.get("workbench.tab", "changes"), diff: null, expanded: new Set(), settings: {},
   };
   const timeline = $("#timeline");
@@ -482,7 +482,7 @@
     meta.replaceChildren(...parts);
   }
 
-  // ---- places: this lab and the others that published one (contracts 1.7) ------------------------------
+  // ---- places: this Classroom and the others that published one (contracts 1.7) ------------------------------
   const placeOf = (address) => (state.places?.others || []).find((place) => place.interface === String(address || "").split(":")[0]);
   const placeName = (address) => placeOf(address) ? `the ${placeOf(address).place.name.toLowerCase()}`
     : String(address || "").startsWith("discord:") ? "Discord" : "where it came from";

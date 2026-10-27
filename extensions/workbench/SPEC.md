@@ -1,6 +1,6 @@
-# The lab, specified
+# The Classroom (the workbench), specified
 
-What the lab does, precisely enough to reimplement it in another language without reading the Python. The
+What the Classroom does, precisely enough to reimplement it in another language without reading the Python. The
 README says how to use it; this says how it behaves. Machine-readable parts live next to it:
 
 | Part | Source of truth |
@@ -88,7 +88,7 @@ such a run, or start a new round.
 ## 4. Seats and staffing
 
 A **seat** is a classmate: a model family, `cheap` and `strong` model lists (her own profile per tier, no silent
-fallback to another family), an avatar, and `also` (classroom personas she stands for). A **role** is an ordered
+fallback to another family), an avatar, and `also` (MomoChat personas she stands for). A **role** is an ordered
 list of seats: `router`, `drafter`, `judge`, `strong`, `critic`, `tester` (cheapest first).
 
 `lineup(role, avoid_family, not_seat)`: the role's list (the task's crew first, in list order), then its sibling
@@ -206,10 +206,10 @@ nothing applied. Otherwise: status `review`, the warning (if any) said, and, wit
 
 A task started by an invitation from another conversation carries `invited {by, lead, crew, from, notes, excerpt}`
 and `origin_address`. Its **lead** narrates; the **crew** take their roles first. **Report back** sends a report
-(outcome, change, tests, who finished and reviewed, who was in the lab and who was asked along but not there, the
+(outcome, change, tests, who finished and reviewed, who was in the Classroom and who was asked along but not there, the
 summary, a link) to `origin_address` as the creator's `core.send_message`; it can be sent again after a new outcome.
-The lab as a place (`places.py`, contracts `PLACE_STATUS`): people on a visit (lead, crew, whoever worked on it)
-are in the lab from the start of a task until it is reported back or closed, or `visit_minutes` after it last
+The Classroom as a place (`places.py`, contracts `PLACE_STATUS`): people on a visit (lead, crew, whoever worked on it)
+are in the Classroom from the start of a task until it is reported back or closed, or `visit_minutes` after it last
 moved; an invitation not followed yet is a ticket.
 
 ## 10. What a port needs from its platform
@@ -221,7 +221,7 @@ Everything else is the core's contracts and this module's own code. The platform
 | --- | --- | --- |
 | Run one shell line (`run`, `probe`, tests) | `bash -c` | Git for Windows' bash |
 | A process group that a timeout ends as a whole | new session, `killpg` | new process group, `taskkill /T` |
-| A background process that outlives the terminal (`club` starting a lab) | new session | new process group, detached |
+| A background process that outlives the terminal (`club` starting a Classroom) | new session | new process group, detached |
 | Borrow a folder from the checkout in a worktree (`link`) | symlink | directory junction, else a copy |
 | Is a process ours, and stop it (`club stop`) | psutil (else `/proc`) | psutil |
 | Hand the process over to the core (`python -m extensions.workbench`) | `execve` | start it and wait |

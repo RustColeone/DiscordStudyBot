@@ -18,10 +18,10 @@ to connect the core to a new platform, especially one you host yourself.
 | Default assignment | `webui:*` | `{engine: room, personas: [luna, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true, diary_scope: webui}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
 | Runtime assignments | `webui:<chat>` | One per chat started with some of the classmates (not all), set with `core.set_assignment` and removed with the chat (below). |
 | Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
-| Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the classroom becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
+| Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the default chat (`classroom`) becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
 
-It contributes no engines, capabilities, personas, profiles or permissions. The five personas and the
-`room` engine come from [`extensions/room`](../../extensions/room).
+It contributes no engines, capabilities, personas, profiles or permissions. The five personas come from
+[`extensions/students`](../../extensions/students), and the `room` engine from [`extensions/room`](../../extensions/room).
 
 Declared settings (editable with `python -m core setup` and `$setup`):
 
@@ -52,9 +52,9 @@ It loads by default. To change anything, copy [`config.example.yml`](config.exam
 | `classmates` | `[Luna, Gemini, Claude, DeepSeek, Grok]` | Display names of those personas, in the same order (a missing one is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
 | `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget; `options` are merged key by key over the web UI's). |
 | `max_upload_mb` | 50 | Largest upload and largest file the core sends here; also sizes the server's request limit. |
-| `map` | true | The mini map: the classroom and the places other interfaces publish in the core's directory (contracts 1.7), such as the lab, read every `places_poll_s` (5) seconds while a page is open. The classroom publishes itself too (its link and classmates), so other interfaces can draw it. Classmates visiting another place show there instead of in class; one holding an invitation for you stays in class with a pulsing ring, its ticket in the corridor. No other place: no map. `false` turns it off. |
+| `map` | true | The mini map: MomoChat and the places other interfaces publish in the core's directory (contracts 1.7), such as the Classroom, read every `places_poll_s` (5) seconds while a page is open. MomoChat publishes itself too (its link and the students), so other interfaces can draw it. A student visiting another place shows there too (a student is in every place at once); one holding an invitation for you has a pulsing ring, its ticket in the corridor. No other place: no map. `false` turns it off. |
 
-A link to a chat (`http://<page>/#<chat>`, as the lab's "open the classroom" makes) opens that chat.
+A link to a chat (`http://<page>/#<chat>`, as the Classroom's "open MomoChat" makes) opens that chat.
 
 Keys the code reads that the example file does not list: `interface` (the interface name, default
 `webui`), `passphrase_env` (the env var to read the passphrase from, default `WEBUI_PASSPHRASE`),
@@ -94,7 +94,7 @@ chat's members.
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
 (`compact`), a message naming no one gets an answer from whoever's turn it is while the others may chime
 in or stay silent (`chime_in`), and every web chat shares one diary scope (`diary_scope: webui`), so
-what Luna learns about you in the classroom she still knows in your direct messages with her. Each note
+what Luna learns about you in the group chat she still knows in your direct messages with her. Each note
 stays filed in the chat it was written in; the scope only lets the others read it, so changing or removing
 it loses nothing. Change any of these under
 `assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).

@@ -151,7 +151,7 @@ class WebUI(Interface):
         self._stopping = False
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
-        # The mini map: the classroom and the other places interfaces publish in the core's directory (the lab next
+        # The mini map: MomoChat and the other places interfaces publish in the core's directory (the Classroom next
         # door, say; contracts 1.7). `map: false` turns it off; with no other place there is simply no map.
         self.map = config.get("map", True) is not False
         self.places_poll_s = max(2.0, float(config.get("places_poll_s", 5)))

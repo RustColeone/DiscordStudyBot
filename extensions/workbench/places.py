@@ -1,6 +1,6 @@
-"""The lab as a place, in the shape every interface understands (contracts.PLACE_STATUS): who is here, who came from
-elsewhere, and which invitations wait. The lab's interface publishes it, so the classroom (or any other interface)
-can draw the lab on its map without knowing anything about the lab.
+"""The Classroom as a place, in the shape every interface understands (contracts.PLACE_STATUS): who is here, who came
+from elsewhere, and which invitations wait. The Classroom's interface publishes it, so MomoChat (or any other
+interface) can draw the Classroom on its map without knowing anything about the Classroom.
 
 A visit lasts from the start of a task until it is reported back or closed (or `visit_minutes` after it last moved,
 once nothing runs): the classmate who brought you, her crew and whoever worked on it are here meanwhile. Someone

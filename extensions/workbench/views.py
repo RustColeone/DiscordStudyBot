@@ -94,7 +94,7 @@ def actions(task: dict, pending: dict | None) -> list[str]:
 
 
 def report_text(board, team, task: dict, link: Callable[[str], str] = lambda task: "") -> str:
-    """The lab report that goes back to the conversation a task came from: what happened, who was really there."""
+    """The session report that goes back to the conversation a task came from: what happened, who was really there."""
     data = task["data"]
     name = lambda persona: team.seats[persona].name if persona in team.seats else ""
     change, validation, landed = data.get("change") or {}, data.get("validation") or {}, data.get("landed")

@@ -179,7 +179,7 @@
     const members = membersOf(chat);
     $("#members-title").textContent = isDirect(chat) ? "Direct message" : `In this chat — ${members.length}`;
     const visiting = new Map((state.places?.others || []).flatMap((place) => (place.away || [])
-      .map((key) => [key, place.place?.name || "another place"])));  // visiting another place (the lab, say)
+      .map((key) => [key, place.place?.name || "another place"])));  // visiting another place (the Classroom, say)
     const tickets = ticketsHere(state.places);
     for (const name of members) {
       const spoke = (state.spoke.get(name) || 0) > Date.now() - 4000;
@@ -665,8 +665,8 @@
     $("#connection").classList.toggle("is-off", Boolean(text));
   }
 
-  // The mini map: the classroom (here) and the lab next door, who is in each, and who waits at the lab's door
-  // with an invitation. The lab says who is there (the server asks it); without a lab there is no map.
+  // The mini map: MomoChat (here) and the Classroom next door, who is in each, and who waits at the Classroom's door
+  // with an invitation. The Classroom says who is there (the server asks it); without a Classroom there is no map.
   // The places other interfaces publish in the core's directory (contracts 1.7), and this classroom.
   const awayKeys = (places) => new Set((places?.others || []).flatMap((place) => place.away || []));
   const ticketsHere = (places) => new Map((places?.others || []).flatMap((place) => (place.tickets || [])

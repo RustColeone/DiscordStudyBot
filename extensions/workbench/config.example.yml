@@ -10,10 +10,10 @@
 # public_url: http://pi.home:4157   # the address links in Discord messages use (default: the one printed at start)
 # web: true                     # false: no page (tasks from Discord only)
 
-# ---- the classroom next door --------------------------------------------------------------------------------
-# A classmate in the classroom (the web UI) can invite you here with workbench.invite; Report back sends the result to
-# the chat it came from.
-# classroom_url: http://192.168.1.20:4156/   # where "open the classroom" goes (default: this computer, port 4156)
+# ---- MomoChat next door -------------------------------------------------------------------------------------
+# A student in MomoChat (the web UI) can invite you here with workbench.invite; Report back sends the result to the
+# chat it came from.
+# classroom_url: http://192.168.1.20:4156/   # where "open MomoChat" goes (default: this computer, port 4156)
 # bring_messages: 16                         # how much of the chat comes along with an invitation
 # visit_minutes: 30                          # a finished visit ends after this, if nobody reported back
 
@@ -44,7 +44,7 @@
 #   flash:                                               # one DeepSeek model as her own classmate
 #     name: Flash-chan
 #     family: deepseek
-#     also: [deepseek]                                   # she leads when the classroom's DeepSeek invites you
+#     also: [deepseek]                                   # she leads when MomoChat's DeepSeek invites you
 #     avatar: deepseek                                   # the picture to use (avatars/<avatar>.png)
 #     voice: "Flash-chan, the younger DeepSeek whale sister: quick and sharp"
 #     cheap: [deepseek/deepseek-flash]

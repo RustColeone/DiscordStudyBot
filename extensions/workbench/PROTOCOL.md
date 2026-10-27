@@ -1,11 +1,11 @@
-# The lab protocol
+# The Classroom protocol
 
-How a frontend talks to the lab: the web page, `club` and a window GUI all use the same HTTP and websocket API,
-served by the lab's interface (`web/server.py`, port 4157 by default). The page is one frontend among others:
-`web: false` turns it off and keeps this API; `api: false` turns the whole interface off (the lab is then reached
+How a frontend talks to the Classroom: the web page, `club` and a window GUI all use the same HTTP and websocket API,
+served by the Classroom's interface (`web/server.py`, port 4157 by default). The page is one frontend among others:
+`web: false` turns it off and keeps this API; `api: false` turns the whole interface off (the Classroom is then reached
 from Discord only).
 
-The rules live in the lab, not in the frontends. The server says which approval a task waits for, with the
+The rules live in the Classroom, not in the frontends. The server says which approval a task waits for, with the
 checklist and its ticks, and which actions are possible now (`views.py`). A frontend shows these; it never
 decides them. The second check is enforced by the `workbench.review` capability, so every tick a frontend sends
 must really be made.
@@ -14,10 +14,10 @@ must really be made.
 
 The API answers only private-network clients. The `Host` must be an IP address, `localhost`, a local name
 (`.local`, `.lan`, `.home.arpa`, `.internal`), this computer's name or one listed in `hostnames`; anything else is
-refused (403), so a website cannot reach the lab through a name it controls. Requests from other sites are refused
+refused (403), so a website cannot reach the Classroom through a name it controls. Requests from other sites are refused
 too: the `Origin` header must match the address you called, or `public_url` when an HTTPS proxy stands in front.
-Whoever connects acts as the lab's creator (the `user_id` setting, default `creator`), so keep the lab on your own
-network.
+Whoever connects acts as the Classroom's creator (the `user_id` setting, default `creator`), so keep the Classroom on
+your own network.
 
 ## HTTP
 
@@ -27,7 +27,7 @@ network.
 | `GET /api/tasks/<id>` | `{"task": task view, "steps": [...], "messages": [...]}`: everything one task shows (a websocket client asks with `load` instead, so the snapshot stays in order with the events). |
 | `GET /api/tasks/<id>/diff` | The change set: `{"files", "stat", "fingerprint", "patch", "live"}` (live from the worktree, or the patch kept once landed or discarded). |
 | `GET /api/tasks/<id>/file?path=…` | One file as it is in the task's worktree (else the checkout): `{"path", "text"}`. |
-| `GET /api/presence` | The lab as a place (`contracts.PLACE_STATUS`, below), as it publishes it. |
+| `GET /api/presence` | The Classroom as a place (`contracts.PLACE_STATUS`, below), as it publishes it. |
 | `GET /api/prices` | Where prices come from and each classmate's model's price; `?refresh=1` fetches once a day old. |
 | `GET /files/<id>/<name>` | A file the club sent (a diff file, say). |
 | `GET /avatars/<key>` | A classmate's picture. |
@@ -38,13 +38,13 @@ The first message is `{"type": "hello", "state": {...}}`:
 
 | Key | What |
 | --- | --- |
-| `title`, `user` | The lab's title; you (`{"name"}`). |
+| `title`, `user` | The Classroom's title; you (`{"name"}`). |
 | `team` | Classmates: `persona`, `name`, `family`, `voice`, `avatar`, `cheap`, `strong`, `ready` (true or false: has a model key; null if unknown). |
 | `roles` | Role → ordered seat names. |
 | `projects` | `{name, path, test, test_line, link, land, source, detected}` each. |
 | `tasks` | Task views (below), newest first. |
 | `workflows` | `{name, title, text}` each: `auto` and every workflow in `workflows/`. |
-| `places` | `{"here": this lab as a place, "others": [places other interfaces published]}`; `links`: interface → its link. |
+| `places` | `{"here": this Classroom as a place, "others": [places other interfaces published]}`; `links`: interface → its link. |
 | `progress` | Task → live "typing" lines. |
 | `settings`, `prices`, `avatars`, `page` | The second-check and commands settings; the price list; picture keys; whether the page is on. |
 
@@ -67,7 +67,7 @@ The first message is `{"type": "hello", "state": {...}}`:
 - `actions`: what can be done now, any of `accept`, `send`, `check`, `approve`, `deny`, `report`, `discard`,
   `forget`.
 
-### Events from the lab
+### Events from the Classroom
 
 | Type | Fields | When |
 | --- | --- | --- |
@@ -83,10 +83,10 @@ The first message is `{"type": "hello", "state": {...}}`:
 | `ack` | `id`, `ok`, `reason`; `task` for `start` | The answer to `start`, `accept` or `send`. `reason` when not ok: `invalid`, `unknown_task`, `not_here` (the task belongs to another conversation: answer it there), or the core's (`duplicate`, `locked`, ...). |
 | `toast`, `error` | `text` | Something to show briefly. |
 
-Messages reach each client in the order the lab made them (one queue per connection). A client that stops reading
+Messages reach each client in the order the Classroom made them (one queue per connection). A client that stops reading
 falls behind and is disconnected; it reconnects and gets a new `hello`.
 
-### Events to the lab
+### Events to the Classroom
 
 | Type | Fields | Does |
 | --- | --- | --- |
@@ -106,11 +106,12 @@ Everything else a person can do is a `$command` sent with `send` (and from any o
 
 ## Places (contracts 1.7)
 
-The lab publishes itself in the core's directory as a place: `{"place": {"name": "Lab", "icon": "🧪", "note"},
-"people": [{"key", "name", "avatar", "doing", "title", "task"}], "away": [keys], "tickets": [{"key", "by",
-"title", "link", "task", "avatar"}], "working", "ready"}`. A key is the name lowercased with only its letters and
-digits kept, in any script ("Flash-chan" → "flashchan", "露娜" → "露娜"); an empty key matches nobody. `people` are
-the classmates on a visit (the one who
-brought you, her crew, whoever worked on it); `away` are the names of people from elsewhere who are here now (the
-classroom's DeepSeek, while Flash-chan stands for her); `tickets` are invitations held by people elsewhere. Any
+The Classroom publishes itself in the core's directory as a place: `{"place": {"name": "Classroom", "icon": "📝",
+"note"}, "people": [{"key", "name", "avatar", "doing", "title", "task"}], "away": [keys], "tickets": [{"key", "by",
+"title", "link", "task", "avatar"}], "working", "ready", "views": [{"name", "icon", "path", "order"}]}`. `views` are
+the page's places for the shared places bar (Classroom, Students `#students`, Logbook `#logbook`). A key is the name
+lowercased with only its letters and digits kept, in any script ("Flash-chan" → "flashchan", "露娜" → "露娜"); an
+empty key matches nobody. `people` are the students on a visit (the one who brought you, her crew, whoever worked on
+it); `away` are the names of people from elsewhere who are here now (MomoChat's DeepSeek, while Flash-chan stands for
+her); `tickets` are invitations held by people elsewhere. Any
 interface reads the places with `port.directory()`; this API passes them on as `places`.

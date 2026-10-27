@@ -404,9 +404,9 @@ body.is-resizing { cursor: col-resize; user-select: none; }
 .price-note { font-size: .78rem; color: var(--muted); margin-top: 8px; }
 .price-note a { color: inherit; font-weight: 700; }
 
-/* the mini map: the classroom, the corridor (invitations waiting for you), the lab */
+/* the mini map: MomoChat, the corridor (invitations waiting for you), the Classroom */
 .map { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 4px; }
-.map.is-alone { grid-template-columns: 1fr; }  /* no other place published: just the lab */
+.map.is-alone { grid-template-columns: 1fr; }  /* no other place published: just the Classroom */
 .place { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; min-width: 0;
          border: 1px solid var(--line); background: var(--paper); border-radius: 12px; padding: 7px 8px; }
 button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
@@ -414,7 +414,7 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
 .place-name { font-size: .78rem; font-weight: 800; }
 .place-faces { display: flex; flex-wrap: wrap; gap: 2px; min-height: 24px; }
 .place-faces .avatar { width: 22px; height: 22px; font-size: .62rem; }
-/* she has an invitation to the lab for you: a pulsing ring (the corridor holds its ticket) */
+/* she has an invitation to the Classroom for you: a pulsing ring (the corridor holds its ticket) */
 .place-faces .avatar.has-ticket { box-shadow: 0 0 0 2px var(--accent); animation: door 1.6s ease-in-out infinite; }
 .place-note { font-size: .66rem; color: var(--muted); line-height: 1.25; }
 .corridor { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 14px;

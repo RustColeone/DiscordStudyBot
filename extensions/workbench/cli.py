@@ -1,17 +1,17 @@
-"""`club`: the lab from a terminal, in the folder you are in, the way codex, claude or grok work.
+"""`club`: the Classroom from a terminal, in the folder you are in, the way codex, claude or grok work.
 
     club                        talk with the club about this folder (its git repository)
     club "add a --json flag"    the same, starting with that request
     club -p "fix the test"      one go: work until it needs you, print the result, exit (also `club exec ...`)
     club -c                     come back to this folder's open task
     club -C ~/code/app          work in another folder (also -d)
-    club --web                  open this folder's task in the lab page
-    club status | stop          is the lab running, its projects and tasks; stop the lab club started
+    club --web                  open this folder's task in the Classroom page
+    club status | stop          is the Classroom running, its projects and tasks; stop the Classroom club started
     club install                put `club` on your PATH (~/.local/bin)
 
-It is a client of the lab protocol (PROTOCOL.md), like the page, so whatever it does shows there too. A lab that is
-already running is used; otherwise one starts in the background (the real core with just the lab), with the keys
-`club install` was given. The two approvals stay yours: club asks you for them and never approves on its own.
+It is a client of the Classroom protocol (PROTOCOL.md), like the page, so whatever it does shows there too. A
+Classroom that is already running is used; otherwise one starts in the background (the real core with just the
+Classroom), with the keys `club install` was given. The two approvals stay yours: club asks you for them and never approves on its own.
 """
 
 from __future__ import annotations
@@ -37,11 +37,11 @@ from .workspace import system
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 DATA = ROOT / "data" / "workbench"
-SETTINGS = DATA / "cli.json"  # what `club install` recorded: the lab's address and how to start it
+SETTINGS = DATA / "cli.json"  # what `club install` recorded: the Classroom's address and how to start it
 LAB = "http://127.0.0.1:4157"
 REST = {"review", "approved", "answered", "failed", "landed", "discarded", "cancelled"}
 CLOSED = {"landed", "discarded"}
-WORKFLOWS = ("auto", "single", "cascade", "critique")  # the built-in ones; the lab sends its full list
+WORKFLOWS = ("auto", "single", "cascade", "critique")  # the built-in ones; the Classroom sends its full list
 ICONS = {"read_file": "📄", "list_files": "📁", "search": "🔎", "write_file": "✏️", "edit_file": "✏️",
          "delete_file": "🗑", "run": "▶", "test": "🧪", "diff": "±", "probe_file": "📝", "probe": "⚖"}
 
@@ -58,7 +58,7 @@ def read_line(text: str) -> str:
 
 
 class LabClosed(ConnectionError):
-    """The lab's connection is gone (a restart, a crash): reconnect, or leave."""
+    """The Classroom's connection is gone (a restart, a crash): reconnect, or leave."""
 
 
 class Style:
@@ -104,19 +104,19 @@ def workplace(path: Path, yes: bool, err) -> Path | None:
         err(f"{folder} is not a folder.")
         return None
     if shutil.which("git") is None:
-        err("git is not installed; the lab works on a git branch of your folder.")
+        err("git is not installed; the Classroom works on a git branch of your folder.")
         return None
     top = git(folder, "rev-parse", "--show-toplevel")
     root = Path(top.stdout.strip()) if top.returncode == 0 else folder
-    trees = (lab_data() / "worktrees", DATA / "worktrees")  # the lab's copies of tasks, not projects
+    trees = (lab_data() / "worktrees", DATA / "worktrees")  # the Classroom's copies of tasks, not projects
     if any(place == tree or tree in place.parents for place in (folder, root) for tree in trees):
-        err(f"{folder} is one of the lab's task worktrees; run club in your project instead.")
+        err(f"{folder} is one of the Classroom's task worktrees; run club in your project instead.")
         return None
     fresh = top.returncode != 0 or git(root, "rev-parse", "--verify", "-q", "HEAD").returncode != 0
     if fresh:
         files = [item for item in root.iterdir() if item.name != ".git"]
         what = "not a git repository" if top.returncode != 0 else "a git repository with no commit yet"
-        err(f"{root} is {what}. The lab works on a branch of it and lands your approved change as one commit.")
+        err(f"{root} is {what}. The Classroom works on a branch of it and lands your approved change as one commit.")
         offer = (f"Make the first commit here{' of its ' + str(len(files)) + ' files' if files else ''}"
                  + (" (git init)" if top.returncode != 0 else "") + "?")
         if not (yes or ask(offer)):
@@ -126,7 +126,7 @@ def workplace(path: Path, yes: bool, err) -> Path | None:
             git(root, "init", "-q")
         git(root, "add", "-A")
         identity = [] if git(root, "config", "user.email").stdout.strip() else \
-            ["-c", "user.name=Workbench", "-c", "user.email=workbench@localhost"]  # as the lab's own commits
+            ["-c", "user.name=Workbench", "-c", "user.email=workbench@localhost"]  # as the Classroom's own commits
         made = git(root, *identity, "commit", "-q", "--allow-empty", "-m", f"Start {root.name}")
         if made.returncode != 0:
             err(f"git could not commit: {made.stderr.strip() or made.stdout.strip()}")
@@ -144,7 +144,7 @@ def describe(root: Path, cwd: Path) -> str:
     return f"{root}{where} · {branch} · {state}"
 
 
-# ---- the lab --------------------------------------------------------------------------------------------------
+# ---- the Classroom --------------------------------------------------------------------------------------------------
 def reachable(url: str) -> bool:
     try:
         with urllib.request.urlopen(f"{url}/api/presence", timeout=2) as response:
@@ -154,39 +154,39 @@ def reachable(url: str) -> bool:
 
 
 def lab_data(data: str | None = None) -> Path:
-    """The lab's data folder: given, as installed, or the default (its log and pid file are kept there)."""
+    """The Classroom's data folder: given, as installed, or the default (its log and pid file are kept there)."""
     return Path(data or load_settings().get("data") or DATA).expanduser().resolve()
 
 
 def start_lab(url: str, extra: list[str], err, data: str | None = None) -> bool:
-    """A lab in the background, on this computer, started the way `club install` recorded (its --env/--key)."""
+    """A Classroom in the background, on this computer, started the way `club install` recorded (its --env/--key)."""
     address = urlparse(url)
     if address.hostname not in ("127.0.0.1", "localhost", "::1"):
-        err(f"Can't reach the lab at {url}.")
+        err(f"Can't reach the Classroom at {url}.")
         return False
     folder = lab_data(data)
     folder.mkdir(parents=True, exist_ok=True)
     log = folder / "lab.log"
     command = [sys.executable, "-m", "extensions.workbench", *load_settings().get("lab_args", []), *extra,
                *(["--data", str(folder)] if data else []), "--host", "127.0.0.1", "--port", str(address.port or 4157)]
-    with log.open("ab") as handle:  # detached: closing this terminal (or Ctrl-C here) leaves the lab running
+    with log.open("ab") as handle:  # detached: closing this terminal (or Ctrl-C here) leaves the Classroom running
         process = subprocess.Popen(command, cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT,
                                    stdin=subprocess.DEVNULL, **system.detached_options())
     (folder / "lab.pid").write_text(str(process.pid))
     for _ in range(120):
         if reachable(url):
-            err(f"Started the lab in the background at {url} (log: {log}; `club stop` stops it).")
+            err(f"Started the Classroom in the background at {url} (log: {log}; `club stop` stops it).")
             return True
         if process.poll() is not None:
             break
         time.sleep(0.25)
     tail = log.read_text("utf-8", "replace").splitlines()[-8:]
-    err("The lab did not start:\n  " + "\n  ".join(tail))
+    err("The Classroom did not start:\n  " + "\n  ".join(tail))
     return False
 
 
 class Lab:
-    """The lab page's websocket, driven from a thread of its own: events come in on `events`."""
+    """The Classroom page's websocket, driven from a thread of its own: events come in on `events`."""
 
     def __init__(self, url: str):
         self.url = url.rstrip("/")
@@ -304,18 +304,18 @@ class Session:
             except queue.Empty:
                 continue
             if event["type"] == "closed":
-                raise LabClosed("the lab closed the connection")
+                raise LabClosed("the Classroom closed the connection")
             self.absorb(event)
             if event["type"] == "projects":
                 found = next((item for item in event["items"] if item["name"] == name), None)
                 if found:
                     self.project = found
-                    self.note(f"Added this folder to the lab as project “{name}”.", "dim")
+                    self.note(f"Added this folder to the Classroom as project “{name}”.", "dim")
                     return True
             elif event["type"] == "error":
-                self.note(f"The lab could not add this folder: {event.get('text')}", "red")
+                self.note(f"The Classroom could not add this folder: {event.get('text')}", "red")
                 return False
-        self.note("The lab did not answer in time.", "red")
+        self.note("The Classroom did not answer in time.", "red")
         return False
 
     def tasks(self) -> list[dict]:
@@ -348,7 +348,7 @@ class Session:
             except queue.Empty:
                 continue
             if event["type"] == "closed":
-                raise LabClosed("the lab closed the connection")
+                raise LabClosed("the Classroom closed the connection")
             self.absorb(event)
             if event["type"] == "ack" and event.get("id") == client:
                 if not event.get("ok"):
@@ -357,7 +357,7 @@ class Session:
                 self.task = event["task"]
                 self.catch_up()
                 return True
-        self.note("The lab did not answer in time.", "red")
+        self.note("The Classroom did not answer in time.", "red")
         return False
 
     def accept(self) -> bool:
@@ -365,8 +365,8 @@ class Session:
         task = self.current() or {}
         invited = (task.get("data") or {}).get("invited") or {}
         crew = list(invited.get("crew") or [])
-        self.note(self.style(f"\n🎟️ {invited.get('by') or 'A classmate'} invites you to the lab: {task.get('title')}",
-                             "bold", "yellow"))
+        self.note(self.style(f"\n🎟️ {invited.get('by') or 'A classmate'} invites you to the Classroom: "
+                             f"{task.get('title')}", "bold", "yellow"))
         if invited.get("notes"):
             self.note(f"   What she knows about how you like it: {invited['notes']}", "dim")
         self.note(f"   The brief:\n   {task['data'].get('request', '').strip()}")
@@ -400,7 +400,7 @@ class Session:
             self.show_step(entry) if kind == "step" else self.show_message(entry, earlier=True)
 
     def absorb(self, event: dict) -> None:
-        """Keep the lab's state current (tasks, projects, team) from its events."""
+        """Keep the Classroom's state current (tasks, projects, team) from its events."""
         kind = event.get("type")
         if kind == "task":
             tasks = [item for item in self.lab.state["tasks"] if item["id"] != event["task"]["id"]]
@@ -427,7 +427,7 @@ class Session:
                 event = None
             if event:
                 if event["type"] == "closed":
-                    raise LabClosed("the lab closed the connection")
+                    raise LabClosed("the Classroom closed the connection")
                 self.absorb(event)
                 about = (event.get("task") or {}).get("id") if event["type"] == "task" else \
                     (event.get("step") or event.get("item") or {}).get("task") or event.get("task")
@@ -482,7 +482,7 @@ class Session:
             self.marks.add(f"{key}:end")
             self.note(f"   ↳ {step.get('title')}", "dim")
         if step.get("kind") == "requirements" and step["status"] == "done" and f"{key}:end" not in self.marks:
-            self.marks.add(f"{key}:end")  # what "done" means, as the lab wrote it down
+            self.marks.add(f"{key}:end")  # what "done" means, as the Classroom wrote it down
             self.note(f"   📋 {step.get('title')}", "dim")
             for item in data.get("requirements") or ():
                 self.note(f"      {item['id']} ({item['kind']}) {item['text']}", "dim")
@@ -527,7 +527,7 @@ class Session:
 
     # ---- approvals --------------------------------------------------------------------------------------------
     def pending(self) -> dict | None:
-        """The approval this task waits for now, as the lab says (its views decide; club only asks you)."""
+        """The approval this task waits for now, as the Classroom says (its views decide; club only asks you)."""
         approval = (self.current() or {}).get("approval")
         return approval if approval and approval.get("id") not in self.asked else None
 
@@ -604,7 +604,7 @@ class Session:
         """A visit from the classroom that is over: take the result back to the chat it came from."""
         task = self.current() or {}
         data = task.get("data") or {}
-        if "report" not in (task.get("actions") or ()):  # the lab says whether there is something to report
+        if "report" not in (task.get("actions") or ()):  # the Classroom says whether there is something to report
             if not ask_first:
                 self.note("Nothing to report back: this task did not come from a conversation, or it is reported.", "dim")
             return
@@ -623,8 +623,8 @@ class Session:
             return None
 
     def reconnect(self) -> bool:
-        """The lab went away (restarted, crashed): connect again for up to half a minute, and catch up."""
-        self.note("\n   The lab closed the connection; reconnecting…", "yellow")
+        """The Classroom went away (restarted, crashed): connect again for up to half a minute, and catch up."""
+        self.note("\n   The Classroom closed the connection; reconnecting…", "yellow")
         url = self.lab.url
         self.lab.close()
         for _ in range(60):
@@ -639,7 +639,7 @@ class Session:
                         self.catch_up()
                     return True
             time.sleep(0.5)
-        self.note(f"   The lab is not back at {url}; `club` starts it again next time.", "red")
+        self.note(f"   The Classroom is not back at {url}; `club` starts it again next time.", "red")
         return False
 
     def show_diff(self) -> None:
@@ -666,7 +666,7 @@ class Session:
 # ---- commands ---------------------------------------------------------------------------------------------------
 HELP = """Commands:
   /diff              the change set so far
-  /status            this folder, the task and the lab
+  /status            this folder, the task and the Classroom
   /tasks             this project's recent tasks
   /resume [id]       go back to a task (the latest open one without an id)
   /new               the next message starts a new task
@@ -674,7 +674,7 @@ HELP = """Commands:
   /report            take a finished visit's result back to the chat it came from
   /crew [names]      who comes along on new tasks (none: the usual roles)
   /workflow [name]   auto, single, cascade or critique for new tasks
-  /web               open this task in the lab page
+  /web               open this task in the Classroom page
   /exit              leave (the club keeps working; `club -c` comes back)
 Anything else goes to the club: a new task, or more for the current one."""
 
@@ -686,7 +686,7 @@ def interactive(session: Session, first: str | None) -> int:
         pass
     style = session.style
     team = [seat["name"] for seat in session.lab.state["team"] if seat.get("ready") is not False]
-    session.note(style("🧪 club", "bold") + style(" · the lab, from here", "dim"))
+    session.note(style("📝 club", "bold") + style(" · the Classroom, from here", "dim"))
     session.note(f"   📁 {describe(session.root, Path.cwd().resolve())}")
     tests = session.project.get("test_line") or session.project.get("test")
     session.note(f"   🧪 tests: {tests + (' (guessed)' if session.project.get('detected') else '') if tests else 'none found'}"
@@ -804,7 +804,8 @@ def once(session: Session, text: str) -> int:
         session.note("\nStepped away; the club keeps working.", "dim")
         return 130
     except LabClosed as error:
-        session.note(f"The lab went away ({error}); the club keeps any task it had: `club -c` comes back to it.", "red")
+        session.note(f"The Classroom went away ({error}); the club keeps any task it had: `club -c` comes back to it.",
+                     "red")
         return 1
     task = session.current() or {}
     data = task.get("data") or {}
@@ -894,10 +895,10 @@ def stop(data: str | None = None) -> int:
             break
         time.sleep(0.25)
     else:
-        print(f"The lab (pid {pid}) is still stopping; `club stop` again, or wait.")
+        print(f"The Classroom (pid {pid}) is still stopping; `club stop` again, or wait.")
         return 1
     pid_file.unlink(missing_ok=True)
-    print("Stopped the lab; its runs and approvals carry over to the next start.")
+    print("Stopped the Classroom; its runs and approvals carry over to the next start.")
     return 0
 
 
@@ -911,19 +912,21 @@ def parser() -> argparse.ArgumentParser:
                           help="one go: work until the club needs you, print the result, exit")
     commands.add_argument("-c", "--continue", dest="resume", action="store_true", help="come back to this folder's open task")
     commands.add_argument("-C", "-d", "--cd", dest="folder", help="work in this folder instead of the current one")
-    commands.add_argument("--web", action="store_true", help="open this folder's task in the lab page")
+    commands.add_argument("--web", action="store_true", help="open this folder's task in the Classroom page")
     commands.add_argument("--json", action="store_true", help="with -p: every event as a JSON line, then the result")
     commands.add_argument("--workflow", help="how to work: auto (default), single, cascade, critique, or one "
                                                "added under workflows/")
     commands.add_argument("--crew", default="", help="who comes along, e.g. flash,pro (default: the usual roles)")
-    commands.add_argument("--lab", help=f"the lab's address (default {LAB}, or CLUB_LAB)")
+    commands.add_argument("--lab", help=f"the Classroom's address (default {LAB}, or CLUB_LAB)")
     commands.add_argument("-y", "--yes", action="store_true", help="make the folder a git repository without asking")
-    commands.add_argument("--env", action="append", default=[], help="install / starting a lab: a .env file with keys")
-    commands.add_argument("--key", action="append", default=[], metavar="NAME", help="install / starting a lab: only this key")
+    commands.add_argument("--env", action="append", default=[],
+                          help="install / starting a Classroom: a .env file with keys")
+    commands.add_argument("--key", action="append", default=[], metavar="NAME", help="install / starting a Classroom: only this key")
     commands.add_argument("--bin", default="~/.local/bin", help="install: where to put the command")
     commands.add_argument("--name", default="club", help="install: the command's name")
-    commands.add_argument("--data", help="install / starting a lab: the lab's data folder")
-    commands.add_argument("--demo", action="store_true", help="install / starting a lab: the scripted club, no keys")
+    commands.add_argument("--data", help="install / starting a Classroom: the Classroom's data folder")
+    commands.add_argument("--demo", action="store_true",
+                          help="install / starting a Classroom: the scripted club, no keys")
     return commands
 
 

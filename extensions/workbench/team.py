@@ -65,7 +65,7 @@ class Seat:
     cheap: tuple[Mapping[str, Any], ...]
     strong: tuple[Mapping[str, Any], ...]
     avatar: str = ""  # the picture to show (avatars/<avatar>.png); her own name when empty
-    also: tuple[str, ...] = ()  # classroom personas she stands for in the lab (flash for the room's deepseek)
+    also: tuple[str, ...] = ()  # MomoChat personas she stands for in the Classroom (flash for the room's deepseek)
     effort: str = ""  # the most reasoning effort she uses, whatever a call asks (empty: no limit)
     tool_calls: bool = False  # she works through her API's own function calls, not one JSON object per turn
 
@@ -114,8 +114,8 @@ class Team:
         return self.seats[persona]
 
     def seat_for(self, name: str) -> Seat | None:
-        """The seat a classmate's name stands for: her persona or display name, or one a seat is `also` (a classroom
-        persona she stands for in the lab)."""
+        """The seat a classmate's name stands for: her persona or display name, or one a seat is `also` (a MomoChat
+        persona she stands for in the Classroom)."""
         key = lambda text: re.sub(r"[^a-z0-9]", "", str(text or "").lower())  # "Flash-chan" is flashchan
         wanted = key(name)
         if not wanted:

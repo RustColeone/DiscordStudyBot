@@ -143,7 +143,7 @@ class Board:
         self._tell("deleted", {"id": task_id})
 
     def search(self, query: str = "", project: str = "", limit: int = 10) -> list[dict]:
-        """The lab's logbook: tasks whose title, request or summary hold every word of `query` (any case), newest
+        """The Classroom's logbook: tasks whose title, request or summary hold every word of `query` (any case), newest
         first; optionally of one project."""
         words = [word.lower() for word in str(query or "").split() if word.strip()]
         found = []
@@ -160,7 +160,7 @@ class Board:
         return found
 
     def notebook(self, project: str, before: str = "", limit: int = 5) -> list[dict]:
-        """What the club did in a project lately (finished tasks), for the lab's own memory of it."""
+        """What the club did in a project lately (finished tasks), for the Classroom's own memory of it."""
         rows = [task for task in self.tasks(300) if task["project"] == project and task["id"] != before
                 and task["status"] in ("landed", "answered", "discarded", "failed")]
         return rows[:limit]

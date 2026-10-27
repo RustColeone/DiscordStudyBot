@@ -17,7 +17,7 @@ I'll review it"), and every step shows who did it, on which model, with what tok
 For whoever set it up, it is a harness. For anyone else in a workbench conversation it is a friendly classmate with
 no access to anything. From Discord it is the same harness, remotely.
 
-## Quick start (just the lab, no bot needed)
+## Quick start (just the Classroom, no bot needed)
 
 1. Once: `python3 -m venv venv && venv/bin/pip install -r requirements.txt` (already done if the bot runs here).
 2. Model keys: put any of `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `CLAUDE_API_KEY` or
@@ -27,7 +27,7 @@ no access to anything. From Discord it is the same harness, remotely.
 
    ```bash
    venv/bin/python -m extensions.workbench --env ../.env --key DEEPSEEK_API_KEY   # or: --demo
-   # [lab] Model keys handed to the core: DEEPSEEK_API_KEY
+   # [classroom] Model keys handed to the core: DEEPSEEK_API_KEY
    # [core] modules: workbench; interfaces: workbench; model providers with keys: deepseek
    # [workbench] Open http://192.168.1.20:4157 for the club's workbench.
    ```
@@ -36,9 +36,9 @@ no access to anything. From Discord it is the same harness, remotely.
    configuration to `data/workbench/core/core.yml` and starts `python -m core` with it. `--env` hands every key in
    that file to the core, so every classmate with a key joins in; `--key NAME` (repeat it for more) hands only the
    keys you name, from the files or your shell. No other key, token or password of your shell reaches the core. A
-   file you name with `--env` wins over the harness's own `.env`. `--also webui --also room` brings the classroom
+   file you name with `--env` wins over the harness's own `.env`. `--also webui --also room` brings MomoChat
    next door too; `--core FILE` adds core settings (other modules' settings, say: its relative paths are read from
-   the file's folder, its modules add to the lab's, and its assignments stay); `--print-config` shows what it
+   the file's folder, its modules add to the Classroom's, and its assignments stay); `--print-config` shows what it
    would run.
 
 On the page, pick a project (the practice project `sample` is always there), describe a task or click a
@@ -63,23 +63,23 @@ cd ~/code/my-app
 club                          # talk with the club here; approvals are asked inline
 club "add a --json flag"      # the same, starting with that request
 club -p "fix the failing test"   # one go: work until it needs you, print the result, exit (also: club exec ...)
-club -c                       # come back to this folder's open task (or take up an invitation from the classroom)
+club -c                       # come back to this folder's open task (or take up an invitation from MomoChat)
 club -C ~/code/other          # work in another folder (also -d)
-club --web                    # open this folder's task in the lab page
-club status | club stop       # the lab: running? projects and open tasks; stop the one club started
+club --web                    # open this folder's task in the Classroom page
+club status | club stop       # the Classroom: running? projects and open tasks; stop the one club started
 ```
 
 - **The folder.** club works in the git repository around the folder you are in (its root, where `AGENTS.md` is
   read). A plain folder, or a repository with no commit yet, gets a first commit only if you agree (`--yes`
   without asking). It tells you the branch, and if you have uncommitted changes: the club works from your last
-  commit, and landing needs a clean checkout. The lab's own worktrees are refused.
-- **The lab.** A lab already running is used (`--lab URL`, `CLUB_LAB`); otherwise one starts in the background on
-  this computer with the keys `install` was given (log and pid in its data folder; `club stop` stops it). The
-  folder becomes a project of the lab the first time (named after the folder).
+  commit, and landing needs a clean checkout. The Classroom's own worktrees are refused.
+- **The Classroom.** A Classroom already running is used (`--lab URL`, `CLUB_LAB`); otherwise one starts in the
+  background on this computer with the keys `install` was given (log and pid in its data folder; `club stop` stops
+  it). The folder becomes a project of the Classroom the first time (named after the folder).
 - **Talking.** Each line starts a task, or goes to the open one as more work. The classmates' messages stream as
   they come, with each tool step (`📄 Pro-chan read file …`, `▶ … ✓`) and the tests. `/diff`, `/status`,
   `/tasks`, `/resume [id]`, `/new`, `/discard`, `/report`, `/crew names`, `/workflow name`, `/web`, `/exit`.
-  Ctrl+C steps away while the club keeps working; Ctrl+D leaves. When a visit from the classroom is over, club
+  Ctrl+C steps away while the club keeps working; Ctrl+D leaves. When a visit from MomoChat is over, club
   offers to report back, as the page does.
 - **Approvals stay yours.** The second check lists every item; `y` shows the whole diff first (unless you just
   looked with `d`), then asks once more. The final approval and any command off the allowlist ask `y/N`.
@@ -88,8 +88,8 @@ club status | club stop       # the lab: running? projects and open tasks; stop 
 - **Scripts.** `club -p --json` prints every event as a JSON line, then `{"type": "result", "status", "summary",
   "change", "tests", "link"}`. Exit code 0 for review/answered/landed, 1 otherwise, 2 for a folder it can't use.
 
-It is a client of the lab protocol ([`PROTOCOL.md`](PROTOCOL.md)), like the page: it works with the page turned off
-(`web: false`), and whatever it does shows in the page, and the other way round. It asks what the lab says (the
+It is a client of the Classroom protocol ([`PROTOCOL.md`](PROTOCOL.md)), like the page: it works with the page turned
+off (`web: false`), and whatever it does shows in the page, and the other way round. It asks what the Classroom says (the
 approval a task waits for, its checklist and ticks); it never decides that itself.
 
 ## How it fits
@@ -101,8 +101,8 @@ flowchart LR
         CLUB["club (terminal)"]
         GUI["a window GUI…"]
     end
-    subgraph LAB["The lab module · extensions/workbench"]
-        API["lab interface<br/>HTTP + websocket · PROTOCOL.md"]
+    subgraph LAB["The Classroom module · extensions/workbench"]
+        API["Classroom interface<br/>HTTP + websocket · PROTOCOL.md"]
         E["engine<br/>kernel/ + workflows/"]
         V["views · places<br/>the rules, in one place"]
         C["workbench.* capabilities<br/>tools · $check · review · land"]
@@ -113,7 +113,7 @@ flowchart LR
         DIR["directory<br/>links · places (1.7)"]
     end
     PAGE & CLUB & GUI <--> API
-    D["Discord · classroom · cli"] --> G
+    D["Discord · MomoChat · cli"] --> G
     API -- "submit / deliver" --> G
     M -- "Session" --> E
     M -- "ToolContext" --> C
@@ -124,15 +124,15 @@ flowchart LR
 ```
 
 The module is written only against `contracts`, and it always runs in the real core: inside the bot, or as the
-lab alone (`python -m extensions.workbench` starts the same core with just this module). Conversation traffic goes
+Classroom alone (`python -m extensions.workbench` starts the same core with just this module). Conversation traffic goes
 through the core: your messages through `port.submit`, the classmates' words through `Session.reply`, approvals
 through the core's approval cards, and everything you can do is also a `$command`, so Discord can do it too.
 
 What a task looks like (steps, diffs, the approval it waits for, what can be done now) lives on the module's own
-board and is computed in one place (`views.py`): the lab's interface serves it to every frontend through the lab
-protocol ([`PROTOCOL.md`](PROTOCOL.md)), so the page, `club` and a window GUI show the same rules instead of
-deciding them. The lab tells other interfaces where it is and who is in it through the core's directory (contracts
-1.7), which is how the classroom draws it on its map without knowing anything about it.
+board and is computed in one place (`views.py`): the Classroom's interface serves it to every frontend through the
+Classroom protocol ([`PROTOCOL.md`](PROTOCOL.md)), so the page, `club` and a window GUI show the same rules instead of
+deciding them. The Classroom tells other interfaces where it is and who is in it through the core's directory (contracts
+1.7), which is how MomoChat draws it on its map without knowing anything about it.
 
 ## A task's life
 
@@ -228,7 +228,7 @@ flowchart LR
 
 - **The second check** is the extra layer for testing. Its card lists every changed file, the test result, the
   reviewer's notes, the criteria met, what the tester tried (and each problem she still sees), the commands that
-  ran and the summary. Every item must be ticked before the approval counts, and the lab itself enforces it
+  ran and the summary. Every item must be ticked before the approval counts, and the Classroom itself enforces it
   (the `workbench.review` capability), whatever the interface: on the page with the boxes, anywhere with
   `$check [task] all` or `$check 1 3 4` after looking. Approving with items unticked gets "not yet" and a new
   request; the ticks you made stay. From Discord the diff arrives as a file with a link to the page.
@@ -270,7 +270,7 @@ You don't have to agree with the club's reasoning. What you can change, from the
 | Other routing | `config.yml`: `routing:` points a case at any workflow |
 | Another way of working | Drop a file into [`workflows/`](workflows): `@workflow("name", "Title", "what it does")` on an `async def run(round)`; it is listed in the page and `club` and can be routed to. The built-in `single`, `cascade` and `critique` are files there too, and the toolkit (`round.solve`, `review_change`, `validate`, `diff`, `outcome`, `say`, the journal) is documented in [`workflows/__init__.py`](workflows/__init__.py). Whatever it returns is verified the same way afterwards. |
 | Another verification | `config.yml`: `verify: {requirements, probe, repairs}`; the stage itself is [`kernel/verify.py`](kernel/verify.py) |
-| Another frontend | Speak the lab protocol ([`PROTOCOL.md`](PROTOCOL.md)), as the page and `club` do; or set `web: false` and keep only the API |
+| Another frontend | Speak the Classroom protocol ([`PROTOCOL.md`](PROTOCOL.md)), as the page and `club` do; or set `web: false` and keep only the API |
 | A whole other engine | Assign your own engine to `workbench:*` (core.yml `assignments:`); the capabilities and the page stay |
 
 ## Verification: the harness looks for the bugs, not you
@@ -319,67 +319,68 @@ changes a reviewer's family. The ledger shows the provider that actually answere
 **The crew.** Who comes along to a task: picked on the arrival card (the inviting classmate's `companions` by
 default) or in the composer, and for `club` with `--crew`/`/crew`. The crew take their roles first, in each
 role's order; the classmate who brought you leads and keeps her usual roles. Nobody picked: the usual order. The
-page shows who has no key (as the latest run could tell; inside the bot that is known from the first lab run on).
+page shows who has no key (as the latest run could tell; inside the bot that is known from the first run on).
 
 Two seats can share a family, for example two DeepSeek models as two classmates (see
 [`config.example.yml`](config.example.yml), `flash` and `pro`).
 
-## The classroom and the lab
-
-> **Renamed (2026-10-26).** The web UI's chat is now **MomoChat** and this page is the **Classroom**, with
-> **Students** (`#students`, the seats) and the **Logbook** (`#logbook`, the task list) as its other views; the web
-> UI also has a **Cafe**. Each page publishes its views in its directory status (`views`: name, icon, a path relative
-> to its link, `order`), and every page draws one places bar from them (`static/places.js`). A student is in every
-> place at once: the maps no longer take her out of one place while she works in another. The Classroom opens on its
-> **sessions**: one strip each (open ones first), numbered like stages, with the students who took part (the task's
-> `people`: who brought it, her crew, everyone who worked a step) faintly on its right, and **＋ New session**; a strip
-> opens the session, and ‹ goes back. The page comes with its first hello inside (`{{state}}`), so the strips are
-> there on the first paint. The text below still uses the old names.
+## MomoChat and the Classroom
 
 Two places, one club (the Codex route: chat and work are separate places that remember each other):
 
-- the **classroom** is the web UI on :4156, chatting with the classmates (the room engine);
-- the **lab** is this page on :4157, tasks on your projects (the workbench engine).
+- **MomoChat** is the web UI on :4156, chatting with the students (the room engine). The web UI also has the **Cafe**.
+- **The Classroom** is this page on :4157, sessions of work on your projects (the workbench engine; a session is a
+  task). Its other views are **Students** (`#students`, the seats) and the **Logbook** (`#logbook`, the task list).
+
+Each page publishes its views in its directory status (`views`: name, icon, a path relative to its link, `order`),
+and every page draws one places bar from them (`static/places.js`). A student is in every place at once: the maps
+never take her out of one place while she works in another. The Classroom opens on its **sessions**: one strip each
+(open ones first), numbered like stages, with the students who took part (the task's `people`: who brought it, her
+crew, everyone who worked a step) faintly on its right, and **＋ New session**; a strip opens the session, and ‹ goes
+back. The page comes with its first hello inside (`{{state}}`), so the strips are there on the first paint.
+
+What the characters say still uses the old names ("the lab" for the Classroom, "the classroom" for MomoChat), since
+that wording is part of their prompts; renaming it is proposed separately.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Y as You
-    participant C as Classroom (room)
-    participant L as Lab (workbench)
+    participant C as MomoChat (room)
+    participant L as Classroom (workbench)
     Y->>C: "the schedule lists Sunday first; can you fix it?"
-    C->>C: DeepSeek checks the lab's logbook (workbench.tasks)
+    C->>C: DeepSeek checks the Logbook (workbench.tasks)
     C->>Y: "I think we need to go to the lab for this, want to come with me?"
     C->>L: workbench.invite: her brief, her notes on how you like it,<br/>the latest part of this chat (nothing starts)
     C->>Y: a link · on the map she has a ticket for you (still in class)
     Y->>L: follow it: the arrival card (the brief to edit, project, workflow, who comes along)
-    Y->>L: Start in the lab
+    Y->>L: Start the session
     L->>Y: "Here we are in the lab. I brought what we talked about." · the work · two approvals · landed
     Y->>L: Report back
-    L->>C: a lab report in the same chat (core.send_message, your own command)
-    Y->>C: the conversation goes on, and the classmates know what happened
+    L->>C: a session report in the same chat (core.send_message, your own command)
+    Y->>C: the conversation goes on, and the students know what happened
 ```
 
 **What travels, and how the club remembers.**
 
 | | How |
 | --- | --- |
-| Classroom → lab | `workbench.invite` (offered to classmates while the creator talks, wherever they are): her `brief` (what to do, every decision and name from the chat), her `notes` (what she knows about how you like such work, from her diary), her `companions` (classmates she asks along; one not in the lab's team or without a key is named in the result and stays behind), and the chat's latest messages (`bring_messages`, 16), read through the conversation's history (contracts 1.6). It only makes an invitation and returns a link; following it is accepting, and you start the task on the arrival card (or with `club -c`), where you can still edit the brief and who comes. |
-| In the lab | The classmate who invited you leads: she greets you and speaks for the club in that task (a lab seat stands for a classroom persona with `also:`, as Flash-chan does for DeepSeek). Every round's brief carries what came from the classroom and the project's **lab notebook** (what the club did there before). |
-| Lab → classroom | **Report back** (on the page, or `club`, once the task is done): a lab report (title, outcome, commit, tests, who did it, who was in the lab and who was asked along but not there, the summary, a link to the visit) goes into the chat it came from, sent with `core.send_message` as your own command. It joins that chat's history, so the classmates there know it, and it can go into their diaries like anything said there. |
-| Classroom → lab, later | The lab's **logbook** (`workbench.tasks`, `$tasks <words>`): classmates look up what happened in the lab; DeepSeek does before she writes a new brief. |
+| MomoChat → Classroom | `workbench.invite` (offered to the students while the creator talks, wherever they are): her `brief` (what to do, every decision and name from the chat), her `notes` (what she knows about how you like such work, from her diary), her `companions` (students she asks along; one not in the Classroom's team or without a key is named in the result and stays behind), and the chat's latest messages (`bring_messages`, 16), read through the conversation's history (contracts 1.6). It only makes an invitation and returns a link; following it is accepting, and you start the session on the arrival card (or with `club -c`), where you can still edit the brief and who comes. |
+| In the Classroom | The student who invited you leads: she greets you and speaks for the club in that session (a Classroom seat stands for a MomoChat persona with `also:`, as Flash-chan does for DeepSeek). Every round's brief carries what came from MomoChat and the project's **notebook** (what the club did there before). |
+| Classroom → MomoChat | **Report back** (on the page, or `club`, once the session is done): a session report (title, outcome, commit, tests, who did it, who was in the Classroom and who was asked along but not there, the summary, a link to the visit) goes into the chat it came from, sent with `core.send_message` as your own command. It joins that chat's history, so the students there know it, and it can go into their diaries like anything said there. |
+| MomoChat → Classroom, later | The **Logbook** (`workbench.tasks`, `$tasks <words>`): the students look up what happened in the Classroom; DeepSeek does before she writes a new brief. |
 
-**The mini map**, in both places: the classroom and the lab side by side, and who is in each. A **visit** lasts from
-the start of a task until you report back or it is closed (or `visit_minutes`, 30, after it last moved once nothing
-runs): the classmate who brought you, her crew and everyone who worked on it are in the lab meanwhile, at work or
-"waiting for your check"; they stay in the classroom too (a student is in every place at once). An invitation
-you have not followed yet keeps her in class with a pulsing ring, and its ticket waits in the corridor (🎟️🚪);
-click a place (or the ticket) to go there. The lab serves it at `/api/presence`; the classroom's server asks for it
-on this machine every few seconds while a page is open (web UI setting `lab_presence`), so neither page reaches
-across sites.
+**The mini map**, in both places: MomoChat and the Classroom side by side, and who is in each. A **visit** lasts from
+the start of a session until you report back or it is closed (or `visit_minutes`, 30, after it last moved once
+nothing runs): the student who brought you, her crew and everyone who worked on it are in the Classroom meanwhile,
+at work or "waiting for your check"; they stay in MomoChat too. An invitation you have not followed yet keeps her
+in class with a pulsing ring, and its ticket waits in the corridor (🎟️🚪); click a place (or the ticket) to go
+there.
+The Classroom serves it at `/api/presence`; the web UI's server asks for it on this machine every few seconds while
+a page is open (web UI setting `lab_presence`), so neither page reaches across sites.
 
-Settings (`config.yml`): `classroom_url` (where "open the classroom" goes; default the same computer, port 4156),
-`bring_messages` (16), `visit_minutes` (30), and per seat `also: [classroom persona, ...]`.
+Settings (`config.yml`; the keys keep their first names): `classroom_url` (where "open MomoChat" goes; default the
+same computer, port 4156), `bring_messages` (16), `visit_minutes` (30), and per seat `also: [MomoChat persona, ...]`.
 
 ## The project's own instructions
 
@@ -442,14 +443,14 @@ and no access to any project, as everything that touches the computer is creator
 | [`kernel/prompts.py`](kernel/prompts.py) | Every prompt and schema, and the club's own lines in English and Chinese |
 | [`team.py`](team.py) | Seats, families, roles, the per-seat profiles |
 | [`capabilities.py`](capabilities.py) | `workbench.*`: open, list, read, search, write, edit, delete, run, probe_file, probe, test, diff, check, review, land, discard, tasks, projects, invite |
-| [`views.py`](views.py), [`places.py`](places.py) | The rules the frontends show: a task's current approval with its checklist, its actions, the report; the lab as a place |
+| [`views.py`](views.py), [`places.py`](places.py) | The rules the frontends show: a task's current approval with its checklist, its actions, the report; the Classroom as a place |
 | [`workspace/`](workspace) | `worktree.py` (open, change set, land, remove), `tools.py`, `commands.py` (the allowlist), `projects.py`, `git.py` |
-| [`web/server.py`](web/server.py) | The lab's interface: the API ([`PROTOCOL.md`](PROTOCOL.md)), the page unless `web: false`, the place published in the core's directory |
+| [`web/server.py`](web/server.py) | The Classroom's interface: the API ([`PROTOCOL.md`](PROTOCOL.md)), the page unless `web: false`, the place published in the core's directory |
 | [`prices.py`](prices.py) | The price list: fetched on use once a day old, matched to each model, credited |
 | [`board.py`](board.py) | Tasks, steps (with each model call's seat, model, tokens, cost, time), the page's transcript, outcomes |
 | [`web/static/`](web/static) | The page (app, styles, a copy of the web UI's Markdown renderer) |
 | [`demo.py`](demo.py) | The scripted club behind `--demo` (a provider kind the module adds) |
-| [`cli.py`](cli.py), [`__main__.py`](__main__.py) | `club`; the lab alone on the real core |
+| [`cli.py`](cli.py), [`__main__.py`](__main__.py) | `club`; the Classroom alone on the real core |
 | [`sample/`](sample) | The practice project, copied into the data folder on first use |
 
 ### Durable, by replay
@@ -481,7 +482,7 @@ Security is not the focus yet. What is there:
 - On Linux, two settings confine what those lines (the club's commands, probes and the tests) can reach:
   - `command_network: false` takes the network away;
   - `command_filesystem: worktree` runs them in a bubblewrap sandbox. They see the system read-only, their
-    worktree and the project's checkout. Home and temp folders (your `.env`, other worktrees, the lab's data) and
+    worktree and the project's checkout. Home and temp folders (your `.env`, other worktrees, the Classroom's data) and
     other processes are not there.
 
   Off by default. Where they cannot be had, the commands are refused, never run without them. Turned on after
@@ -491,7 +492,7 @@ Security is not the focus yet. What is there:
 
 ## Data it keeps
 
-Under its data folder: `data/workbench/` for the lab alone (`data_dir`; the core's own stores in `core/` there),
+Under its data folder: `data/workbench/` for the Classroom alone (`data_dir`; the core's own stores in `core/` there),
 `data/core/extensions/workbench/` in the bot.
 
 | Path | Contents |
@@ -517,7 +518,7 @@ DeepSeek only (Pro-chan drafting, Flash-chan routing, judging and reviewing), on
 ## Tests
 
 [`tests/test_workbench.py`](../../tests/test_workbench.py), with scripted models and real git, every flow in the real
-core (the lab alone, as `python -m extensions.workbench` runs it):
+core (the Classroom alone, as `python -m extensions.workbench` runs it):
 
 - the allowlist, test detection and path refusals
 - landing by fast-forward and by cherry-pick onto a branch that moved, and stopping on a dirty file or a conflict
@@ -529,15 +530,15 @@ core (the lab alone, as `python -m extensions.workbench` runs it):
 - a task surviving a restart, with nothing said twice, and a guest getting chat only
 - the page refusing other sites and starting a task
 - the module inside the real core, from its page and from another interface (diff file, link, approvals there)
-- the classroom → lab trip: an invitation with companions, the visit on the map, report back, the logbook
+- the MomoChat → Classroom trip: an invitation with companions, the visit on the map, report back, the logbook
 - the crew taking roles first; the narrator speaking of her own part in the first person; `AGENTS.md` reaching
   the drafter and the judge
 - an answer cut off at the length limit asked again with twice the room; seats without a key skipped quietly
   and a sibling role stepping in
 - `club`: a folder made a repository only with consent (a subfolder means its repository), and one go from a
   folder through the real page websocket, stopping at your check
-- the second check enforced by the lab: an approval with items unticked gets "not yet" and a new request; `$check`
-  from another interface; the lab's view of which approval is for now (and `club` asking only that)
+- the second check enforced by the Classroom: an approval with items unticked gets "not yet" and a new request; `$check`
+  from another interface; the Classroom's view of which approval is for now (and `club` asking only that)
 - verification: the criteria in the drafter's and the reviewer's prompts; a "minor" bug or an unasked change still
   blocking; the tester's finding repaired and tested again; a problem still found reaching the checklist; a probe
   on the old code and the new, with `.probe/` never in the change set
@@ -552,5 +553,5 @@ venv/bin/python -m unittest tests.test_workbench
 - Replies in the person's language: see the proposal in the project notes (a computed language per turn).
 - Tune the routing from `outcomes.jsonl` once there is real use, as the earlier plan proposed.
 - Give the critic read-only tools: HydraFusion's latest critics inspect the workspace.
-- A page for chat and tasks together: the web UI's classroom with a Tasks tab.
+- A page for chat and tasks together: MomoChat with a Tasks tab.
 - Parallel critics, and HydraFusion's "Max" (higher effort where it matters).

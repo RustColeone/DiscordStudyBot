@@ -355,7 +355,7 @@ body.is-dragging .composer-row { border: 2px dashed var(--accent); }
                 font-weight: 700; }
 .login-error { color: #b4512d !important; min-height: 1.2em; }
 
-/* the mini map: the classroom (here), the corridor (invitations to the lab), the lab next door */
+/* the mini map: MomoChat (here), the corridor (invitations to the Classroom), the Classroom next door */
 .map { display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch; gap: 4px; }
 .map[hidden] { display: none; }
 .place { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; color: var(--ink);
@@ -365,7 +365,7 @@ a.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line))
 .place-name { font-size: .78rem; font-weight: 800; }
 .place-faces { display: flex; flex-wrap: wrap; gap: 2px; min-height: 24px; }
 .place-faces .avatar { width: 22px; height: 22px; font-size: .62rem; }
-/* she has an invitation to the lab for you: a pulsing ring (the corridor holds its ticket) */
+/* she has an invitation to the Classroom for you: a pulsing ring (the corridor holds its ticket) */
 .place-faces .avatar.has-ticket { box-shadow: 0 0 0 2px var(--accent); animation: door 1.6s ease-in-out infinite; }
 .place-note { font-size: .66rem; color: var(--muted); line-height: 1.25; }
 .corridor { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; min-width: 14px;

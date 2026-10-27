@@ -1,10 +1,10 @@
-"""The lab's interface: an HTTP and websocket API (the lab protocol, see PROTOCOL.md) and, optionally, the web page
-that uses it. `club` and any other frontend use the same API, so none of them is special.
+"""The Classroom's interface: an HTTP and websocket API (the Classroom protocol, see PROTOCOL.md) and, optionally, the
+web page that uses it. `club` and any other frontend use the same API, so none of them is special.
 
 It is an ordinary interface (`workbench`, addresses `workbench:<task>`): what you type goes to the core through
 `port.submit`, and what the club says comes back through `deliver`, as for Discord or the web UI. The rest (each
 task's steps, its diff, the approval it waits for and what can be done now) comes from the module's views
-(views.py), so every frontend shows the same rules instead of deciding them. It publishes the lab as a place in
+(views.py), so every frontend shows the same rules instead of deciding them. It publishes the Classroom as a place in
 the core's directory (contracts 1.7) and reads the other places from there, for the mini map.
 
 Whoever opens it acts as the creator. It answers only private-network clients and refuses other websites
@@ -81,7 +81,7 @@ class WorkbenchUI(Interface):
         port.set_owners([self.user_id])  # whoever opens the page is the creator (unless core.yml names owners)
         self._loop = asyncio.get_running_loop()
         app = web.Application(middlewares=[self._guard], client_max_size=4 * 1024 * 1024)
-        app.add_routes([  # the lab protocol (PROTOCOL.md)
+        app.add_routes([  # the Classroom protocol (PROTOCOL.md)
             web.get("/api/tasks/{task}", self._task_api), web.get("/api/tasks/{task}/diff", self._diff_api),
             web.get("/api/tasks/{task}/file", self._file_api), web.get("/files/{file}/{name}", self._file),
             web.get("/api/prices", self._prices_api), web.get("/api/presence", self._presence_api),
@@ -104,7 +104,7 @@ class WorkbenchUI(Interface):
         self.port_number = bound
         self.url = f"http://{_lan_address() if self.host in ('0.0.0.0', '::') else self.host}:{bound}"
         print(f"[{self.name}] Open {self.url} for the club's workbench." if self.page else
-              f"[{self.name}] The lab's API is at {self.url} (the page is off).", flush=True)
+              f"[{self.name}] The Classroom's API is at {self.url} (the page is off).", flush=True)
         self._unsubscribe = self.board.subscribe(self._on_board)
         self._publish()
         self._watcher = asyncio.create_task(self._watch_places())
@@ -153,13 +153,13 @@ class WorkbenchUI(Interface):
                                         "connect-src 'self'; frame-ancestors 'none'; object-src 'none'")
         return response
 
-    # ---- places: the lab in the core's directory, and the others for the map ------------------------------
+    # ---- places: the Classroom in the core's directory, and the others for the map ------------------------------
     def presence(self) -> dict:
-        """The lab as a place (places.py), as published."""
+        """The Classroom as a place (places.py), as published."""
         return places.lab_place(self.board, self.team, self.link, float(self.config.get("visit_minutes", 30)))
 
     def _publish(self) -> None:
-        """Tell the other interfaces where the lab is and who is in it (contracts 1.7), when that changed."""
+        """Tell the other interfaces where the Classroom is and who is in it (contracts 1.7), when that changed."""
         if self.port is None:
             return
         place = self.presence()
@@ -184,7 +184,7 @@ class WorkbenchUI(Interface):
         return {name: link for name, link in found.items() if link}
 
     async def _watch_places(self) -> None:
-        """Every few seconds: publish the lab when it changed (a finished visit ends with no event to say so), and
+        """Every few seconds: publish the Classroom when it changed (a finished visit ends with no event to say so), and
         tell open pages when any place changed."""
         every = max(2.0, float(self.config.get("places_poll_s", 5)))
         while True:
@@ -196,13 +196,13 @@ class WorkbenchUI(Interface):
                     self._broadcast({"type": "places", **current})
             except asyncio.CancelledError:
                 raise
-            except Exception as error:  # the map is a nicety: it never stops the lab
+            except Exception as error:  # the map is a nicety: it never stops the Classroom
                 self.port.log("places_failed", error=type(error).__name__)
             await asyncio.sleep(every)
 
     # ---- pages and files --------------------------------------------------------------------------
     async def _no_page(self, request):
-        return web.Response(text="The lab's API (see PROTOCOL.md); the web page is turned off (web: false).")
+        return web.Response(text="The Classroom's API (see PROTOCOL.md); the web page is turned off (web: false).")
 
     async def _state_api(self, request):
         return web.json_response(self._state())
@@ -450,7 +450,7 @@ class WorkbenchUI(Interface):
         return [name for name in dict.fromkeys(picked) if name in self.team.seats][:6]
 
     def report_text(self, task: dict) -> str:
-        """The lab report that goes back to the conversation a task came from (views.py)."""
+        """The session report that goes back to the conversation a task came from (views.py)."""
         return views.report_text(self.board, self.team, task, self.link)
 
     async def _report(self, socket_, task_id: str) -> None:
@@ -571,7 +571,7 @@ class WorkbenchUI(Interface):
         self._publishing = None
         try:
             self._publish()
-        except Exception as error:  # the map is a nicety: it never stops the lab
+        except Exception as error:  # the map is a nicety: it never stops the Classroom
             self.port.log("places_failed", error=type(error).__name__)
 
     def _broadcast(self, message: dict) -> None:

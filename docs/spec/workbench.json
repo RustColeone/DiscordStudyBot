@@ -67,7 +67,7 @@
   },
   {
    "key": "data_dir",
-   "description": "Where the lab keeps its board, projects and worktrees (default: the module's data folder)",
+   "description": "Where the Classroom keeps its board, projects and worktrees (default: the module's data folder)",
    "kind": "text",
    "default": null
   },

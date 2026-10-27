@@ -1,10 +1,10 @@
-"""Everything the lab asks of the operating system, in one place: a port (or Windows) reimplements only this.
+"""Everything the Classroom asks of the operating system, in one place: a port (or Windows) reimplements only this.
 
 - `shell(line)`: the argv that runs one shell line. bash everywhere (on Windows, Git for Windows' bash), so the
   allowlist, the models' commands and the tests mean the same thing on every system.
 - `group_options()` / `end_group(process)`: start a process in its own group, and end the whole group (a test run
   that starts servers or subprocesses must not outlive its timeout); `detached_options()`: a background process
-  that outlives the terminal (`club` starting a lab).
+  that outlives the terminal (`club` starting a Classroom).
 - `borrow(source, target)`: make a checkout's folder (a venv, node_modules) appear inside a worktree: a symlink, on
   Windows a directory junction when symlinks are not allowed, else a copy.
 - `process_running(pid, needle)`: whether a process is alive and its command line contains `needle`;
@@ -12,7 +12,7 @@
 - `hand_over(argv, env)`: replace this process with another program (POSIX `execve`); on Windows start it, wait,
   and exit with its code.
 - `offline(argv)`: the argv that runs `argv` with no network (Linux: a user and network namespace of its own, no
-  root needed), for the commands models run when the lab has `command_network: false`; elsewhere it refuses.
+  root needed), for the commands models run when the Classroom has `command_network: false`; elsewhere it refuses.
 - `isolated(argv, folder, isolation)`: the argv that runs `argv` as an `Isolation` allows: with `confined`
   (`command_filesystem: worktree`), in a sandbox that sees the system read-only, its own folder and the paths it
   shares, and no home or temp folders, no other processes (Linux: bubblewrap); elsewhere it refuses.
@@ -37,7 +37,7 @@ LOCALE = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
 @dataclass(frozen=True)
 class Isolation:
     """What a model's command may reach. `network`: the network. `confined`: only the system (read-only), its own
-    folder, `readable` (read-only) and `shared` (writable); the home and temp folders, the lab's data, other
+    folder, `readable` (read-only) and `shared` (writable); the home and temp folders, the Classroom's data, other
     worktrees and other processes are not there."""
     network: bool = True
     confined: bool = False

@@ -1,11 +1,11 @@
-"""Run the lab on its own: the bot's real core, with only this module (and any you add with --also).
+"""Run the Classroom on its own: the bot's real core, with only this module (and any you add with --also).
 
     venv/bin/python -m extensions.workbench --env ../.env --key DEEPSEEK_API_KEY   # only that key from the file
     venv/bin/python -m extensions.workbench --demo     # no keys: a scripted club plays the practice task
     venv/bin/python -m extensions.workbench --also webui --also room   # the classroom next door, too
 
 It writes a small core configuration (<data>/core/core.yml) and starts `python -m core` with it, under the core's
-supervisor, so the lab runs exactly as it does inside the bot. Settings come from extensions/workbench/config.yml
+supervisor, so the Classroom runs exactly as it does inside the bot. Settings come from extensions/workbench/config.yml
 (see config.example.yml); --config adds more.
 
     venv/bin/python -m extensions.workbench install --env ../.env --key DEEPSEEK_API_KEY
@@ -84,7 +84,7 @@ def module_path(name: str) -> Path:
 
 
 def core_config(arguments) -> tuple[dict, dict[str, str]]:
-    """The lab-only core configuration, and the model keys to hand it (only those named with --key)."""
+    """The Classroom-only core configuration, and the model keys to hand it (only those named with --key)."""
     data = Path(arguments.data).expanduser().resolve() if arguments.data else ROOT / "data" / "workbench"
     lab = load_config([HERE / "config.yml", *(Path(item).expanduser() for item in arguments.config)])
     lab["data_dir"] = str(data)  # the board, projects and worktrees stay where they were
@@ -111,12 +111,12 @@ def core_config(arguments) -> tuple[dict, dict[str, str]]:
     generated = list(config["modules"]["paths"])
     for path in arguments.core:  # more core settings (other modules' extension_config, owners, ...)
         config = merge(config, core_file(Path(path).expanduser()))
-    modules = config.setdefault("modules", {})  # (a --core module list adds to the lab's own, never drops it)
+    modules = config.setdefault("modules", {})  # (a --core module list adds to the Classroom's own, never drops it)
     modules["paths"] = list(dict.fromkeys([*(modules.get("paths") or []), *generated]))
     if "assistant" not in arguments.also:
         # The built-in defaults send conversations nobody claims to the assistant, which is not loaded here: they go to
-        # the lab's engine instead (the lab's own conversations have their assignment from the module). Assignments
-        # of your own (--core) stay; only the missing catch-alls are filled in.
+        # the Classroom's engine instead (the Classroom's own conversations have their assignment from the module).
+        # Assignments of your own (--core) stay; only the missing catch-alls are filled in.
         from .team import build_team
         fallback = {"engine": "workbench", "personas": list(build_team(lab).seats)}
         assignments = config.setdefault("assignments", {})
@@ -134,18 +134,18 @@ def handed_environment(keys: dict[str, str], environ=None) -> dict[str, str]:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["install"]:  # put `club` on the PATH: the lab from any folder (see cli.py)
+    if argv[:1] == ["install"]:  # put `club` on the PATH: the Classroom from any folder (see cli.py)
         from .cli import main as club
         return club(argv)
     parser = argparse.ArgumentParser(prog="python -m extensions.workbench", description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, help="port for the page (default 4157)")
     parser.add_argument("--host", help="address to listen on (default all; 127.0.0.1 for this computer only)")
-    parser.add_argument("--data", help="the lab's data folder (default data/workbench)")
+    parser.add_argument("--data", help="the Classroom's data folder (default data/workbench)")
     parser.add_argument("--env", action="append", default=[], help="another .env file with model keys")
     parser.add_argument("--key", action="append", default=[], metavar="NAME",
                         help="hand over only this key, from the .env files or your shell (repeat for more); no other "
                              "key or token of your shell reaches the core")
-    parser.add_argument("--config", action="append", default=[], help="another YAML file of the lab's settings")
+    parser.add_argument("--config", action="append", default=[], help="another YAML file of the Classroom's settings")
     parser.add_argument("--demo", action="store_true", help="a scripted club: no keys, no model calls")
     parser.add_argument("--also", action="append", default=[], metavar="MODULE",
                         help="another module to load (e.g. webui and room: the classroom next door)")
@@ -164,9 +164,10 @@ def main(argv: list[str] | None = None) -> int:
     import yaml
     path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")  # (dates stay dates)
     if arguments.demo:
-        print("[lab] Demo mode: a scripted club, no model calls. Try the practice project's Sunday task.", flush=True)
+        print("[classroom] Demo mode: a scripted club, no model calls. Try the practice project's Sunday task.",
+              flush=True)
     else:
-        print(f"[lab] Model keys handed to the core: {', '.join(sorted(keys)) or 'none (try --env or --demo)'}",
+        print(f"[classroom] Model keys handed to the core: {', '.join(sorted(keys)) or 'none (try --env or --demo)'}",
               flush=True)
     environment = handed_environment(keys)
     os.chdir(ROOT)

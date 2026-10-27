@@ -37,7 +37,8 @@ port: 4156                      # open http://<this computer's address>:4156
 # passphrase_env: WEBUI_PASSPHRASE   # the .env variable holding the passphrase
 # user_id: creator               # your sender ID in the core (owners are configured by it)
 
-# The lab next door (the workbench module): a mini map in the sidebar shows who is in the lab and who waits at its
-# door with an invitation; this server asks the lab on this machine every few seconds while a page is open.
-# map: true                     # the mini map of the places other interfaces publish (the lab); false: none
+# The Classroom next door (the workbench module): a mini map in the sidebar shows who is in the Classroom and who
+# waits at its door with an invitation; this server asks the Classroom on this machine every few seconds while a page
+# is open.
+# map: true                     # the mini map of the places other interfaces publish (the Classroom); false: none
 # places_poll_s: 5
