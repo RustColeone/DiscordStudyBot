@@ -11,6 +11,7 @@ def turn(message="", status="complete", actions=()):
 
 
 ASSISTANT = {"assignments": {"*": {"engine": "assistant", "personas": ["p"]}}}
+DIARY = {"assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": True}}}}  # the core diary, off by default
 
 
 class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
@@ -305,7 +306,7 @@ class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
         core, adapter = await self.core([
             calls("", ("ask", {"question": "Which city?"})),
             calls("Paris it is!", ("remember", {"key": "home.city", "kind": "fact", "note": "Lives in Paris",
-                                                "importance": 4}))])
+                                                "importance": 4}))], DIARY)
         await iface(core).say("weather?")
         await settle(core)
         await iface(core).say("Paris")
@@ -329,7 +330,7 @@ class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_note_without_words_is_a_step_of_its_own_and_the_answer_follows(self):
         note = {"key": "home.city", "kind": "fact", "note": "Lives in Paris", "importance": 4}
-        core, adapter = await self.core([calls("", ("remember", note)), calls("Nice, Paris!")])
+        core, adapter = await self.core([calls("", ("remember", note)), calls("Nice, Paris!")], DIARY)
         await iface(core).say("I live in Paris")
         await settle(core)
         self.assertEqual(iface(core).texts("room"), ["Nice, Paris!"])

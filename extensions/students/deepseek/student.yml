@@ -1,6 +1,8 @@
 # DeepSeek: one student. extension.py reads every folder with a student.yml (see ../README.md).
 name: deepseek
 display_name: DeepSeek
+aliases: [鲸酱]                # "鲸酱, …" calls on her too (her Discord bot's people call her so)
+formerly: [whale_chan, whale]  # Whale-chan's own persona, and the whale persona of a core.yml
 order: 4
 models:
   - {provider: deepseek, model: deepseek-flash}

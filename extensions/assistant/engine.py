@@ -182,6 +182,20 @@ TURN_SCHEMA = {
     "required": ["message", "status", "actions"],
     "additionalProperties": False,
 }
+# The turn when the core diary is off (the default: the companion module keeps what she remembers of people).
+PLAIN_SCHEMA = {**TURN_SCHEMA, "properties": {name: value for name, value in TURN_SCHEMA["properties"].items()
+                                              if name != "diary"}}
+
+
+def flag(value, default: bool) -> bool:
+    """An on/off option as people write it in YAML or JSON (true/false, yes/no, on/off, 1/0); else the default."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value or "").strip().lower()
+    return True if text in ("true", "yes", "on", "1") else False if text in ("false", "no", "off", "0") else default
+
 
 CONTRACT = """\
 Respond to every turn with one JSON object: {{"message": string, "status": "continue"|"complete"|"needs_input"|"blocked", "actions": [{{"tool": name, "arguments": {{...}}}}]}}.
@@ -232,9 +246,12 @@ class AssistantEngine(Engine):
     spec = EngineSpec("assistant", "One persona that talks, uses tools and asks questions; resumable.", "one")
 
     def __init__(self, max_steps: int = 8, history_limit: int = 16, effort: str = "low", max_tokens: int = 1200,
-                 tool_calls: bool = True):
+                 tool_calls: bool = True, diary: bool = False):
         self.max_steps, self.history_limit, self.effort, self.max_tokens = max_steps, history_limit, effort, max_tokens
         self.tool_calls = tool_calls  # the model's own function calls where it can make them
+        # The core diary (notes the model adds in its turn): off, since the companion keeps each student's memory;
+        # an assignment's `diary: true` option turns it on for its conversations.
+        self.diary = diary
 
     async def run(self, session: Session) -> RunYield:
         state = session.state or {"transcript": [], "pending": [], "event_cursor": -1, "steps": 0,
@@ -430,9 +447,8 @@ class AssistantEngine(Engine):
             merged.insert(1, {"role": "user", "content": "(conversation continues)"})
         return merged
 
-    @staticmethod
-    def _diary(session: Session):
-        if session.options.get("diary", True) is False or not session.personas:
+    def _diary(self, session: Session):
+        if not flag(session.options.get("diary"), self.diary) or not session.personas:
             return None
         diary = session.diary(session.personas[0].name)
         return diary if diary.available else None
@@ -545,7 +561,7 @@ class AssistantEngine(Engine):
         for attempt in range(3):
             try:
                 result = await session.models.generate(ModelRequest(
-                    self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
+                    self._messages(session, state, correction), output_schema=self._schema(session), schema_name="turn",
                     images=self._images(session, state),
                     effort=self.effort, max_tokens=self.max_tokens))
             except ModelError as error:
@@ -559,6 +575,9 @@ class AssistantEngine(Engine):
                 return turn
             correction = f"Your previous turn was rejected: {problem} Send a corrected turn."
         raise ModelError("invalid_output", "The model did not produce a valid turn after corrections")
+
+    def _schema(self, session: Session) -> dict:
+        return TURN_SCHEMA if self._diary(session) is not None else PLAIN_SCHEMA
 
     @staticmethod
     def _problem(turn: dict, names: set[str]) -> str | None:
@@ -578,7 +597,7 @@ class AssistantEngine(Engine):
                       "briefly tell the person what is done and what is unfinished.")
         try:
             result = await session.models.generate(ModelRequest(
-                self._messages(session, state, correction), output_schema=TURN_SCHEMA, schema_name="turn",
+                self._messages(session, state, correction), output_schema=self._schema(session), schema_name="turn",
                     images=self._images(session, state),
                 effort=self.effort, max_tokens=self.max_tokens))
             message = (result.data or {}).get("message", "").strip()

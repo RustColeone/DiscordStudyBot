@@ -10,10 +10,9 @@ token_env: DISCORD_BOT_TOKEN_WHALE_CHAN
 # token: "your-bot-token"
 # interface: whale_chan        # conversations are whale_chan:dm:<user> or whale_chan:<channel>
 
-# The persona.
-# display_name: 鲸酱
-# prompt: |
-#   ...                         # replaces the whale-girl personality
+# She is the DeepSeek student: her prompt, name (and the alias 鲸酱) and models are in extensions/students/deepseek/,
+# her memory and mood the companion's (extensions/companion/config.yml), the same as every student's.
+# persona: deepseek             # the student her bot speaks as
 # new_chat_text: "🐳 好的主人，新的对话开始啦～"   # the reply to /new
 
 # The engine: one ongoing thread per conversation; /new starts a fresh one.
@@ -23,25 +22,11 @@ max_tokens: 8000
 history_limit: 60               # messages of the current thread sent as context
 history_chars: 40000            # and at most this many characters of them
 
-# Models tried in order (candidates whose provider has no API key are skipped). `vision: false` marks a
-# model that cannot see images: requests with images try the others first.
-models:
-  - {provider: deepseek, model: deepseek-flash}
-#  - {provider: deepseek, model: deepseek-v4-pro, vision: false}   # stronger text model that cannot see images
-
 # Tools as her model's own function calls where it can make them (DeepSeek, OpenAI); false: JSON steps only.
 # tool_calls: true
 
-# Her name, and what her core diary (when on) calls the bot's owner (their Discord name when unset).
-# display_name: 鲸酱
-# call_owner: 主人
-
-# Her memory and mood are the companion module's (extensions/companion/config.yml, under `students: whale_chan:`):
-#   students:
-#     whale_chan: {language: zh, memory_language: Chinese, decisions: luna, call_owner: 主人}
-# Here, only her core diary instead (off: the companion keeps what she remembers):
-# memory:
-#   engine: core
+# The core diary from her turns, as every engine can keep it (off: the companion keeps what she remembers).
+# diary: false
 
 # Speaking up: now and then she messages you first (a local dice roll every 30 minutes; a model is only
 # called when it hits). Off until you turn it on; then it starts as a dry run that only writes down what it

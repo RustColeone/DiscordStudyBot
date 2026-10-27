@@ -13,6 +13,8 @@ from tests.core_support import ROOT, FakeAdapter, FakeToolAdapter, calls, iface,
 
 PLUGIN = ROOT / "plugins" / "whale_chan"
 COMPANION = ROOT / "extensions" / "companion"
+STUDENTS = ROOT / "extensions" / "students"  # she is the DeepSeek student
+PROFILES = {name: [{"provider": "fake", "model": "pro"}] for name in ("gpt", "claude", "deepseek", "gemini", "grok")}
 QUIET = {"voice": {"enabled": False}}
 # Her memory and mood are the companion module's: one Discord user is one person (`chat` stands for her bot here).
 MEMORY = {"platforms": {"chat": "discord"}}
@@ -40,12 +42,12 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
         """Her engine through the real core; with `companion` (its settings), the companion module keeps her
         memory and mood."""
         self.adapter = FakeAdapter(responses, handler)
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN),
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN), str(STUDENTS),
                       *([str(COMPANION)] if companion is not None else [])]
         self.core = await start_core(self.tmp, {
-            "extensions": extensions, "profiles": {"whale_chan": [{"provider": "fake", "model": "pro"}]},
+            "extensions": extensions, "profiles": PROFILES,
             "extension_config": {"whale_chan": plugin if plugin is not None else QUIET, "companion": companion or {}},
-            "assignments": {"*": {"engine": "chat", "personas": ["whale_chan"], "options": options or {}}},
+            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"], "options": options or {}}},
             **({"owners": owners} if owners else {})}, self.adapter)
         return iface(self.core)
 
@@ -56,7 +58,7 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
     def memory(self):
         """Her mneme-llm file, as the companion keeps it."""
         import mneme_llm
-        memory = mneme_llm.Mneme(str(self.tmp / "data" / "extensions" / "companion" / "whale_chan.db"), "whale_chan",
+        memory = mneme_llm.Mneme(str(self.tmp / "data" / "extensions" / "companion" / "deepseek.db"), "deepseek",
                                  luna=False, micro=False, embed=False, meaning_micro=False, memory_language=None)
         self.addCleanup(memory.close)
         return memory
@@ -118,7 +120,7 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
 
 class PromptLayoutTests(ChatEngineTests):
     async def test_each_turn_reuses_her_system_prompt_and_the_thread_as_its_prefix(self):
-        chat = await self.start([step("嗨主人～"), step("还在哦"), step("好呀")], plugin={**QUIET, "memory": {"engine": "core"}})
+        chat = await self.start([step("嗨主人～"), step("还在哦"), step("好呀")], plugin={**QUIET, "diary": True})
         for text in ("你好", "在吗", "陪我聊天"):
             await chat.say(text)
             await settle(self.core)
@@ -137,11 +139,11 @@ class NativeChatTests(unittest.IsolatedAsyncioTestCase):
 
     async def start(self, responses, options=None, plugin=None):
         self.adapter = FakeToolAdapter(responses)
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN)]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN), str(STUDENTS)]
         self.core = await start_core(self.tmp, {
-            "extensions": extensions, "profiles": {"whale_chan": [{"provider": "fake", "model": "pro"}]},
+            "extensions": extensions, "profiles": PROFILES,
             "extension_config": {"whale_chan": plugin if plugin is not None else QUIET},
-            "assignments": {"*": {"engine": "chat", "personas": ["whale_chan"], "options": options or {}}}},
+            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"], "options": options or {}}}},
             self.adapter)
         return iface(self.core)
 
@@ -165,7 +167,7 @@ class NativeChatTests(unittest.IsolatedAsyncioTestCase):
         chat = await self.start([
             calls("", ("ask", {"question": "哪个城市？"})),
             calls("好的！", ("remember", {"key": "home.city", "kind": "fact", "note": "住在杭州", "importance": 4})),
-            calls("杭州今天晴。")], plugin={**QUIET, "memory": {"engine": "core"}})
+            calls("杭州今天晴。")], plugin={**QUIET, "diary": True})
         for text in ("天气怎么样？", "杭州", "今天呢？"):
             await chat.say(text)
             await settle(self.core)
@@ -178,7 +180,7 @@ class NativeChatTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_run_from_before_gets_the_diary_rule_of_the_form_it_is_asked_in(self):
         chat = await self.start([calls("Saving it.", ("tools.write_value", {"key": "k", "value": "v"})), calls("Saved.")],
-                                plugin={**QUIET, "memory": {"engine": "core"}})
+                                plugin={**QUIET, "diary": True})
         await chat.say("save v")
         await settle(self.core)
         run = self.core.tank.runs(("waiting_approval",))[0]
@@ -234,23 +236,35 @@ class WhaleChanSetupTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             return extension.setup(context)
 
-    def test_without_a_token_only_the_engine_persona_and_profile_load(self):
+    def test_without_a_token_only_the_engine_loads(self):
         contributions = self.setup_with({}, {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""})
-        self.assertEqual(([e.spec.name for e in contributions.engines], [p.name for p in contributions.personas],
-                          list(contributions.interfaces)), (["chat"], ["whale_chan"], []))
-        self.assertEqual([(c["model"], c.get("vision", True)) for c in contributions.profiles["whale_chan"]],
-                         [("deepseek-flash", True)])
+        self.assertEqual(([e.spec.name for e in contributions.engines], list(contributions.personas),
+                          list(contributions.interfaces), dict(contributions.profiles)), (["chat"], [], [], {}))
+
+    def test_her_old_persona_settings_are_reported_as_moved(self):
+        logged = []
+        from core.loader import import_extension
+        extension, _ = import_extension(PLUGIN)
+        context = SimpleNamespace(config={"display_name": "大肥鱼", "prompt": "…", "models": [], "call_owner": "主人"},
+                                  data_dir=Path(tempfile.mkdtemp()), log=lambda event, **fields: logged.append(
+                                      (event, fields)))
+        with patch.dict(os.environ, {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""}):
+            extension.setup(context)
+        moved = dict(logged)["settings_moved"]
+        self.assertEqual(moved["keys"], ["call_owner", "display_name", "models", "prompt"])
+        self.assertIn("extensions/students/deepseek/student.yml (display_name, aliases)", moved["to"])
 
     def test_the_token_comes_from_the_environment_or_the_local_config(self):
         from_env = self.setup_with({}, {"DISCORD_BOT_TOKEN_WHALE_CHAN": "secret"})
         self.assertEqual([interface.name for interface in from_env.interfaces], ["whale_chan"])
         self.assertEqual(from_env.interfaces[0].token, "secret")
         self.assertEqual(from_env.assignments["whale_chan:*"]["engine"], "chat")
+        self.assertEqual(from_env.assignments["whale_chan:*"]["personas"], ["deepseek"])  # the student she is
+        self.assertEqual(from_env.interfaces[0].persona, "deepseek")
         self.assertTrue(from_env.admission["whale_chan:*"]["require_mention_in_groups"])
         self.assertEqual(from_env.permissions["whale_chan:*"]["tiers"],
                          {"write": "always-ask", "critical": "always-ask"})
-        # the companion keeps her memory: no second notepad that asks the owner at every fact
-        self.assertEqual(from_env.permissions["whale_chan:*"]["use"], ["*", "!basic.remember", "!basic.notes"])
+        self.assertNotIn("use", from_env.permissions["whale_chan:*"])  # what she may use is every student's
         from_config = self.setup_with({"token": "local", "interface": "whale", "assignment": {"lane": "sender"}},
                                       {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""})
         self.assertEqual(from_config.interfaces[0].token, "local")
@@ -360,18 +374,16 @@ class CompanionTests(ChatEngineTests):
         self.assertEqual(self.mneme_calls, ["judge", "writer", "judge", "writer"])
         self.assertEqual([n.key for n in self.memory().memory.notes("discord:alice")], ["exam.math.date"])
 
-    async def test_her_name_and_what_she_calls_her_owner_come_from_the_config(self):
-        plugin = {**QUIET, "display_name": "大肥鱼"}
-        chat = await self.start([], plugin=plugin, owners={"chat": ["alice"]},
-                                companion={**MEMORY, "students": {"whale_chan": {"call_owner": "主人"}}},
+    async def test_she_is_the_deepseek_student_and_her_memory_calls_the_owner_as_every_students_does(self):
+        chat = await self.start([], owners={"chat": ["alice"]}, companion={**MEMORY, "call_owner": "主人"},
                                 handler=self.scripted([step("在呢"), step("嗯嗯")]))
         await chat.say("我养了一只猫")
         await self.settled()
         await chat.say("还记得吗")
         await self.settled()
         prompts = [self.prompt(index) for index in range(len(self.adapter.calls))]
-        self.assertTrue(any("Your name here is 大肥鱼" in text for text in prompts))
-        self.assertTrue(any("主人 is talking to 大肥鱼" in text for text in prompts))  # not "Alice", her Discord name
+        self.assertTrue(any("Your name here is DeepSeek" in text and "共享房间" in text for text in prompts))
+        self.assertTrue(any("主人 is talking to DeepSeek" in text for text in prompts))  # not "Alice", her Discord name
 
     async def test_her_prompt_says_who_someone_is_to_her(self):
         chat = await self.start([], companion={**MEMORY, "roles": {"discord:alice": "creator"}},
@@ -388,7 +400,7 @@ class CompanionTests(ChatEngineTests):
         chat = await self.start([], companion=MEMORY, handler=self.scripted([step("加油")], notes=notes))
         await chat.say("周五考数学")
         await self.settled()
-        facts = chat.port.facts("whale_chan", "alice")
+        facts = chat.port.facts("deepseek", "alice")
         plan = facts["companion.plans"][0]
         self.assertEqual((plan["text"], datetime.fromtimestamp(plan["at"]).strftime("%Y-%m-%d")), ("数学考试", day))
         speakup, settings = plugin_module(self.core, "speakup"), plugin_module(self.core, "speakup").Settings()
@@ -415,7 +427,7 @@ class CompanionTests(ChatEngineTests):
 
     async def test_the_core_diary_is_still_there_when_asked_for(self):
         diary = [{"key": "pet", "kind": "preference", "note": "Loves cats", "importance": 4}]
-        chat = await self.start([{**step("ok"), "diary": diary}, step("ok")], plugin={**QUIET, "memory": {"engine": "core"}})
+        chat = await self.start([{**step("ok"), "diary": diary}, step("ok")], plugin={**QUIET, "diary": True})
         await chat.say("I love cats")
         await settle(self.core)
         await chat.say("what do I love?")
@@ -466,7 +478,8 @@ class CompanionTests(ChatEngineTests):
         await self.start([step("ok")], plugin={**QUIET, "memory": {"lang": "zh", "language": "Chinese"},
                                                "mood": {"luna": True}})
         moved = [event for event in self.core.audit.events if event.get("detail") == "settings_moved"]
-        self.assertEqual(moved[0]["keys"], ["lang", "language", "mood"])
+        self.assertEqual(moved[0]["keys"], ["memory", "mood"])
+        self.assertIn("extensions/companion/config.yml (mood)", moved[0]["to"])
 
     async def test_voice_on_sends_short_replies_as_voice_messages(self):
         chat = await self.start([step("晚安主人～做个好梦"), step("```python\nprint(1)\n```")],

@@ -209,19 +209,19 @@ class ChatEngine(Engine):
 
     def __init__(self, max_steps: int = 10, history_limit: int = 60, history_chars: int = 40000,
                  effort: str = "high", max_tokens: int = 8000, new_chat_text: str = "New chat started.",
-                 diary: bool = False, voice: dict | None = None, call_owner: str | None = None, tool_calls: bool = True):
+                 diary: bool = False, voice: dict | None = None, tool_calls: bool = True):
         self.max_steps, self.history_limit, self.history_chars = max_steps, history_limit, history_chars
         self.effort, self.max_tokens, self.new_chat_text = effort, max_tokens, new_chat_text
         # Her memory and mood are the companion module's (its part, its watcher); `diary` keeps notes in the core
         # diary instead (an assignment's `diary` option wins). voice: {speak_up, max_chars} or None (no voice).
         self.diary, self.voice = diary, voice
-        self.call_owner = call_owner  # what her core diary calls the bot's owner (their own name when None)
         self.tool_calls = tool_calls  # her model's own function calls where it can make them
 
-    def _person(self, session) -> str:
-        """How her memory names whoever she is talking with: the owner as `call_owner`, anyone else by name."""
+    @staticmethod
+    def _person(session) -> str:
+        """How her core diary names whoever she is talking with."""
         sender = session.trigger.sender
-        return self.call_owner if self.call_owner and session.owner else sender.name or sender.id
+        return sender.name or sender.id
 
     # ---- run -------------------------------------------------------------------------------------
     async def run(self, session: Session) -> RunYield:

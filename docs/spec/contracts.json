@@ -549,6 +549,11 @@
      "name": "owner",
      "type": "bool",
      "default": false
+    },
+    {
+     "name": "personas",
+     "type": "list[str]",
+     "default": "()"
     }
    ]
   },

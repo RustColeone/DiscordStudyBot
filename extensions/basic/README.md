@@ -2,7 +2,7 @@
 
 A built-in module with three capabilities: the date and time (optionally in another time zone), saving
 a short note, and listing saved notes. People use them as `$now`, `$remember` and `$notes`; engines
-offer them to models as tools. It is the smallest complete module in the project, so read it first if
+offer `basic.now` and `basic.notes` to models as tools. It is the smallest complete module in the project, so read it first if
 you want to write a capability: one file, three handlers, one `setup`.
 
 ## What it adds
@@ -10,7 +10,7 @@ you want to write a capability: one file, three handlers, one `setup`.
 | Kind | Name | Tier | Access | `$command` | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Capability | `basic.now` | read | member | `$now [timezone]` | Optional `timezone` (IANA name) |
-| Capability | `basic.remember` | write | member | `$remember <text>` | Required `text`; asks the owner by default |
+| Capability | `basic.remember` | write | member | `$remember <text>` | Required `text`; asks the owner by default; typed only (models are not offered it) |
 | Capability | `basic.notes` | read | member | `$notes` | No parameters |
 
 No interfaces, engines, personas, profiles, defaults or declared settings. The core's built-in
@@ -37,7 +37,10 @@ $notes                    1. buy milk
 ```
 
 * `$now` with an unknown zone answers `Unknown IANA timezone 'X'` (error code `invalid_timezone`).
-* `$remember` is a write: when a member (not an owner) types it, or a model calls it, the owner is
+* `$remember` is typed by people only: models are not offered it (`internal`), since a student took it for a memory
+  of her own, a write that asked the owner at every fact, while the companion module keeps what she remembers.
+  Models may still read the notes (`basic.notes`).
+* `$remember` is a write: when a member (not an owner) types it, the owner is
   asked first. An owner's own `$remember` counts as the approval and runs at once. Text is cut to
   2,000 characters; empty text fails with `empty`.
 * `$notes` shows the latest 20 notes saved in this conversation. Each conversation keeps its own 200

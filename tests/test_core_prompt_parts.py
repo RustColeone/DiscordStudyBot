@@ -480,11 +480,12 @@ class WhaleChanTests(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def test_her_parts_go_beside_her_prompt_and_in_the_turns_context(self):
-        from tests.test_plugin_whale_chan import PLUGIN, QUIET, step
+        from tests.test_plugin_whale_chan import PLUGIN, PROFILES, QUIET, STUDENTS, step
         adapter = FakeAdapter([step("嗨～")])
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN)]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN), str(STUDENTS)]
+        # A core.yml from before still names her `whale_chan`: she is the DeepSeek student now (`formerly`).
         self.core = await start_core(self.tmp, {
-            "extensions": extensions, "profiles": {"whale_chan": [{"provider": "fake", "model": "pro"}]},
+            "extensions": extensions, "profiles": PROFILES,
             "extension_config": {"whale_chan": QUIET},
             "personas": {"whale_chan": {"parts": [{"name": "personality", "text": "Teases gently."},
                                                   {"name": "season", "text": "It is autumn.", "place": "turn"}]}},
@@ -495,6 +496,7 @@ class WhaleChanTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("\n\nYour name here is", system)
         self.assertIn("Teases gently.", system.split("Your name here is", 1)[1])
         self.assertIn("本鲸", system)  # her own prompt is kept
+        self.assertIn("Your name here is DeepSeek", system)
         self.assertNotIn("It is autumn.", system)
         self.assertIn("It is autumn.", turn_context(adapter.calls[0]))
 

@@ -32,7 +32,7 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def core(self, responses=(), overrides=None):
         adapter = FakeAdapter(list(responses))
-        core = await start_core(self.tmp, {"assignments": {"*": {"engine": "assistant", "personas": ["p"]}},
+        core = await start_core(self.tmp, {"assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": True}}},
                                            "personas": {"q": {"display_name": "Quinn", "prompt": "You are Quinn."}},
                                            **(overrides or {})}, adapter)
         self.cores.append(core)
@@ -126,6 +126,15 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
         await chat.say(f"$memory forget {bob_note}", sender="bob", conversation="room")
         await settle(core)
         self.assertEqual(chat.texts("room")[-1], "Note removed.")
+
+    async def test_the_diary_is_off_unless_an_assignment_turns_it_on(self):
+        core, adapter = await self.core([turn("ok", diary=[note("k", "something real")])], {
+            "assignments": {"*": {"engine": "assistant", "personas": ["p"]}}})
+        await iface(core).say("I moved to Tokyo")
+        await settle(core)
+        self.assertNotIn("Your diary", self.context(adapter))
+        self.assertNotIn("diary", adapter.calls[0]["schema"]["properties"])  # nothing to write it with
+        self.assertEqual(core.tank.note_counts("chat:room", "alice"), {})
 
     async def test_diary_can_be_switched_off_per_assignment(self):
         core, adapter = await self.core([turn("ok", diary=[note("k", "something real")])], {

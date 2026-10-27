@@ -215,6 +215,9 @@ class OpenAICompatible:
         self.settings = dict(settings)
         self._client = client
         self._effort_supported = bool(self.settings.get("effort_param", False))
+        # Models that take function tools on Chat Completions only without reasoning (OpenAI's GPT-6 Luna: "set
+        # reasoning_effort to 'none'"): their tool steps say so, and every other call keeps its effort.
+        self._tools_without_reasoning: set[str] = set()
 
     def client(self):
         if self._client is None:
@@ -264,16 +267,21 @@ class OpenAICompatible:
                 for image in images)]
             params["messages"] = [*params["messages"][:at], last, *params["messages"][at + 1:]]
         if self._effort_supported:
-            params["reasoning_effort"] = effort
+            params["reasoning_effort"] = "none" if tools and model in self._tools_without_reasoning else effort
         client = self.client().with_options(timeout=timeout_s, max_retries=0)
         try:
             response = await client.chat.completions.create(**params)
         except Exception as error:
             if "reasoning_effort" not in params or "reasoning_effort" not in str(error):
                 raise
-            # Some compatible endpoints reject the parameter; remember and retry once without it.
-            self._effort_supported = False
-            params.pop("reasoning_effort")
+            if tools and params["reasoning_effort"] != "none" and "tools" in str(error).lower():
+                # This model takes function tools here only without reasoning: remember, for its tool steps alone.
+                self._tools_without_reasoning.add(model)
+                params["reasoning_effort"] = "none"
+            else:
+                # Some compatible endpoints reject the parameter; remember and retry once without it.
+                self._effort_supported = False
+                params.pop("reasoning_effort")
             response = await client.chat.completions.create(**params)
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "prompt_tokens", 0) or 0

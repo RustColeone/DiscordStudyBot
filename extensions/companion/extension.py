@@ -1,10 +1,12 @@
 """Companion extension: what each student keeps of each person, in mneme-llm (one file per student).
 
-Every engine that places prompt parts (the room, the assistant, Whale-chan's chat) tells her, each turn, who the person
+Every engine that places prompt parts (the room, the assistant, the chat engine) tells her, each turn, who the person
 is to her, what they call her, her notes for the message and her mood's news. After each of her messages a watcher lets her learn
 from it: how it left her feeling, what is worth remembering, and a day of contact for her closeness with the person.
-Pages see where she stands with you as facts (bond, alias, mood). `$alias` names a student your way, `$bond` shows
-where each stands with you. It works for any persona from any module, by name, and imports none of them.
+What was said in a group chat, every student there heard: the notes one keeps of it go into each classmate's file
+too; a direct chat stays between the two. A person with several accounts (`people:`) is one person to every student.
+Pages see where she stands with you as facts (bond, alias, mood, plans). `$alias` names a student your way, `$bond`
+shows where each stands with you. It works for any persona from any module, by name, and imports none of them.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ except ImportError:  # optional: without it the module adds nothing
 RESET = {"reset", "remove", "clear", "none"}
 DAY = 86400
 # The engines whose messages are conversation (the Classroom's are reports on work, which teach her nothing of you):
-# the room, the assistant and Whale-chan's chat.
+# the room, the assistant and the chat engine (a Discord bot of a student's own).
 ENGINES = ("room", "assistant", "chat")
 # What `students: <persona>:` may set for one student, over the settings for all.
 OWN = ("learn", "notes", "mood", "met_role", "writer_profile", "reflect_after_notes", "language", "memory_language",
@@ -32,8 +34,8 @@ OWN = ("learn", "notes", "mood", "met_role", "writer_profile", "reflect_after_no
 
 
 def usable() -> bool:
-    """mneme-llm installed, and new enough to keep aliases (0.2)."""
-    return mneme_llm is not None and hasattr(mneme_llm, "Aliases")
+    """mneme-llm installed, and new enough to keep aliases and one person's accounts (0.2)."""
+    return mneme_llm is not None and hasattr(mneme_llm, "Aliases") and hasattr(mneme_llm, "People")
 
 
 def key(text: str) -> str:
@@ -85,10 +87,25 @@ class Book:
 
     A file is made only when there is something to keep: an alias, a role from the settings, or what she learns."""
 
-    def __init__(self, folder: Path, *, personas=(), platforms=None, roles=None, settings: Settings | None = None):
+    def __init__(self, folder: Path, *, personas=(), platforms=None, roles=None, people=None,
+                 settings: Settings | None = None):
         self.folder, self.personas = Path(folder), tuple(personas)
         self.platforms = {str(name): str(platform) for name, platform in (platforms or {}).items()}
-        self.roles = {str(subject): str(role) for subject, role in (roles or {}).items()}
+        self.roles = {self.named(subject): str(role) for subject, role in (roles or {}).items()}
+        # One person behind several accounts (`people: {Leo: [discord:1, webui:creator]}`): their first account is
+        # where every student keeps them, and the name is what her memory calls them.
+        self.accounts: dict[str, list[str]] = {}  # a person's own subject → all of theirs, their own first
+        self.person_of: dict[str, str] = {}
+        self.person_names: dict[str, str] = {}
+        for name, given in dict(people or {}).items():
+            subjects = [self.named(item) for item in (given if isinstance(given, (list, tuple)) else [given])
+                        if str(item or "").strip()]
+            subjects = [item for index, item in enumerate(subjects) if item not in subjects[:index]]
+            if not subjects or any(item in self.person_of for item in subjects):
+                continue  # (an account named for two people: neither link is made)
+            self.accounts[subjects[0]] = subjects
+            self.person_names[subjects[0]] = str(name)
+            self.person_of.update({item: subjects[0] for item in subjects})
         self.settings = settings or Settings({})
         self.opened: dict[str, object] = {}
         self.index = self.folder / "names.json"  # persona → her display name and other names, as engines showed her
@@ -109,11 +126,24 @@ class Book:
         """One person, whichever bot they talk to: `<platform>:<id>` (`whale_chan` counts as `discord`, say)."""
         return f"{self.platforms.get(interface, interface)}:{sender_id}"
 
+    def named(self, subject) -> str:
+        """A subject as the settings write it (`whale_chan:42`), as the files keep it (`discord:42`)."""
+        interface, _, sender = str(subject).strip().partition(":")
+        return self.subject(interface, sender) if sender else interface
+
+    def name_of(self, subject: str) -> str:
+        """The person's name in `people:` ("" for someone not named there)."""
+        return self.person_names.get(self.person_of.get(subject, ""), "")
+
     def people(self, subject: str) -> list[tuple[str, str]]:
-        """The (interface, sender id) pairs a subject stands for: facts are published for each."""
-        platform, _, sender = subject.partition(":")
-        return [(name, sender) for name in sorted({platform, *(name for name, value in self.platforms.items()
-                                                              if value == platform)})]
+        """The (interface, sender id) pairs the person a subject stands for is reached by, on every account of theirs
+        (`people:`) and every interface sharing its platform: facts are published for each."""
+        found = set()
+        for account in self.accounts.get(self.person_of.get(subject, subject), [subject]):
+            platform, _, sender = account.partition(":")
+            found |= {(name, sender) for name in {platform, *(name for name, value in self.platforms.items()
+                                                             if value == platform)}}
+        return sorted(found)
 
     def met(self, persona) -> None:
         value = {"display_name": persona.display_name, "aliases": list(getattr(persona, "aliases", ()))}
@@ -155,10 +185,22 @@ class Book:
         memory = mneme_llm.Mneme(str(path), persona, config=own.config_file, companion_name=self.shown(persona),
                                  display_language=own.language or mneme_llm.STORED, luna=luna, micro=luna,
                                  embed=False, meaning_micro=False, memory_language=language)
+        self.link(memory)
         for subject, role in self.roles.items():
             memory.relate(subject, role)  # (the same role again changes nothing)
         self.opened[persona] = memory
         return memory
+
+    def link(self, memory) -> None:
+        """Her file's links as `people:` has them: each account of a person is that person (what it kept joins
+        them), and an account taken out of `people:` is its own again (what was joined stays)."""
+        for subject, person in memory.people.all().items():
+            if self.person_of.get(subject) != person:
+                memory.unlink(subject)
+        for person, subjects in self.accounts.items():
+            for subject in subjects[1:]:
+                if memory.person(subject) != person:
+                    memory.link(subject, person)
 
     def stand(self, persona: str, subject: str) -> dict:
         """Where she stands with a person, as facts for the pages: bond, alias, mood (None: nothing to show)."""
@@ -213,9 +255,33 @@ def no_notes(person: str, language: str) -> str:
 
 
 def impulse(trigger) -> str:
-    """Her own motive when the message is a turn she started herself (an interface marks it `extra.speak_up`: Whale-
-    chan speaking up), else ""."""
+    """Her own motive when the message is a turn she started herself (an interface marks it `extra.speak_up`: a
+    student's Discord bot speaking up), else ""."""
     return str((getattr(trigger, "extra", None) or {}).get("speak_up") or "")
+
+
+def called(book: Book, own: Settings, subject: str, owner: bool, sender) -> str:
+    """What her memory calls the person: `call_owner` for the owner, else their name in `people:`, else the name
+    they have where they wrote."""
+    return own.call_owner if own.call_owner and owner else book.name_of(subject) or sender.name or sender.id
+
+
+def share(book: Book, settings: Settings, exchange, subject: str, notes, facts) -> list[str]:
+    """What was said in a group chat (a conversation with several students), every student there heard: the notes
+    one kept of it are kept in each classmate's file as well, as her own (source "heard"). A direct chat stays
+    between the two. Returns the classmates who keep them."""
+    heard = []
+    for persona in getattr(exchange, "personas", ()):  # (contracts 1.9)
+        own = settings.of(persona)
+        if persona == exchange.persona.name or not book.keeps(persona) or not (own.learn and own.notes):
+            continue
+        memory = book.open(persona, create=True)
+        for note in notes:
+            memory.remember(subject, note.text, kind=note.kind, key=note.key, importance=note.importance,
+                            feeling=note.feeling, happened_at=note.happened_at, source="heard", gloss=note.gloss)
+        book.publish(facts, persona, subject)
+        heard.append(persona)
+    return heard
 
 
 def make_part(book: Book, settings: Settings):
@@ -228,11 +294,11 @@ def make_part(book: Book, settings: Settings):
             return ""
         book.met(persona)
         own = settings.of(persona.name)
-        person = own.call_owner if own.call_owner and context.owner else trigger.sender.name or trigger.sender.id
+        subject = book.subject(context.address.interface, trigger.sender.id)
+        person = called(book, own, subject, context.owner, trigger.sender)
         memory = book.open(persona.name)
         if memory is None:  # (nothing kept of anyone yet)
             return no_notes(person, own.language) if own.learn and own.notes else ""
-        subject = book.subject(context.address.interface, trigger.sender.id)
         who = "\n".join(line for line in (memory.relations.line(subject, person),
                                           memory.aliases.line(subject, person)) if line)
         query = impulse(trigger) or trigger.text  # (speaking up, her notes for what moves her)
@@ -259,7 +325,8 @@ def make_learner(book: Book, settings: Settings):
     async def learn(exchange, context) -> None:
         """After each of her messages: how it left her feeling and what is worth keeping (one decision call, and
         a note writer only when something is), a day of contact for her closeness, and once a day her impression.
-        A message she started herself (speaking up) moves her mood only: notes come from what people tell her."""
+        Notes from a group chat go to her classmates there too (`share`). A message she started herself (speaking
+        up) moves her mood only: notes come from what people tell her."""
         persona, trigger = exchange.persona, exchange.trigger
         if trigger.origin != "person" or exchange.engine not in settings.engines or not book.keeps(persona.name):
             return
@@ -269,7 +336,7 @@ def make_learner(book: Book, settings: Settings):
         book.met(persona)
         memory = book.open(persona.name, create=True)
         subject = book.subject(exchange.address.interface, trigger.sender.id)
-        person = own.call_owner if own.call_owner and exchange.owner else trigger.sender.name or trigger.sender.id
+        person = called(book, own, subject, exchange.owner, trigger.sender)
         motive = impulse(trigger)
         if own.met_role and not motive and memory.relations.get(subject) is None:
             memory.relate(subject, own.met_role)  # someone new is an acquaintance; your settings say more
@@ -282,6 +349,8 @@ def make_learner(book: Book, settings: Settings):
                                          complete=complete, mood=own.mood, capture=own.notes)
             if seen.error:
                 context.log("notes_not_written", persona=persona.name, error=seen.error)
+            if seen.notes:
+                share(book, settings, exchange, subject, seen.notes, context.facts)
         elif not motive:
             memory.relations.seen(subject)
         if own.notes and not motive:
@@ -351,7 +420,7 @@ def setup(context) -> Contributions:
     config = context.config
     settings = Settings(config, Path(context.data_dir))
     book = Book(context.data_dir, personas=settings.personas, platforms=config.get("platforms"),
-                roles=config.get("roles"), settings=settings)
+                roles=config.get("roles"), people=config.get("people"), settings=settings)
     facts = getattr(context, "facts", None)  # (None when loaded without a core)
     book.publish_all(facts)
     return Contributions(
@@ -372,4 +441,4 @@ def setup(context) -> Contributions:
 
 EXTENSION = Extension("companion", setup, contracts="1", version="2",
                       description="What each student keeps of each person (mneme-llm): roles, aliases, notes, mood, "
-                                  "plans")
+                                  "plans; group-chat notes shared, one person's accounts as one")

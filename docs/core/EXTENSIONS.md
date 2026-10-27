@@ -262,6 +262,8 @@ def setup(context):
   `context.log(event, **fields)` writes to the audit log.
 * `personas` limits a watcher to those personas (none: every persona). `exchange.engine` lets a watcher keep to
   the engines whose messages are conversation (the companion skips the Classroom's reports).
+  `exchange.personas` names every persona taking part in the conversation (the run's), hers included: more than
+  one is a group chat (the companion gives what was said there to every student who heard it).
 * A turn a persona starts on her own (Whale-chan speaking up) is submitted by her interface with
   `extra["speak_up"]` holding her motive, which people cannot set; a watcher should read it as her own thought, not
   as something the person said.
@@ -763,14 +765,15 @@ to any conversation:
   `quote: latest` (default; quote the newest message of the run) or `quote: trigger` (keep quoting
   the original request).
 * Module settings (`extensions/assistant/config.yml`): `max_steps` (8), `history_limit` (16), `effort`
-  (`low`).
+  (`low`), `diary` (false).
 * Images attached to the run's messages, found by its tools, or sent by the person in history shortly
   before the request (`history_image_minutes`, default 30; WeChat sends a picture and its question as
   separate messages) are shown to the model on every turn (latest 6). History lines carry the time,
   the speaker, what they replied to and their attachments.
-* Diary: the turn's context includes the persona's notes about the sender (matching ones first), and a
-  turn may add `diary: [{key, kind, note, importance}]` (at most 2; importance 3+ is kept). Turn it
-  off with the assignment option `diary: false`.
+* Diary (off by default, as in every engine: the companion module keeps what a student remembers; turn it on with
+  the assignment option `diary: true` or the module setting): the turn's context includes the persona's notes about
+  the sender (matching ones first), and a turn may add `diary: [{key, kind, note, importance}]` (at most 2;
+  importance 3+ is kept).
 
 ### Diaries
 

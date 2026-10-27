@@ -28,6 +28,7 @@ class Exchange:
     engine: str
     at: float
     owner: bool = False  # the trigger's sender is an owner of its interface (as Session.owner)
+    personas: tuple[str, ...] = ()  # every persona taking part in the conversation (the run's), her own included
 
     @property
     def person(self) -> tuple[str, str]:

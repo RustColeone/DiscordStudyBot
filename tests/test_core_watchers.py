@@ -89,6 +89,7 @@ class WatcherTests(Base):
         self.assertEqual((exchange.persona.name, exchange.text, exchange.trigger.text, exchange.engine),
                          ("p", "hello", "echo hello", "probe"))
         self.assertEqual(exchange.person, ("chat", "alice"))
+        self.assertEqual(exchange.personas, ("p",))  # who takes part in the conversation: the run's personas
         self.assertEqual(len(self.seen), 1)  # `ivy_only` names only Ivy
         run = core.tank.runs(("done",))[0]
         times = core.tank.store('extension:watchmod {"person": "[\\"chat\\", \\"alice\\"]", "persona": "p"}')

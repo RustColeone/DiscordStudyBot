@@ -96,7 +96,7 @@ class SimpleMessage:
 
 class WhaleChanBot(Interface):
     def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None,
-                 persona: str = "whale_chan"):
+                 persona: str = "deepseek"):
         self.name, self.token, self.persona = name, token, persona
         self.port = None
         self.attachments = Path(data_dir) / "attachments"

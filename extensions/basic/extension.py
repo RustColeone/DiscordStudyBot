@@ -1,5 +1,5 @@
 """Built-in capabilities: current time and simple notes, kept per conversation (exercises storage and
-approvals)."""
+approvals). People save notes (`$remember`); models may read them (`basic.notes`), not write them."""
 
 from __future__ import annotations
 
@@ -60,9 +60,11 @@ def setup(context) -> Contributions:
         Capability("basic.now", "Current local date and time, optionally in an IANA timezone.", now,
                    {"timezone": {"type": "string", "description": "IANA name such as Asia/Shanghai"}},
                    risk=Risk.READ, command="now", command_argument="timezone"),
+        # Typed by people only (`$remember`): offered to models, it was taken for a memory of their own, a write
+        # that waits for the owner each time, while the companion module keeps what a student remembers.
         Capability("basic.remember", "Save a short note for later, in this conversation.", remember,
                    {"text": {"type": "string"}}, ("text",), Risk.WRITE, command="remember",
-                   command_argument="text"),
+                   command_argument="text", internal=True),
         Capability("basic.notes", "List the notes saved in this conversation.", notes, risk=Risk.READ,
                    command="notes"),
     ])

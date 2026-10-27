@@ -32,6 +32,7 @@ The module loads by default. Its settings live in `extensions/assistant/config.y
 max_steps: 8
 history_limit: 16
 effort: low
+diary: false
 ```
 
 | Key | Default | Meaning |
@@ -39,6 +40,7 @@ effort: low
 | `max_steps` | 8 | Model turns per run. When they run out the model is asked for a closing message. |
 | `history_limit` | 16 | Earlier conversation messages the model reads. |
 | `effort` | `low` | `effort` of every model call (`low`, `medium` or `high`). |
+| `diary` | `false` | Keep the persona's notes about people in the core diary, written from her turns. Off: the [companion module](../companion/README.md) keeps what each student remembers, in every engine (an assignment's `diary` option wins). |
 
 `extension_config.assistant` in `core.yml` is merged over this file. The module needs no environment
 variables of its own; the persona's profile decides which provider keys matter (for the `default`
@@ -65,7 +67,7 @@ assignments:
 | `history_image_minutes` | How far back (default 30) images people sent are shown with the request. |
 | `history_scope: sender` | In group conversations, read only this sender's messages and the replies to them, and only their other open requests. |
 | `quote` | `latest` (default) quotes the newest message of the run; `trigger` keeps quoting the original request. Only in group conversations whose interface supports quotes. |
-| `diary` | `false` turns the persona's diary off. |
+| `diary` | `true` turns the persona's core diary on here (off by default: the companion keeps her memory). |
 
 To stop it answering in a conversation, assign another engine there or set `enabled: false`. To remove
 the module, add it to `modules: {exclude: [assistant]}`, and first replace the default `*` and
@@ -115,7 +117,7 @@ is not registered.
 3. **Inbox.** Messages that arrived while the run was thinking (`session.inbox()`) are added.
 4. **Step limit.** At `max_steps` the engine asks for one closing turn (`_close`), speaks its message
    if there is one, and returns `RunYield.DONE`.
-5. **Turn** (`_turn`). One model call; diary notes are kept; the turn is appended to the transcript;
+5. **Turn** (`_turn`). One model call; diary notes are kept (with the diary on); the turn is appended to the transcript;
    each action becomes a pending entry with `call_id` `c1`, `c2`, ...; then `session.save(state)`.
 6. **Speak.** The message is sent with `session.reply` after the save.
 7. **Act.** Pending actions run in order through `session.tools.call(..., call_id=...)`. A
@@ -212,7 +214,7 @@ refuses notes that copy the message or exceed its limits.
   `steps`, `call_seq`, `quote` and `images` (up to 6 file references). Runs are kept indefinitely; run
   workspaces are deleted 7 days after the run ends
   ([Retention](../../docs/core/EXTENSIONS.md#retention)).
-* **Diary**: the persona's notes about the sender in this conversation, recalled by the request's
+* **Diary** (when on): the persona's notes about the sender in this conversation, recalled by the request's
   words (up to 12 notes, about 3500 characters). Only importance 3 or more is written; the core keeps
   at most 200 notes per persona and person ([Diaries](../../docs/core/EXTENSIONS.md#diaries)).
 

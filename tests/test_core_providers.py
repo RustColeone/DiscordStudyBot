@@ -256,6 +256,27 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter.complete("m", [{"role": "user", "content": "hi"}], None, "x", "low", 50, 10)
         self.assertEqual(["reasoning_effort" in call for call in client.calls], [True, False, False])
 
+    async def test_a_model_that_takes_tools_only_without_reasoning_gets_none_for_its_tool_steps_alone(self):
+        client = FakeOpenAIClient()
+        create = client.create
+
+        async def picky(**params):  # GPT-6 Luna on Chat Completions
+            if params["model"] == "gpt-6-luna" and params.get("tools") and \
+                    params.get("reasoning_effort") not in (None, "none"):
+                client.calls.append(params)
+                raise ValueError("Error code: 400 - Function tools with reasoning_effort are not supported for "
+                                 "gpt-6-luna in /v1/chat/completions. To use function tools, use /v1/responses or "
+                                 "set reasoning_effort to 'none'.")
+            return await create(**params)
+        client.chat.completions.create = picky
+        adapter = OpenAICompatible({"effort_param": True}, client)
+        hi = [{"role": "user", "content": "hi"}]
+        await adapter.complete("gpt-6-luna", hi, None, "turn", "high", 50, 10, tools=TOOLS)
+        await adapter.complete("gpt-6-luna", hi, None, "turn", "high", 50, 10, tools=TOOLS)
+        await adapter.complete("gpt-6-luna", hi, SCHEMA, "reply", "low", 50, 10)  # no tools: its effort stays
+        await adapter.complete("deepseek-flash", hi, None, "turn", "high", 50, 10, tools=TOOLS)
+        self.assertEqual([call.get("reasoning_effort") for call in client.calls], ["high", "none", "none", "low", "high"])
+
     async def test_anthropic_separates_system_and_reserves_thinking_tokens(self):
         captured = {}
 

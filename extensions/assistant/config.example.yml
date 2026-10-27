@@ -4,3 +4,4 @@ max_steps: 8
 history_limit: 16
 effort: low
 tool_calls: true   # models that can call tools do so natively (false: JSON turns only)
+diary: false       # the core diary (off: the companion module keeps what each student remembers)

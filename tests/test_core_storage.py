@@ -172,8 +172,8 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
     NOTE = {"key": "food.favorite", "kind": "fact", "note": "Likes spicy noodles", "importance": 4}
 
     def shared(self, *addresses, scope="mine"):
-        rule = {"engine": "assistant", "personas": ["p"], "options": {"diary_scope": scope}}
-        return {"assignments": {"*": {"engine": "assistant", "personas": ["p"]},
+        rule = {"engine": "assistant", "personas": ["p"], "options": {"diary_scope": scope, "diary": True}}
+        return {"assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": True}},
                                 **{address: rule for address in addresses}}}
 
     async def test_a_diary_scope_reads_its_conversations_notes_together(self):
@@ -195,7 +195,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Nobody keeps notes about you here", iface(core).texts("elsewhere")[-1])
 
     async def test_changing_a_scope_moves_nothing(self):
-        core = await self.core({"assignments": {"*": {"engine": "assistant", "personas": ["p"]}}},
+        core = await self.core({"assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": True}}}},
                                [turn("Noted!", diary=[self.NOTE])])
         await iface(core).say("I love 担担面, the spicy one", conversation="dm")
         await settle(core)
@@ -204,7 +204,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(before), 1)
         for address in ("chat:dm", "chat:group"):  # turned on later: the dm's old note is shared as it is
             core.manager.set_assignment(address, {"engine": "assistant", "personas": ["p"],
-                                                  "options": {"diary_scope": "mine"}})
+                                                  "options": {"diary_scope": "mine", "diary": True}})
         await iface(core).say("$memory", conversation="group")
         await settle(core)
         self.assertIn("Likes spicy noodles", iface(core).texts("group")[-1])

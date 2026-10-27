@@ -36,8 +36,9 @@ for its own interfaces. See [docs/core/EXTENSIONS.md](../docs/core/EXTENSIONS.md
 
 ## The example: `whale_chan` (鲸酱)
 
-Her own Discord bot that chats like a personal AI web client (ChatGPT, Claude), with the DeepSeek
-whale-girl personality, on DeepSeek Flash:
+Her own Discord bot that chats like a personal AI web client (ChatGPT, Claude). She is the DeepSeek student, the
+whale girl of the club, and the bot is one more way to reach her: the same character, models and memory as in the
+room or MomoChat.
 
 * each DM or channel is one ongoing thread; send `/new` to start a fresh one;
 * full Markdown answers, math rendered as images, image attachments understood;
@@ -46,10 +47,9 @@ whale-girl personality, on DeepSeek Flash:
 * she asks before every write or critical action (`always-ask`, no exceptions), in case she misread a
   request or a page tried to trick her; when you asked in your DM with her, the question comes from her,
   in that DM;
-* her memory of each person in [mneme-llm](../../mneme-llm/README.md), one file any model can read, so switching
-  her model keeps what she knows (without mneme-llm installed: the core's diary, `$memory`);
-* a mood: after each reply, how it left her feeling (GPT-6 Luna's decisions with `OPENAI_API_KEY`, else
-  her own model), told to her once, fading by itself;
+* her memory of each person and her mood are the [companion's](../extensions/companion/README.md), as every
+  student's: one [mneme-llm](../../mneme-llm/README.md) file for DeepSeek, wherever you talk with her, so switching
+  her model or the way you reach her keeps what she knows;
 * speaking up first now and then (off until you turn it on with `/speakup`; it starts as a dry run);
 * her voice: `/voice on` turns her short replies into Discord voice messages (OpenAI speech; Piper, a
   local voice, is optional);
@@ -61,12 +61,12 @@ To run it:
 1. Create a Discord application with a bot, enable **Message Content Intent**, invite it to a server.
    For her memory and mood: `venv/bin/pip install -e ../mneme-llm`.
 2. Put `DISCORD_BOT_TOKEN_WHALE_CHAN=...` in `.env` (or `token:` in her `config.yml`, see above).
-3. Optional: `cp plugins/whale_chan/config.example.yml plugins/whale_chan/config.yml` to change models,
-   effort or the personality.
+3. Optional: `cp plugins/whale_chan/config.example.yml plugins/whale_chan/config.yml` to change effort, speaking up
+   or her voice (her models and personality are in `extensions/students/deepseek/`).
 4. Restart the bot. DM her, or mention her in a server.
 
-Without a token only the `chat` engine, the `whale_chan` persona and her model profile load; assign them
-anywhere in core.yml, for example `"discord:123": {engine: chat, personas: [whale_chan]}`.
+Without a token only the `chat` engine loads; assign it anywhere in core.yml, for example
+`"discord:123": {engine: chat, personas: [deepseek]}`.
 
 ## The web UI
 

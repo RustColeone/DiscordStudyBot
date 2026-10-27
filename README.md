@@ -76,7 +76,7 @@ A module is a folder with an `extension.py`. Built-in ones live in [`extensions/
 ones are dropped into [`plugins/`](plugins); all load at startup unless `core.yml` excludes them
 (`modules: {exclude: [extensions/terminal]}`), each with its own git-ignored `config.yml`.
 [`plugins/whale_chan`](plugins/whale_chan) is a complete example: 鲸酱, a second Discord bot that chats
-like a personal AI web client on DeepSeek. [`plugins/webui`](plugins/webui) is the example interface: the
+like a personal AI web client, as the DeepSeek student. [`plugins/webui`](plugins/webui) is the example interface: the
 bot as a web page on your local network.
 
 * [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md): how the core is built (interfaces, gateway,

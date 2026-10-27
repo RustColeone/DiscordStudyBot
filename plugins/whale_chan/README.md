@@ -1,11 +1,14 @@
-# `whale_chan`: a second Discord bot with its own engine, persona and model profile
+# `whale_chan`: a second Discord bot, with its own engine, for the DeepSeek student
 
 鲸酱 (Whale-chan) is an external module: her own Discord application that chats like a personal AI
 web client, one ongoing thread per DM or channel, with full Markdown answers, rendered math, image
-understanding and the core's tools. The user-level description and the four setup steps are in
-[plugins/README.md](../README.md) (section "The example: `whale_chan`"); this page is the developer
-companion. Study it as the project's complete plugin: one folder that brings an interface, an engine, a
-persona, a model profile and the defaults that make it work as soon as it is dropped in.
+understanding and the core's tools. She is the DeepSeek student (the whale girl, 本鲸): the bot is one more way to
+reach her, beside MomoChat and the room, so her prompt, name and models are her folder's in the
+[students module](../../extensions/students/README.md), and what she remembers of you and how she feels is the
+[companion's](../../extensions/companion/README.md), the same wherever you talk with her. The user-level
+description and the four setup steps are in [plugins/README.md](../README.md) (section "The example:
+`whale_chan`"); this page is the developer companion. Study it as the project's complete plugin: one folder that
+brings an interface, an engine and the defaults that make it work as soon as it is dropped in.
 
 ## What it adds
 
@@ -13,25 +16,27 @@ persona, a model profile and the defaults that make it work as soon as it is dro
 | --- | --- | --- |
 | Interface | `whale_chan` | The Discord bot ([`bot.py`](bot.py)). Only when a token is set; the name comes from `interface` |
 | Engine | `chat` | One persona; "a personal AI chat client" ([`engine.py`](engine.py)) |
-| Persona | `whale_chan` | Display name `鲸酱`, the whale-girl prompt, profile `whale_chan` |
-| Profile | `whale_chan` | `[{provider: deepseek, model: deepseek-flash}]`, or the `models` list |
-| Assignment | `whale_chan:*` | `engine: chat`, `personas: [whale_chan]`, `budget: {model_calls: 30, tool_calls: 24, seconds: 1800}`, merged with `assignment` |
+| Assignment | `whale_chan:*` | `engine: chat`, `personas: [deepseek]` (the `persona` setting), `budget: {model_calls: 30, tool_calls: 24, seconds: 1800}`, merged with `assignment` |
 | Admission | `whale_chan:*` | `enabled: true`, `require_mention_in_groups: true` |
-| Permissions | `whale_chan:*` | `use: ["*", "!basic.remember", "!basic.notes"]` (the companion keeps what she remembers; she would otherwise save each fact with the conversation notepad, a write that asks you every time), `tiers: {write: always-ask, critical: always-ask}` |
+| Permissions | `whale_chan:*` | `tiers: {write: always-ask, critical: always-ask}` |
 | Setting | `token` | `secret`, env `DISCORD_BOT_TOKEN_WHALE_CHAN`, checked by logging in to Discord |
-| Setting | `display_name` | `text`, default `鲸酱` |
+| Setting | `persona` | `text`, default `deepseek`: the student her bot speaks as |
 | Capability | `whale_chan.speak` | `prepare`: a short text spoken aloud as a voice message ([`voice.py`](voice.py)); off with `voice: {enabled: false}` |
 
-Her memory and mood are the [companion module's](../../extensions/companion/README.md), as every student's are: it
-keeps them in [mneme-llm](../../../mneme-llm/README.md) (one SQLite file any model can use), tells her what fits each
-message through a prompt part, and learns after each of her replies. Her own diary in the core is off (`memory:
-{engine: core}` turns it on instead). The assignment, admission and permissions are suggestions: core.yml and runtime edits
-win, setting by setting. Without a token, only the engine, persona and profile load (the log says
-`no_token`), and you can assign them to any conversation:
+She is nothing of her own here: no persona, no model profile, no memory settings. Her prompt (`whale.md`,
+`prompt.md` and the shared parts), her display name, the alias 鲸酱 and her models are in
+`extensions/students/deepseek/`; the persona was called `whale_chan` before (and the live site's DM persona
+`whale`), and both names are her `formerly`, so a core.yml that still says `whale_chan` reaches her, and what was
+kept under it is hers. Her memory and mood are the companion module's, as every student's are: one mneme-llm file,
+`deepseek.db`, whether you talk with her here, in a Discord DM of the main bot or in the room; with
+`platforms: {whale_chan: discord}` in the companion's settings, one Discord user is one person on both bots. The
+core diary is off, as in every engine (`diary: true` turns it on). The assignment, admission and permissions are
+suggestions: core.yml and runtime edits win, setting by setting. Without a token, only the engine loads (the log
+says `no_token`), and you can assign it to any conversation:
 
 ```yaml
 assignments:
-  "discord:123": {engine: chat, personas: [whale_chan]}
+  "discord:123": {engine: chat, personas: [deepseek]}
 ```
 
 ## Setup
@@ -51,23 +56,25 @@ cp plugins/whale_chan/config.example.yml plugins/whale_chan/config.yml && chmod 
 | `token_env` | `DISCORD_BOT_TOKEN_WHALE_CHAN` | The environment variable holding the bot token |
 | `token` | none | The token itself, instead of `.env` (then keep `config.yml` at `chmod 600` and never share the folder with it) |
 | `interface` | `whale_chan` | Interface name; conversations become `<interface>:dm:<user id>` or `<interface>:<channel id>` |
-| `display_name` | `鲸酱` | Her name |
-| `prompt` | the whale-girl prompt | Replaces the personality ([`extension.py:43-52`](extension.py)); to add to it instead, give her [prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts) in core.yml (`personas: whale_chan: parts:`) |
+| `persona` | `deepseek` | The student her bot speaks as (her prompt, name and models are that student's; [prompt parts](../../docs/core/EXTENSIONS.md#prompt-parts) in core.yml add to them: `personas: deepseek: parts:`) |
 | `new_chat_text` | `🐳 好的主人，新的对话开始啦～` | The reply to `/new` |
 | `effort` | `high` | Model effort: `low`, `medium` or `high` |
 | `max_steps` | `10` | Model steps (tool rounds) per message |
 | `max_tokens` | `8000` | Output tokens per model call |
 | `history_limit` | `60` | Messages of the current thread sent as context |
 | `history_chars` | `40000` | At most this many characters of them |
-| `models` | DeepSeek Flash | The `whale_chan` profile: candidates tried in order; `vision: false` marks one that cannot see images |
+| `diary` | `false` | Keep notes in the core diary from her turns, as every engine can (off: the companion keeps what she remembers) |
 | `slash_commands` | `help, memory, remind, reminders, routine, draw, search, read, video` | Core commands registered as slash commands besides `/new`; `[]` for none |
 | `math` | `true` | Render display math as images |
 | `math_width_px`, `math_dpi`, `math_font_size_pt`, `math_min_height_px`, `math_max_images` | 1440, 180, 20, 220, 10 | Image size and the most equations rendered per reply ([`math_render.py:128-141`](math_render.py)) |
 | `assignment` | none | Keys merged over the default assignment (for example `options: {owner_instructions: "…"}`) |
 | `permissions` | none | Read by the core, not by `setup`: `use` and `tiers` for her conversations (see the example file) |
 
+Her old settings `display_name`, `prompt`, `models`, `call_owner`, `memory` and `mood` are read no more: the audit
+log says `settings_moved`, and where each now lives, while they are still in this config.yml.
+
 Environment variables (names only): `DISCORD_BOT_TOKEN_WHALE_CHAN` (or the one `token_env` names), and
-the key of each provider in `models`: the default profile needs `DEEPSEEK_API_KEY`, which the core's
+the key of each provider in her student's models: DeepSeek's need `DEEPSEEK_API_KEY`, which the core's
 built-in `deepseek` provider reads. Candidates whose provider has no key are skipped.
 `python -m core setup` and `$setup` offer the token because it is a declared `secret` setting (only the
 setup on the machine takes a secret), and `check_token` tries it before it is saved.
@@ -103,16 +110,14 @@ modules:
   to the core. Images are shown to the model (at most 6 per call); files from tools are sent back.
 * **Limits.** `max_steps` per message, then she answers from what she has and says what remains
   unverified. The run budget is 30 model calls, 24 tool calls and 30 minutes.
-* **Memory and mood** (the companion module's, since 2026-10-27). What she learns about each person (facts,
-  preferences, plans, what happened, her own impressions) and how each reply left her feeling are kept in her
-  mneme-llm file, `data/extensions/companion/whale_chan.db`. After each reply one decision request judges her mood
-  and whether anything was worth keeping; only then does a short call write the notes. Each message brings up the
-  notes that match its words (and their glosses in `memory_language`), with dates as people say them. Her mood
-  (0–100, settling at 70) and feelings (开心 踏实 甜蜜 心疼 担心 难过 吃醋) fade by themselves; she hears what moved her
-  in her next prompt. Her settings go in `extensions/companion/config.yml`, under `students: whale_chan:`, for
-  example `{language: zh, memory_language: Chinese, decisions: luna, call_owner: 主人}` (`decisions: luna` asks
-  GPT-6 Luna's Decisions API first, as she did before). Her old `memory:` and `mood:` settings here are read no
-  more; the audit log says `settings_moved` while they are still in this config.yml.
+* **Memory and mood** (the companion module's, as every student's). What she learns about each person (facts,
+  preferences, plans, what happened, her own impressions) and how each reply left her feeling are kept in the
+  DeepSeek student's mneme-llm file, `data/extensions/companion/deepseek.db`, whichever way you reach her. After
+  each reply one decision request judges her mood and whether anything was worth keeping; only then does a short
+  call write the notes. Each message brings up the notes that match its words (and their glosses in
+  `memory_language`), with dates as people say them. Her mood (0–100, settling at 70) and feelings fade by
+  themselves; she hears what moved her in her next prompt. The settings are the companion's
+  (`extensions/companion/config.yml`), the same for every student.
 * **Speaking up.** With `speak_up: {enabled: true}` she may message her owner first: a local dice roll
   every 30 minutes, likelier after a long quiet and off-peak, never in quiet hours (1–8), within 20
   minutes of her own message, or before you answered her last one. Her reason comes from the companion's facts (a
@@ -128,7 +133,7 @@ modules:
 
 | File | Lines | Role |
 | --- | --- | --- |
-| [`extension.py`](extension.py) | 108 | Declaration, settings, token check, persona prompt; `setup` builds everything from `context.config` |
+| [`extension.py`](extension.py) | 97 | Declaration, settings, token check, the settings that moved; `setup` builds everything from `context.config` |
 | [`engine.py`](engine.py) | 488 | `ChatEngine` (`chat`): the turn loop, thread context, images, the core diary when on, speak-up turns, voice after a reply |
 | [`bot.py`](bot.py) | 482 | `WhaleChanBot`: the Discord interface (incoming messages, slash commands, buttons, delivery, voice messages, the speak-up loop) |
 | [`speakup.py`](speakup.py) | 287 | Speaking up: the dice rules, motives and the ledger of who spoke when |
@@ -139,11 +144,11 @@ modules:
 | [`config.example.yml`](config.example.yml) | 109 | Documented settings to copy |
 | `.gitignore` | 2 | Keeps `config.yml` out of git when the folder is its own repository |
 
-**Setup** ([`extension.py:53-75`](extension.py)). `setup` reads `context.config`, builds the persona and
-the engine, and always returns them with the profile. It looks for the token in `token`, then in the
+**Setup** ([`extension.py:59-88`](extension.py)). `setup` reads `context.config`, reports settings that moved,
+builds the engine and always returns it with her voice. It looks for the token in `token`, then in the
 variable `token_env` names; without one it logs and stops there. With one it adds the interface and its
-defaults, all keyed by the interface's own name, because a module may only suggest `assignments`,
-`admission`, and `use`/`tiers` permissions for its own interfaces.
+defaults (the assignment names the `persona` student), all keyed by the interface's own name, because a module may
+only suggest `assignments`, `admission`, and `use`/`tiers` permissions for its own interfaces.
 
 **Incoming** ([`bot.py:124-154`](bot.py)). `on_message` submits every human message it sees with
 `mentions_me` set from the platform's facts (a DM, a mention, a reply to her) and lets the core's
@@ -187,16 +192,18 @@ are ephemeral. It returns a `Delivery`: not sent for 403/404, uncertain for 5xx 
 
 Design decisions:
 
-* **The interface is optional.** The engine and persona are useful without the bot, so a missing token
-  only skips the interface instead of failing the module.
+* **The interface is optional.** The engine is useful without the bot, so a missing token only skips the
+  interface instead of failing the module.
+* **A way to reach a student, not a student.** Who she is lives with the other students, and what she remembers
+  with the companion, so the bot adds no second Whale-chan who knows less.
 * **Progress instead of speaking.** Unlike the built-in `assistant` engine, which speaks its message
   before running tools, `chat` shows it as progress and posts only the answer, like a web chat client.
 * **A thread boundary, not a deletion.** `/new` stores the time in the persona's memory under
   `thread_since:<address>`; history is kept and only filtered.
 * **Memory that outlives the model, kept by another module.** The engine knows nothing of mneme-llm: the
   companion's turn part brings what she remembers, and its watcher learns after the reply is posted, so she never
-  answers slower. `memory: {engine: core}` (or the assignment option `diary: true`) uses `session.diary` from the
-  turn's `diary` field instead, where the core enforces the format and people manage notes with `$memory`.
+  answers slower. `diary: true` (here, or as an assignment option) uses `session.diary` from the turn's `diary`
+  field as well, where the core enforces the format and people manage notes with `$memory`.
 * **After the reply, not before.** Her voice message is made once the answer is posted (a replayed run skips it);
   a message that arrives meanwhile starts the next run.
 * **Speak-ups are hers.** Interfaces only submit requests for people, so a speak-up goes in her owner's
@@ -225,8 +232,8 @@ Safety:
   default.)
 * `<data dir>/extensions/whale_chan/math/`: rendered equations, deleted after they are sent.
 * Her interface's bottle: `slash_fingerprint`, the hash of the registered commands.
-* The `whale_chan` persona's memory: `thread_since:<address>` and `voice:<address>` per conversation.
-* Her memory and mood: the companion's `<data dir>/extensions/companion/whale_chan.db` (an older
+* The persona's memory (the DeepSeek student's): `thread_since:<address>` and `voice:<address>` per conversation.
+* Her memory and mood: the companion's `<data dir>/extensions/companion/deepseek.db` (an older
   `extensions/whale_chan/mneme-llm.db` is no longer read; `python -m mneme_llm --db … export` and `import` move what
   is in it).
 * `<data dir>/extensions/whale_chan/speak_up.json`: when she and each person last wrote, unanswered
@@ -239,17 +246,19 @@ Safety:
 
 `tests/test_plugin_whale_chan.py`:
 
-* `ChatEngineTests` (a real core with a fake model): tools run and only the answer is posted, at
-  `high` effort, with the persona prompt; the thread lasts until `/new`; a long thread is trimmed to the
-  character budget, newest first; at the step limit the model is told to answer.
-* `WhaleChanSetupTests`: without a token only the engine, persona and profile load; the token comes
-  from the environment or the local config; defaults follow a renamed `interface`; long text splits
-  within 2,000 characters; the folder's `.gitignore` lists `config.yml`.
+* `ChatEngineTests` (a real core with a fake model and the students module): tools run and only the answer is
+  posted, at `high` effort, with the DeepSeek student's prompt; the thread lasts until `/new`; a long thread is
+  trimmed to the character budget, newest first; at the step limit the model is told to answer.
+* `WhaleChanSetupTests`: without a token only the engine loads; her old persona settings are reported as moved;
+  the token comes from the environment or the local config, and the assignment names the DeepSeek student;
+  defaults follow a renamed `interface`; long text splits within 2,000 characters; the folder's `.gitignore` lists
+  `config.yml`.
 * `WhaleSlashTests`: her slash commands are `/new`, `/voice` and `/speakup` plus the catalog entries
   named in `slash_commands` (others, such as `call`, are left out); `/new` is submitted as text, and the
   reply edits the placeholder.
 * `CompanionTests` (a real core with the companion module): notes are written after the reply and recalled with
-  dates, with no diary in her turn; her name and what she calls her owner; who someone is to her; dated plans
+  dates, with no diary in her turn; she is the DeepSeek student, and the companion's `call_owner` names her owner
+  as it does for every student; who someone is to her; dated plans
   published for speaking up; small talk never reaches the note writer; her impression is rewritten at most daily;
   the core diary when asked for; the mood judged by her own model and told once; a speak-up is her impulse with no
   tools, moves her mood and writes no note, and the mark typed by a person is an ordinary message; her old memory
@@ -270,11 +279,13 @@ and her own folder.
 ## Building something similar
 
 * **Contribute what works without the platform first**, and the interface only when it is configured
-  ([`extension.py:62-75`](extension.py)). A module that every install gets but few use should do the same.
-* **Declare settings with a check** ([`extension.py:26-38`](extension.py), [`extension.py:80-84`](extension.py)):
+  ([`extension.py:76-88`](extension.py)). A module that every install gets but few use should do the same.
+* **Declare settings with a check** ([`extension.py:26-38`](extension.py), [`extension.py:91-97`](extension.py)):
   `python -m core setup` and `$setup` then offer them, and a token is tried before it is saved.
 * **Suggest defaults for your own addresses only**: `<interface>:*` assignments, admission and
-  permissions ([`extension.py:69-75`](extension.py)). Anything else refuses to load.
+  permissions ([`extension.py:81-88`](extension.py)). Anything else refuses to load.
+* **Name the student, don't be one**: an interface for a character takes her persona's name (`persona`), so
+  she is the same character, with the same memory, wherever she is reached.
 * **A resumable engine**: state saved after each step, call IDs saved before calling, events tracked by
   index ([`engine.py:262-263`](engine.py), [`engine.py:472-478`](engine.py), [`engine.py:380-435`](engine.py)). Compare with the built-in
   [`assistant`](../../extensions/assistant/README.md) engine.

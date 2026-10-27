@@ -43,27 +43,28 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
             await self.core.stop()
         self._tmp.cleanup()
 
-    async def start(self, handler, settings=None):
+    async def start(self, handler, settings=None, assignments=None):
         extensions = [*make_config(self.tmp).raw["modules"]["paths"],
                       *(str(ROOT / "extensions" / name) for name in ("companion", "room", "students"))]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "extension_config": {"companion": settings or {}},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},
-            "assignments": {"*": {"engine": "room", "personas": list(NAMES)}}}, FakeAdapter(handler=handler))
+            "assignments": {**(assignments or {}), "*": {"engine": "room", "personas": list(NAMES)}}},
+            FakeAdapter(handler=handler))
         return iface(self.core)
 
-    async def say(self, chat, text):
-        await chat.say(text)
+    async def say(self, chat, text, conversation="room", sender="alice"):
+        await chat.say(text, conversation=conversation, sender=sender)
         await settle(self.core)
         await self.core.manager.idle()  # and what the watchers do after
-        return chat.texts("room")[-1]
+        return chat.texts(conversation)[-1]
 
     @staticmethod
     def seen(script, speaker):
         return "\n".join(message["content"] for message in script.prompts[speaker][-1])
 
-    def facts(self, persona):
-        return {name: value for name, value in iface(self.core).port.facts(persona, "alice").items()
+    def facts(self, persona, sender="alice"):
+        return {name: value for name, value in iface(self.core).port.facts(persona, sender).items()
                 if name.startswith("companion.")}
 
     async def test_a_name_of_yours_reaches_her_and_only_her(self):
@@ -109,9 +110,32 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Alice loves oolong tea.", turn)  # her note, for this message (found by its words)
         self.assertIn("(Alice is someone you know; you are not close yet.)", turn)  # an acquaintance
         await self.say(chat, "Gemini, which tea do I like?")
-        self.assertNotIn("Alice loves oolong tea.", self.seen(script, "Gemini"))  # GPT's note is hers alone
+        self.assertIn("Alice loves oolong tea.", self.seen(script, "Gemini"))  # a group chat: she heard it too
         self.assertIn("GPT: acquaintance, closeness 20/100, mood", await self.say(chat, "$bond"))
         self.assertEqual(self.facts("gemini")["companion.bond"]["role"], "acquaintance")  # she talked with Alice too
+        self.assertTrue((self.tmp / "data" / "extensions" / "companion" / "claude.db").is_file())
+
+    async def test_a_direct_chat_stays_between_the_two(self):
+        script = room.Script(GPT=[room.turn("Oolong, noted.")], Gemini=[room.turn("Hm.")])
+        chat = await self.start(Mind(script), {"language": "en"},
+                                {"chat:dm": {"engine": "room", "personas": ["gpt"]}})
+        await self.say(chat, "GPT, I love oolong tea", conversation="dm")
+        folder = self.tmp / "data" / "extensions" / "companion"
+        self.assertEqual(sorted(path.name for path in folder.glob("*.db")), ["gpt.db"])  # nobody else heard it
+        await self.say(chat, "Gemini, which tea do I like?")
+        self.assertNotIn("oolong", self.seen(script, "Gemini"))
+
+    async def test_one_person_on_several_accounts_is_one_person_to_her(self):
+        script = room.Script(GPT=[room.turn("Oolong, noted."), room.turn("Oolong tea!")])
+        chat = await self.start(Mind(script), {"language": "en",
+                                               "people": {"Ally": ["chat:alice", "chat:al"]}})
+        await self.say(chat, "GPT, I love oolong tea")
+        await self.say(chat, "GPT, which tea do I like?", sender="al")
+        turn = self.seen(script, "GPT")
+        self.assertIn("Notes about Ally", turn)  # one name for her, whichever account
+        self.assertIn("Alice loves oolong tea.", turn)  # kept from the first account (the note writer's words)
+        self.assertIn("(Ally is someone you know", turn)  # her role on the first account
+        self.assertEqual(self.facts("gpt", "al")["companion.bond"], self.facts("gpt")["companion.bond"])
 
     async def test_it_speaks_and_learns_only_in_the_engines_it_is_told_and_can_be_turned_off(self):
         script = room.Script(GPT=[room.turn("Hi!")])

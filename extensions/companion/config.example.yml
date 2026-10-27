@@ -2,8 +2,9 @@
 # It needs mneme-llm 0.2 or newer (pip install -U mneme-llm); without it the module adds nothing.
 
 # personas: [gpt, gemini, claude, deepseek, grok]   # whose companion it keeps (left out: every persona)
-# engines: [room, assistant, chat]   # whose messages are conversation (chat: Whale-chan's; not the Classroom's)
-# learn: true                   # after each of her messages: her mood, notes worth keeping, a day of contact
+# engines: [room, assistant, chat]   # whose messages are conversation (chat: a student's own bot; not the Classroom's)
+# learn: true                   # after each of her messages: her mood, notes worth keeping (a group chat's for
+#                               # every student there), a day of contact
 # notes: true                   # keep notes, and give her those that fit each message
 # mood: true                    # judge her mood after each exchange; tell her its news once
 # met_role: acquaintance        # the role someone gets when they first talk with her ("": leave them without one)
@@ -14,8 +15,10 @@
 # decisions: core               # core (her model) or luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
 # call_owner: 主人               # what her memory calls the bot's owner (left out: their name)
 # config: whale.toml            # a mneme-llm config file, read when her file is first made (relative to its data folder)
-# students:                     # a student's own settings, over the ones above
-#   whale_chan: {language: zh, memory_language: Chinese, decisions: luna, call_owner: 主人}
+# students:                     # a student's own settings, over the ones above, when one should differ
+#   grok: {learn: false}
 # platforms: {whale_chan: discord}   # interfaces that share people: one Discord user is one person on both bots
+# people:                       # one person behind several accounts: kept as one by every student, under the first
+#   Leo: ["discord:123456789012345678", "webui:creator"]   # and her memory calls them Leo (after call_owner)
 # roles:                        # who people are to every student it keeps: creator (one), family, friend, acquaintance
 #   "discord:123456789012345678": creator

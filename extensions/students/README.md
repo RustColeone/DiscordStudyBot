@@ -15,7 +15,7 @@ to a character is a change to a file, not to code.
 | Persona | `gpt` | Display name `GPT`, profile `gpt`; also called `Luna`; formerly `luna` |
 | Persona | `gemini` | Display name `Gemini`, profile `gemini` |
 | Persona | `claude` | Display name `Claude`, profile `claude`; also called `Haiku` |
-| Persona | `deepseek` | Display name `DeepSeek`, profile `deepseek` |
+| Persona | `deepseek` | Display name `DeepSeek`, profile `deepseek`; also called `鲸酱`; formerly `whale_chan`, `whale` |
 | Persona | `grok` | Display name `Grok`, profile `grok` |
 | Provider | `grok` | `openai_compatible` at `https://api.x.ai/v1`, key in `GROK_API_KEY`, `schema_mode: native`, `effort_param: true`; `$model` offers models released since 2026-06-01, excluding IDs matching `imagine` |
 | Setting | `grok_api_key` | `secret`, env `GROK_API_KEY`: "API key for Grok (`grok`; without it, GPT's model answers for her)" |
@@ -135,6 +135,13 @@ openai/gpt-6.1-sol` picks it for a chat). The prompts say GPT where they said Lu
   her, diary notes, `$model` choices, runtime assignments, facts, the runs she is in, her name on what she said) and
   records `persona_data_moved`; the web UI renames her old chats and bubbles (`persona_renamed`). Let open runs finish
   first. The next starts move nothing.
+
+**Whale-chan is DeepSeek (2026-10-27).** The whale girl of `whale.md` was also two personas of her own: `whale_chan`
+(her Discord bot's) and, on a site set up before the students, `whale` (core.yml's, for Discord DMs). Both are her
+former names now, so she is one student wherever she is reached: her bot speaks as `deepseek`, "鲸酱, ..." calls on her
+(`aliases: [鲸酱]`), and an assignment that still names `whale_chan` or `whale` reaches her. A persona core.yml still
+defines keeps her name: remove `personas: whale:` from core.yml for its DMs to be hers (what was kept under `whale`
+is moved on the next start, as Luna's was).
 
 **Moved from the room (2026-10-27).** The room's `config.yml` used to take `providers:` and `profiles:`. They belong
 here now: move them from `extensions/room/config.yml` to `extensions/students/config.yml` unchanged. The room
