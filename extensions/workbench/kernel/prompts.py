@@ -73,12 +73,6 @@ def turn_schema(names, findings: bool = False) -> dict:
     return strict(properties, [])
 
 
-def last_turn(schema: dict) -> dict:
-    """A turn schema for the last turn: no actions (their items stay described, as strict schemas need)."""
-    actions = {**schema["properties"]["actions"], "maxItems": 0}
-    return {**schema, "properties": {**schema["properties"], "actions": actions}}
-
-
 REVIEW_SCHEMA = strict({
     "verdict": {"type": "string", "enum": ["approve", "revise"]},
     "say": {"type": "string"},
@@ -263,16 +257,16 @@ BOOLEAN_ARGUMENTS = ("ignore_case", "replace_all", "append")
 FINDING = strict({"criterion": {"type": "string"}, "problem": {"type": "string"}, "evidence": {"type": "string"}})
 
 
-def tool_specs(names, *, probing: bool = False, planning: bool = False, final: bool = False) -> list[ToolSpec]:
-    """The tools as functions for a classmate with tool_calls, then plan (when she keeps one) and finish; on the last
-    turn only finish. Arguments are described but none required: a tool missing one says so in its result."""
+def tool_specs(names, *, probing: bool = False, planning: bool = False) -> list[ToolSpec]:
+    """The tools as functions for a classmate with tool_calls, then plan (when she keeps one) and finish. Arguments are
+    described but none required: a tool missing one says so in its result."""
     specs = []
-    for name in () if final else names:
+    for name in names:
         description, arguments = TOOLS[name]
         properties = {key: {"type": "integer" if key in INTEGER_ARGUMENTS else "boolean" if key in BOOLEAN_ARGUMENTS
                             else "string", "description": text} for key, text in arguments.items()}
         specs.append(ToolSpec(name, description, {"type": "object", "properties": properties}))
-    if planning and not final:
+    if planning:
         specs.append(ToolSpec("plan", "Keep your short checklist up to date (the whole list each time).", {
             "type": "object", "properties": {"steps": {"type": "array", "items": strict({
                 "step": {"type": "string"}, "done": {"type": "boolean"}})}}}))

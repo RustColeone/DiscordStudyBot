@@ -92,14 +92,15 @@ async def solve(ctx: Context, seat: Seat, tier: str, phase: str, *, mode: str, b
                  title=f"{seat.name} · {label}" + (f" · turn {number}" if number > 1 else ""),
                  data={"phase": phase, "mode": mode, "turn": number})
         await ctx.progress(f"{seat.name} · {label}…", key=f"{step}.m")
+        # The same tools and schema on every turn, the last one included: they come before the conversation (the
+        # tools in the request, the schema in the system prompt), so offering fewer would void the prompt cache for
+        # the whole turn. The last turn is told to finish, and actions it asks for anyway are not run (below).
         if native:
             messages, schema = _native_messages(system, brief, history, final), None
-            tools = prompts.tool_specs(names, probing=probing, planning=write, final=final)
+            tools = prompts.tool_specs(names, probing=probing, planning=write)
         else:
             messages, schema, tools = _messages(system, brief, history, final), prompts.turn_schema(
                 names, findings=probing), ()
-            if final:
-                schema = prompts.last_turn(schema)
         try:
             answer = await ctx.model(f"{step}.m", seat, tier, messages, schema=schema, schema_name="workbench_turn",
                                      effort=str(ctx.settings.get("turn_effort", "medium")),

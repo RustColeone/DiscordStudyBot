@@ -842,6 +842,41 @@ class CoreRegressions(unittest.TestCase):
             self.assertEqual(changed, [15, 23], build.__name__)  # the 16th and the 24th exchange shorten 8 at once
             self.assertEqual(sum(len(message["content"]) > 900 for message in before(30)), 14)  # 8 to 15 kept in full
 
+    def test_the_last_turn_offers_the_same_tools_and_schema_so_the_cache_still_serves_it(self):
+        # Was: the last turn offered only `finish` (and the JSON protocol a schema with no actions). The tools come
+        # before the conversation in the request, and the schema sits in the system prompt, so the whole last turn
+        # missed the prompt cache: 17% cached and ~32k fresh tokens a call in the cache-layout pilot.
+        import asyncio
+        from contracts import ToolResult
+        from extensions.workbench.kernel import agent
+        from extensions.workbench.team import Seat
+        for native in (True, False):
+            seat = Seat("flash", "Flash", "deepseek", "Flash", ({"provider": "p", "model": "m"},), (),
+                        tool_calls=native)
+            asked = []
+
+            async def model(key, seat, tier, messages, *, schema=None, tools=(), **options):
+                asked.append((tuple(tool.name for tool in tools), schema, messages[-1]["content"]))
+                read = {"id": f"c{len(asked)}", "name": "read_file", "arguments": {"path": "a.py"}}
+                return ({"text": "", "data": None, "tool_calls": [read], "provider": "p", "model": "m"} if native else
+                        {"text": "", "data": {"status": "continue", "actions": [{"tool": "read_file",
+                                                                                "arguments": {"path": "a.py"}}]},
+                         "provider": "p", "model": "m"})
+
+            async def tool(key, name, arguments, step=None):
+                return ToolResult.ok("print(1)")
+
+            async def nothing(*arguments, **options):
+                return None
+            ctx = SimpleNamespace(language="en", person="Leo", settings={}, team=SimpleNamespace(seats={}),
+                                  step=lambda *arguments, **options: None, update=lambda **options: None,
+                                  progress=nothing, say=nothing, model=model, tool=tool)
+            solved = asyncio.run(agent.solve(ctx, seat, "cheap", "draft", mode="draft", brief="Fix it.", write=True,
+                                             max_turns=2, role="drafter", project="p", test=None))
+            self.assertEqual((solved.status, len(asked)), ("limit", 3))  # two turns, then the last one, unanswered
+            self.assertEqual(asked[2][:2], asked[0][:2], native)  # the same tools and schema on the last turn
+            self.assertIn("used all your turns", asked[2][2])     # told in the conversation instead
+
     def test_a_modules_provider_settings_override_the_built_in_ones_but_not_core_yml(self):
         # Was: the built-in provider settings were merged into the same table as core.yml's, which "wins key by key"
         # over a module's suggestion, so the lab's `providers: deepseek: {schema_mode: ...}` never applied.
@@ -877,8 +912,7 @@ class CoreRegressions(unittest.TestCase):
                 found += bad(value, f"{path}.{name}")
             return found + bad(schema.get("items"), f"{path}[]")
         turn = prompts.turn_schema(prompts.WRITE_TOOLS)
-        last = prompts.last_turn(turn)
-        schemas = {"turn": turn, "last turn": last, "probe": prompts.turn_schema(prompts.PROBE_TOOLS, findings=True),
+        schemas = {"turn": turn, "probe": prompts.turn_schema(prompts.PROBE_TOOLS, findings=True),
                    **{name: value for name, value in vars(prompts).items() if name.endswith("_SCHEMA")}}
         for name, schema in schemas.items():
             self.assertEqual(bad(strict_tool_schema(schema), name), [])
