@@ -823,6 +823,25 @@ class CoreRegressions(unittest.TestCase):
         from contracts import ModelResult
         self.assertEqual(ModelResult("x", cached_input_tokens=3).cached_input_tokens, 3)
 
+    def test_a_long_task_keeps_the_start_of_its_conversation_for_the_prompt_cache(self):
+        # Was: from turn 10, one more old exchange was shortened every turn, which changed the start of the
+        # conversation each time: in the polyglot rounds a quarter of turn 10's input and a seventh of turn 11's came
+        # from the cache, against over 90% on turns 3 to 9. Now old exchanges are shortened 8 at a time.
+        from extensions.workbench.kernel import agent
+        calls = lambda n: [{"id": f"c{n}", "name": "read_file", "arguments": {"path": f"f{n}.py"}}]
+        protocols = {
+            agent._messages: lambda n: agent.Exchange({"note": f"step {n}", "status": "continue",
+                                                       "actions": [{"tool": "read_file", "arguments": {"path": "f"}}]},
+                                                      "x" * 1000),
+            agent._native_messages: lambda n: agent.Exchange({}, "", answer={"text": "", "tool_calls": calls(n)},
+                                                             outputs={f"c{n}": "y" * 1000})}
+        for build, make in protocols.items():
+            history = [make(n) for n in range(30)]
+            before = lambda count: build("system", "brief", history[:count], False)
+            changed = [count for count in range(1, 30) if before(count + 1)[:len(before(count))] != before(count)]
+            self.assertEqual(changed, [15, 23], build.__name__)  # the 16th and the 24th exchange shorten 8 at once
+            self.assertEqual(sum(len(message["content"]) > 900 for message in before(30)), 14)  # 8 to 15 kept in full
+
     def test_a_modules_provider_settings_override_the_built_in_ones_but_not_core_yml(self):
         # Was: the built-in provider settings were merged into the same table as core.yml's, which "wins key by key"
         # over a module's suggestion, so the lab's `providers: deepseek: {schema_mode: ...}` never applied.

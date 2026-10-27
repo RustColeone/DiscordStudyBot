@@ -22,8 +22,16 @@ NO_CALLS = "No tools ran this turn: call them to act, or call finish when the ta
 NOTHING_CHANGED = ("You finished, but no file differs from where the task started (the diff is empty). If the request "
                    "needs a change, make it now (actions); if nothing needs to change, finish again and say why.")
 
-KEEP_FULL = 8          # the latest exchanges the model reads in full; older results are shortened
+KEEP_FULL = 8          # the latest exchanges the model reads in full, at least; older results are shortened
 OLD_RESULT_CHARS = 400
+
+
+def short_count(count: int) -> int:
+    """How many of the oldest exchanges are shortened: whole blocks of KEEP_FULL, so the start of the conversation
+    stays the same for KEEP_FULL turns at a time and the provider's prompt cache keeps serving it. (Shortening one
+    more every turn changed the start every turn: in the polyglot rounds, a quarter of turn 10's input and a seventh
+    of turn 11's came from the cache, against over 90% on turns 3 to 9.)"""
+    return max(0, count - KEEP_FULL) // KEEP_FULL * KEEP_FULL
 
 
 @dataclass
@@ -249,7 +257,7 @@ def _native_messages(system: str, brief: str, history: list[Exchange], final: bo
                  for exchange in earlier]
         messages.append({"role": "user", "content": "A classmate worked on this before you:\n\n" + "\n\n".join(notes)})
     own = [exchange for exchange in history if exchange.answer is not None]
-    old = len(own) - KEEP_FULL
+    old = short_count(len(own))
     for index, exchange in enumerate(own):
         calls = exchange.answer.get("tool_calls") or []
         shown = calls if index >= old else [  # an older exchange: what each call was for, results shortened
@@ -286,7 +294,7 @@ def _shortened(text: str) -> str:
 
 def _messages(system: str, brief: str, history: list[Exchange], final: bool) -> list[dict]:
     messages = [{"role": "system", "content": system}, {"role": "user", "content": brief}]
-    old = len(history) - KEEP_FULL
+    old = short_count(len(history))
     for index, exchange in enumerate(history):
         turn = {**exchange.turn, "actions": [{key: value for key, value in action.items() if key != "id"}
                                              for action in exchange.turn.get("actions") or ()]}
