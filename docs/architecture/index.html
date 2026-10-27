@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>DiscordStudyBot · Architecture</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="data.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/">DiscordStudyBot <span>architecture</span></a>
+    <div class="search">
+      <label class="visually-hidden" for="search">Find a file, class or function</label>
+      <input id="search" type="search" placeholder="Find a file, class or function…" autocomplete="off">
+      <ol class="results" id="results" hidden></ol>
+    </div>
+  </header>
+  <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
+  <main class="layout">
+    <section class="chart" aria-label="Flow chart">
+      <div class="chart-head">
+        <div><h1 id="chart-title"></h1><p id="chart-hint"></p></div>
+        <button class="size" id="size" type="button" hidden>Actual size</button>
+      </div>
+      <div class="chart-body" id="chart"></div>
+    </section>
+    <aside class="pane" id="pane" aria-label="Details"></aside>
+  </main>
+  <noscript>This page draws the code's architecture with JavaScript; please enable it.</noscript>
+</body>
+</html>
