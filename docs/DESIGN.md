@@ -49,6 +49,10 @@ flowchart LR
 | **Engine** | A harness: what the speakers see, which tools they get, who speaks, when a turn ends | one module per engine | Know a platform; keep memory of people |
 | **Interface** | A frontend: renders replies (her voice included), collects messages | one module per platform or page | Decide a reply |
 
+**A student is a derived agent** (the owner's words: a derived class of Agent): everything an agent is, plus her
+memory, and that is the only difference. So whatever takes an agent takes a student: MomoChat and Chimera ask only for
+agents (personas), and a student brings her memory with her.
+
 The memory and the models together are the students. Every engine reaches the same student, and with her the same
 memory: what GPT knows of you in MomoChat she also knows in Chimera. Engines do not import mneme-llm: the students
 module adds her memory through the core's hooks (a prompt part each turn, a watcher after each message, facts for the
