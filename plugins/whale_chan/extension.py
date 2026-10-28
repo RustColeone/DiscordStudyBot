@@ -45,8 +45,8 @@ async def check_token(token: str) -> str:
 MOVED = {"prompt": "extensions/students/deepseek/ (whale.md, prompt.md)",
          "models": "extensions/students/deepseek/student.yml (models)",
          "display_name": "extensions/students/deepseek/student.yml (display_name, aliases)",
-         "call_owner": "extensions/students/config.yml (call_owner)",
-         "memory": "extensions/students/config.yml (memory)",
+         "call_owner": "extensions/students/deepseek/student.yml (memory: call_owner, 主人 already)",
+         "memory": "extensions/students/deepseek/student.yml (memory: language zh, memory_language Chinese already)",
          "mood": "extensions/students/config.yml (mood)",
          "diary": "nowhere: a student's memory is the students module's"}
 # How MomoChat runs her chats: a chat client's, as her own engine did. Her settings of these names (effort,
