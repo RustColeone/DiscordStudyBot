@@ -367,6 +367,7 @@
       if (index === items.length - 1) nav.append(make("span", "here", label));
       else { const anchor = make("a", "", label); anchor.href = href; nav.append(anchor); }
     });
+    nav.scrollLeft = nav.scrollWidth;  // (on a phone the trail scrolls sideways: where you are stays in view)
   }
 
   function show() {
