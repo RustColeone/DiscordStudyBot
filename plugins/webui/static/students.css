@@ -138,3 +138,24 @@
 .meter-today { height: 6px; }
 .meter-today .meter-fill { background: var(--plate); }
 .today-line { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.panel-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.small-button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--paper);
+                color: var(--ink); font-weight: 800; cursor: pointer; }
+.small-button:hover { background: var(--panel); }
+
+/* the art: pictures to show in her portrait, glimpses of those not opened yet, her model ladder */
+.pick-picture { display: block; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.glimpse { position: relative; display: block; overflow: hidden; border-radius: 10px; }
+.stage-image.is-glimpse { filter: blur(7px) saturate(.6) brightness(.85); transform: scale(1.08); }
+.glimpse-over { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+                gap: 4px; color: #ffffff; font-size: 12px; font-weight: 900; text-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+.memory-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ladder { display: flex; flex-wrap: wrap; gap: 12px; }
+.rung { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 140px; padding: 8px; border: 1px solid var(--line);
+        border-radius: 14px; background: var(--bg); text-align: center; }
+.rung.is-hers { border: 2px solid #d97a1e; padding: 7px; }
+.rung-image { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; border-radius: 10px; background: var(--paper); }
+.rung-tier { font-size: 13px; font-weight: 900; }
+.rung-model { font-size: 12px; font-weight: 700; color: var(--ink-2); overflow-wrap: anywhere; }
+.rung-note { font-size: 11px; font-weight: 800; color: #8a4a12; }
+.rung:not(.is-hers) .rung-note { color: var(--muted); }

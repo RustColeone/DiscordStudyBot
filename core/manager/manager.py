@@ -1107,8 +1107,8 @@ class Manager:
         who = trigger.sender.name or trigger.sender.id
         if capability.name == STAMINA:  # a run at a spending limit: the question is the card's own
             title, asked = "Stamina", summary
-            actions = (Action("Let her", f"$approve {approval_id}", "success") if arguments.get("kind") == "daily"
-                       else Action("Allow more", f"$approve {approval_id}", "success"),
+            actions = (Action("Let her" if arguments.get("kind") == "daily" else "Allow more", f"$approve {approval_id}",
+                              "success"),
                        Action("Stop here", f"$deny {approval_id}", "danger"))
         elif typed:
             title, asked = "Confirm", f"You typed: {summary}"
@@ -1187,6 +1187,7 @@ class Manager:
         # One card per stop: the same stop asked again (nothing spent since) finds its card; a later one, after more
         # was spent, gets its own (a keyed action runs once).
         key = (f"stamina:daily:{stop['persona']}:{stop['day']}:{stop['spent']}" if stop["kind"] == "daily"
+               else f"stamina:total:{stop['day']}:{stop['spent']}" if stop["kind"] == "total"
                else f"stamina:session:{record.id}:{stop['limit']}:{stop['spent']}")
         result = await self._request_approval(record, capability, stop, key) if capability else None
         if result is None or result.status != "needs_approval":

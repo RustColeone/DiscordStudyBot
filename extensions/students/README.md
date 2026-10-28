@@ -93,11 +93,20 @@ falls_back_to: gpt          # optional, instead: after her own models, this stud
 providers: {...}            # optional: a provider she brings, in the core.yml `providers:` form
 pictures:                   # optional: files in her folder, for the pages (avatar: square; card: 3:4; any kind)
   avatar: avatar.png        # the web UI's Students page also shows card, stage-2 … stage-4 (her art stages, 3:4),
-                            # mood-happy, mood-calm, mood-worried, mood-sad (round faces) and chibi when she has them
+                            # mood-happy, mood-calm, mood-worried, mood-sad (round faces) and chibi when she has them;
+                            # every picture in her art/ folder counts too, by its name (art/stage-2.webp: stage-2)
 prompt:                     # her prompt: these files in order (default: [prompt.md])
   - prompt.md
   - ../shared/school.md
 ```
+
+**Her art** is drawn, not kept by hand: [`art.yml`](art.yml) holds the prompts (a shared style, each student's
+look, motifs and role, and a prompt per kind: `chibi` for the Cafe, `stage-2` … `stage-4` drawn with more effort at
+each stage, `bond-1` … `bond-3` more casual as she grows closer, `model-<tier>` for her models), and
+`venv/bin/python tools/draw_students.py` draws what is missing with OpenAI's image model from her `avatar.png` (only
+OPENAI_API_KEY is read). `ladders:` there names each of her models' tier, weakest to strongest (a chibi, a
+middle-school, a high-school or a university student), which the Students page shows. Tune a prompt and draw that
+one again: `--students claude --kinds stage-3 --force`.
 
 How a prompt is put together: the `prompt:` files in order, and inside each file **its lines joined with nothing
 between them**. The prompts are Chinese prose, which needs no spaces, so a line break is only there to keep lines

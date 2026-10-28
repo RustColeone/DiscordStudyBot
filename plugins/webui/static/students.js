@@ -32,7 +32,9 @@
     get(key) { try { return localStorage.getItem(key); } catch { return null; } },
     set(key, value) { try { localStorage.setItem(key, value); } catch { /* private window */ } },
   };
-  const state = { students: [], avatars: new Set(), filter: store.get("students.filter") || "all", places: null };
+  const state = { students: [], avatars: new Set(), filter: store.get("students.filter") || "all", places: null,
+                  showing: {} };  // the picture each student's portrait shows (a stage or a memory you picked)
+  const BOND_OPENS = [30, 60, 85];  // the closeness each bond memory opens at
 
   // ---- who she is ----------------------------------------------------------------------------------------
   const keyOf = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
@@ -144,7 +146,7 @@
     plate.append(nameRow, make("div", "plate-line", [student.alias ? student.display : "", companyOf(student),
       models.join(" and ")].filter(Boolean).join(" · ")));
     const body = make("div", "student-body");
-    if (student.description) body.append(make("p", "student-line", student.description));
+    if (student.description) body.append(make("p", "student-line student-description", student.description));
     const chips = make("div", "chips");
     chips.append(make("span", "chip chip-cafe", "Cafe"), make("span", "chip chip-momo", `MomoChat · ${student.chats}`));
     const working = classroomNow(student);
@@ -216,7 +218,8 @@
 
     const hero = make("div", "hero");
     const picture = make("div", "hero-portrait");
-    picture.append(portrait(student, "portrait-image"), make("span", "badge badge-level big", `Lv ${record.level}`));
+    const showing = state.showing[student.name] || "card";  // a stage or memory picked below shows here
+    picture.append(portrait(student, "portrait-image", showing), make("span", "badge badge-level big", `Lv ${record.level}`));
     const plate = make("div", "student-plate hero-plate");
     const row = make("div", "plate-row");
     row.append(make("span", "plate-name big", shown(student)));
@@ -226,7 +229,7 @@
     row.append(rename);
     plate.append(row, make("div", "plate-line strong", student.alias ? `${student.display} · the name you gave her, kept by mneme-llm`
                                                                       : `${student.display} · give her a name of your own`));
-    if (student.description) plate.append(make("div", "plate-line", student.description));
+    if (student.description) plate.append(make("div", "plate-line student-description", student.description));
     hero.append(picture, plate);
 
     const stages = section("Art stages");
@@ -235,10 +238,14 @@
     for (let number = 1; number <= record.stages; number++) {
       const opens = [1, 10, 20, 30][number - 1];
       const open = record.stage >= number;
-      const slot = make("div", `stage${open ? "" : " is-locked"}${number === record.stage ? " is-current" : ""}`);
+      const kind = number === 1 ? "card" : `stage-${number}`;
+      const slot = make("div", `stage${open ? "" : " is-locked"}${showing === kind || (showing === "card" && number === 1) ? " is-current" : ""}`);
       const kinds = new Set(student.pictures || []);
-      if (number === 1 || (open && kinds.has(`stage-${number}`))) {
-        slot.append(portrait(student, "stage-image", number === 1 ? "card" : `stage-${number}`));
+      if (number === 1 || (open && kinds.has(kind))) {
+        slot.append(pickable(student, kind, "stage-image", `Stage ${number}`));
+      } else if (kinds.has(kind)) {  // drawn, not opened yet: a glimpse, as gacha games tease the next stage
+        slot.append(glimpse(student, kind, "stage-image", icon("lock", 20), `Lv ${opens}`));
+        slot.title = `Stage ${number}, unlocks at level ${opens}`;
       } else {
         const empty = make("span", "stage-empty");
         if (!open) empty.append(icon("lock", 20));
@@ -264,7 +271,29 @@
       faces.append(cell);
     }
     moods.append(faces);
-    left.append(hero, stages, moods);
+    const memories = section("Bond memories");
+    memories.append(make("p", "panel-note", "Closer, she lets you see her off duty: each picture opens as your bond grows."));
+    const shelf = make("div", "memory-strip");
+    const closeness = student.bond?.closeness || 0;
+    BOND_OPENS.forEach((opens, index) => {
+      const kind = `bond-${index + 1}`;
+      const kinds = new Set(student.pictures || []);
+      const slot = make("div", `stage${closeness >= opens ? "" : " is-locked"}${showing === kind ? " is-current" : ""}`);
+      if (!kinds.has(kind)) {
+        const empty = make("span", "stage-empty");
+        empty.append(make("span", "", `Bond ${opens}`));
+        slot.append(empty);
+      } else if (closeness >= opens) {
+        slot.append(pickable(student, kind, "stage-image", `Bond ${opens}`));
+      } else {
+        slot.append(glimpse(student, kind, "stage-image", icon("heart", 18), `Bond ${opens}`));
+        slot.title = `Opens at bond ${opens}`;
+      }
+      slot.append(make("span", "stage-name", ["Off duty", "At ease", "A memory"][index]));
+      shelf.append(slot);
+    });
+    memories.append(shelf);
+    left.append(hero, stages, moods, memories);
 
     const trio = make("div", "trio");
     const levelBox = section(`Level `);
@@ -303,18 +332,59 @@
       staminaBox.append(make("p", "panel-note", account?.kind === "budget"
         ? `${companyOf(student)} shows no balance to an ordinary key, so this counts down from what she spends.`
         : "When today's allowance is spent, her work stops and asks you before she spends more."));
+      const changes = make("div", "panel-buttons");
+      const change = (label, ask, body) => {
+        const button = make("button", "small-button", label);
+        button.type = "button";
+        button.onclick = async () => {
+          const value = prompt(ask);
+          if (value == null || !value.trim() || !Number.isFinite(parseFloat(value))) return;
+          try {
+            const response = await fetch("api/stamina", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                          body: JSON.stringify(body(parseFloat(value))) });
+            toast((await response.json()).text || "Done.");
+          } catch { toast("Not changed."); }
+          refresh();
+        };
+        changes.append(button);
+      };
+      change("Her daily allowance", `${shown(student)}'s daily allowance, in dollars (0: none)`,
+             (value) => ({ persona: student.name, allowance: value }));
+      if (account?.kind === "budget" || !account) {
+        change("Account budget", `The ${companyOf(student) || "account"} budget, in dollars (counted from today)`,
+               (value) => ({ account: account?.provider || String(student.own?.[0] || "").split("/")[0], budget: value }));
+      }
+      staminaBox.append(changes);
       trio.append(staminaBox);
     }
 
-    const models = section((student.strong || []).length ? "Two models, one student" : "Her model");
-    const list = make("div", "model-list");
-    for (const [id, use] of [[student.own?.[0], "Everyday: chatting, building, testing"], [student.strong?.[0], "Strong seats: planning, taking over"]]) {
-      if (!id) continue;
-      const item = make("div", "soft-box");
-      item.append(make("div", "soft-title", modelName(id)), make("div", "soft-note", use));
-      list.append(item);
+    const steps = ladderOf(student);
+    const models = section(steps.length > 1 ? "Her models, weakest to strongest" : (student.strong || []).length ? "Two models, one student" : "Her model");
+    if (steps.length) {
+      models.append(make("p", "panel-note", "Each of her models is drawn as she would be on it: a chibi on the lightest, a " +
+                                            "high-school or university student on the strongest."));
+      const ladderRow = make("div", "ladder");
+      const hers = new Set([...(student.own || []), ...(student.strong || [])].map((id) => norm(modelName(id))));
+      for (const step of steps) {
+        const rung = make("div", `rung${hers.has(step.model) ? " is-hers" : ""}`);
+        const image = make("img", "rung-image");
+        image.src = `pictures/${encodeURIComponent(student.name)}/${step.kind}`;
+        image.alt = `${shown(student)} as ${TIERS[step.tier]}`;
+        rung.append(image, make("span", "rung-tier", TIERS[step.tier]), make("span", "rung-model", step.label),
+                    make("span", "rung-note", hers.has(step.model) ? "hers here" : "not set up"));
+        ladderRow.append(rung);
+      }
+      models.append(ladderRow);
+    } else {
+      const list = make("div", "model-list");
+      for (const [id, use] of [[student.own?.[0], "Everyday: chatting, building, testing"], [student.strong?.[0], "Strong seats: planning, taking over"]]) {
+        if (!id) continue;
+        const item = make("div", "soft-box");
+        item.append(make("div", "soft-title", modelName(id)), make("div", "soft-note", use));
+        list.append(item);
+      }
+      models.append(list);
     }
-    models.append(list);
     if (student.own_ready === false) models.append(make("p", "student-warn", `No ${companyOf(student) || "own"} key here: she answers on a classmate's model (her fallback) until you add one.`));
     right.append(trio, models);
 
@@ -370,6 +440,34 @@
     document.title = `${shown(student)} · Students · ${state.title || ""}`;
   }
 
+  // A picture you can show in her portrait (a click), and a glimpse of one not opened yet (blurred, what opens it).
+  function pickable(student, kind, className, label) {
+    const button = make("button", "pick-picture");
+    button.type = "button";
+    button.setAttribute("aria-label", `Show ${label}`);
+    button.append(portrait(student, className, kind));
+    button.onclick = () => { state.showing[student.name] = kind; renderCard(student); };
+    return button;
+  }
+  function glimpse(student, kind, className, mark, text) {
+    const holder = make("span", "glimpse");
+    const image = portrait(student, `${className} is-glimpse`, kind);
+    const over = make("span", "glimpse-over");
+    over.append(mark, make("span", "", text));
+    holder.append(image, over);
+    return holder;
+  }
+  // Her model ladder (the students module's `ladder-<n>-<tier>-<model>` pictures), weakest first.
+  const TIERS = { chibi: "Chibi", chuugakusei: "Middle-schooler", koukousei: "High-schooler", daigakusei: "University student" };
+  const norm = (text) => String(text || "").toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+  function ladderOf(student) {
+    return (student.pictures || []).map((kind) => /^ladder-(\d+)-([a-z]+)-(.+)$/.exec(kind)).filter(Boolean)
+      .map(([kind, index, tier, model]) => ({ kind, index: Number(index), tier, model,
+                                             label: [...(student.own || []), ...(student.strong || [])].map(modelName)
+                                               .find((id) => norm(id) === model) || model }))
+      .sort((a, b) => a.index - b.index);
+  }
+
   async function renameHer(student) {
     const name = prompt(`What do you call ${student.display}? (“reset” takes your name for her back)`, student.alias || "");
     if (name == null || !name.trim()) return;
@@ -406,10 +504,13 @@
     state.avatars = new Set(data.avatars || []);
     state.places = data.places;
     window.renderPlaces?.($("#places-nav"), data.places || { here: data.here, others: [] }, "Students");
-    window.renderStamina?.($("#stamina"), state.students.filter((student) => student.own_ready !== false).map((student) => ({
-      name: shown(student), href: `#${encodeURIComponent(student.name)}`, plate: plateOf(student),
-      picture: state.avatars.has(student.avatar) ? `avatars/${encodeURIComponent(student.avatar)}` : "",
-      stamina: student.stamina })));
+    window.renderStaminaTotal?.($("#stamina"), data.stamina, { set: async (total) => {
+      try {
+        await fetch("api/stamina", { method: "POST", headers: { "Content-Type": "application/json" },
+                                     body: JSON.stringify({ total }) });
+      } catch { /* shown again below */ }
+      refresh();
+    } });
     route();
   }
   async function refresh() {

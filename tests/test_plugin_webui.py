@@ -376,6 +376,13 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((response.status, response.headers["Content-Type"]), (200, "font/woff2"))
         async with self.http.get(f"{self.base}/static/app.js") as response:
             self.assertEqual(response.status, 401)  # everything else waits for the passphrase
+        async with self.http.get(f"{self.base}/static/i18n.js") as response:
+            self.assertEqual(response.status, 200)  # the sign-in page in your language
+
+    def test_the_classroom_shares_the_header_and_the_translations(self):
+        for name in ("places.js", "i18n.js", "i18n-zh.js"):
+            self.assertEqual((PLUGIN / "static" / name).read_bytes(),
+                             (ROOT / "extensions/chimera/web/static" / name).read_bytes(), name)
 
     # ---- files ----------------------------------------------------------------------------------
     async def test_files_go_both_ways_and_only_pictures_and_media_open_in_the_page(self):

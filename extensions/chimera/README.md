@@ -361,7 +361,9 @@ Two places, one club (the Codex route: chat and work are separate places that re
 - **MomoChat** is the web UI on :4156, chatting with the students (the momochat engine). The web UI also has the
   **Cafe**.
 - **The Classroom** is this page on :4157, sessions of work on your projects (the chimera engine; a session is a
-  task). Its other view is the **Logbook** (`#logbook`, the task list); `#students` still opens the seats. The
+  task). Its other view is the **Logbook** (`#logbook`): what was spent each day of the last two weeks, by student
+  (the core's spending history, `/api/logbook`), each student's share, and every past session; `#students` still
+  opens the seats. The header shows the day's stamina for everyone together (the core's), each seat her own. The
   **Students** page is the web UI's: it shows each student's record here from the facts this module publishes.
 
 **Each student's record, as facts** ([`record.py`](record.py)). The module publishes, for every seat, everyone who

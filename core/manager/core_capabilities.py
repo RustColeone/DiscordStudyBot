@@ -142,12 +142,18 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
     def stamina_card(arguments) -> str:
         """The question on the card a run waits with at a spending limit (core/manager/stamina.py)."""
         amount = money(float(arguments.get("amount") or 0))
+        if arguments.get("kind") == "total":
+            return (f"Everyone together has spent today's {money(float(arguments.get('limit') or 0))}. "
+                    f"Let them spend {amount} more today?")
         if arguments.get("kind") == "session":
             return (f"The session spent its budget ({money(float(arguments.get('spent') or 0))} of "
                     f"{money(float(arguments.get('limit') or 0))}). Let it spend {amount} more?")
         name = manager.stamina.name(str(arguments.get("persona") or ""))
         return (f"{name} has spent her {money(float(arguments.get('limit') or 0))} for today. "
                 f"Let her spend {amount} more today?")
+
+    async def stamina_settings(arguments, context) -> ToolResult:
+        return ToolResult.ok(manager.stamina.command(str(arguments.get("text") or "")))
 
     rule_schema = {"type": ["object", "null"], "description": "enabled, allow_senders, require_mention_in_groups; null deletes"}
     capabilities = [
@@ -157,6 +163,15 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
                     "day": {"type": "string"}, "run": {"type": "string"}, "spent": {"type": "number"},
                     "limit": {"type": "number"}}, ("kind", "amount"), Risk.WRITE, internal=True,
                    describe=stamina_card),
+        Capability("core.stamina_settings", "Show today's spending, or change everyone's daily total, a persona's daily "
+                   "allowance or an account's budget.", guarded(stamina_settings),
+                   {"text": {"type": "string", "description": "empty, 'total <dollars>', '<persona> <dollars>|reset' or "
+                                                              "'budget <provider> <dollars>'"}},
+                   risk=Risk.WRITE, internal=True, owner_only=True,
+                   command=Command("stamina", "Show today's spending, or set the daily total, an allowance or a budget",
+                                   (Option("text", "total <dollars>, <persona> <dollars>, or budget <provider> <dollars>"),),
+                                   examples=("total 3", "deepseek 0.8", "budget openai 20")),
+                   command_argument="text"),
         Capability("core.send_message", "Send a text message to another conversation (interface:conversation).",
                    guarded(send_message), {"address": {"type": "string"}, "text": {"type": "string"}},
                    ("address", "text"), Risk.CRITICAL, owner_only=True, subject="address", grantable=True,

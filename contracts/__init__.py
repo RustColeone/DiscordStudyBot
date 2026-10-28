@@ -22,7 +22,7 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 #       other engines (Persona.description, Persona.profiles, Persona.tier, TIERS, ExtensionContext.personas).
 # 1.12: 1.11 plus model prices (Prices, ModelResult.price and .cost, ExtensionContext.prices, InterfacePort.prices) and
 #       stamina (a run that reaches a persona's daily allowance, or its Request.extra `budget_usd`, waits for the
-#       owner; InterfacePort.stamina).
+#       owner; InterfacePort.stamina, InterfacePort.spending).
 CONTRACTS_VERSION = "1.12"
 
 __all__ = [

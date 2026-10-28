@@ -10,6 +10,7 @@
     if (text != null) node.textContent = text;
     return node;
   };
+  const t = (text, values) => (window.t ? window.t(text, values) : text);  // (i18n.js translates when it is loaded)
   const PEOPLE = {
     gpt: { accent: "#c9d2de", ink: "#6f7c8e" }, gemini: { accent: "#9a86f2", ink: "#7a63de" },
     claude: { accent: "#e5896a", ink: "#c4694a" }, deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
@@ -103,7 +104,7 @@
     return new Date(at * 1000).toLocaleDateString();
   };
   const tokens = (n) => n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0);
-  const money = (n) => n == null ? "—" : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(3)}`;
+  const money = (n) => n == null ? "—" : !n ? "$0" : n < 0.01 ? `$${n.toFixed(4)}` : n < 1 ? `$${n.toFixed(3)}` : `$${n.toFixed(2)}`;
   const span = (seconds) => seconds < 60 ? `${Math.round(seconds)}s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
   const stepsOf = (task) => state.steps.get(task) || state.steps.set(task, new Map()).get(task);
   const messagesOf = (task) => state.messages.get(task) || state.messages.set(task, new Map()).get(task);
@@ -228,6 +229,7 @@
     state.settings = data.settings;
     state.prices = data.prices;
     state.benchmarks = data.benchmarks || [];
+    state.staminaTotal = data.stamina;
     renderStaminaBar();
     state.places = data.places;
     state.links = data.links || {};
@@ -263,7 +265,7 @@
   function showView() {
     const view = viewOf();
     if (view === "Students") { openDialog("team"); refreshPrices(); }
-    else if (view === "Logbook") { showList("done"); $("#sessions-search").focus(); }
+    else if (view === "Logbook") showLogbook();
     renderPlaces();
   }
 
@@ -282,6 +284,7 @@
     $("#sessions").hidden = view !== "list";
     $("#team-page").hidden = view !== "new";
     $("#report-page").hidden = view !== "report";
+    $("#logbook-page").hidden = view !== "logbook";
   }
   function showList(tab) {
     showPage("list");
@@ -409,6 +412,7 @@
     if (document.hidden && task.status === "review" && before?.status !== "review") document.title = `● ${state.title}`;
     renderSidebar();
     renderSessions();
+    renderLogbook();
     if (task.id === state.current && state.view === "report") {
       if (REPORTED.has(task.status)) renderReport();
       else open(task.id, false);  // sent back: working again, shown live
@@ -508,13 +512,13 @@
     return `${called(persona)}${strong} ${SEATS[seatName].verb}`;
   }).join(", ");
 
-  // The stamina pill in the header (places.js): each seat with a key and stamina to show, asked again every 20 s.
+  // The stamina pill in the header (places.js): everyone's day against the total, asked again every 20 s; a click goes
+  // to the Students page in MomoChat's web UI, where it is set.
   function renderStaminaBar() {
-    const momo = (state.places?.others || []).find((place) => place.place?.name === "MomoChat");  // her card is there
-    const cardOf = (persona) => { try { return momo?.link ? new URL(`students#${persona}`, momo.link).href : ""; } catch { return ""; } };
-    window.renderStamina?.($("#stamina"), state.team.filter((seat) => seat.ready !== false).map((seat) => ({
-      name: called(seat.persona), picture: picture(seat.persona), plate: plateOf(seat.persona),
-      href: cardOf(seat.persona), stamina: seat.stamina })));
+    const momo = (state.places?.others || []).find((place) => place.place?.name === "MomoChat");
+    let href = "";
+    try { href = momo?.link ? new URL("students", momo.link).href : ""; } catch { href = ""; }
+    window.renderStaminaTotal?.($("#stamina"), state.staminaTotal, { href });
   }
   async function refreshStamina() {
     if (document.hidden) return;
@@ -522,7 +526,8 @@
       const response = await fetch("api/stamina", { headers: { Accept: "application/json" } });
       if (!response.ok) return;
       const found = await response.json();
-      for (const seat of state.team) if (seat.persona in found) seat.stamina = found[seat.persona];
+      for (const seat of state.team) if (seat.persona in (found.seats || {})) seat.stamina = found.seats[seat.persona];
+      state.staminaTotal = found.total;
       renderStaminaBar();
       if (state.view === "new") renderTeamPage();
     } catch { /* the next try */ }
@@ -1014,6 +1019,174 @@
     columns.append(left, aside);
     page.replaceChildren(back, top, make("h1", "report-title", task.title), columns);
   }
+  // ---- the Logbook: what was spent each day and by whom, and every session with its verdict -----------------------
+  // The chart's colours are the categorical slots in the students' fixed order (their plate colours are too close to
+  // tell apart in a stack: GPT's and Gemini's purples); the legend and the table carry the same identities.
+  const SERIES = ["gpt", "gemini", "claude", "deepseek", "grok"];
+  const seriesOf = (persona) => { const index = SERIES.indexOf(persona); return index >= 0 ? index + 1 : 6; };
+  async function showLogbook() {
+    showPage("logbook");
+    state.current = null;
+    renderLogbook();
+    renderPlaces();
+    try {
+      const response = await fetch("api/logbook", { headers: { Accept: "application/json" } });
+      if (response.ok) state.logbook = (await response.json()).days || [];
+    } catch { state.logbook = state.logbook || []; }
+    renderLogbook();
+  }
+  function renderLogbook() {
+    if (state.view !== "logbook") return;
+    const page = $("#logbook-page");
+    const days = state.logbook || [];
+    const tasks = [...state.tasks.values()].filter((task) => task.status !== "invited");
+    const head = make("div", "sessions-head");
+    const heading = make("div", "sessions-heading");
+    const title = make("h1", "", t("Logbook"));
+    title.id = "logbook-title";
+    heading.append(title, make("p", "", t("What the club did and what it cost: everything spent each day, chats and sessions alike, and every session with your verdict.")));
+    head.append(heading);
+    const week = days.slice(-7).reduce((sum, day) => sum + day.total, 0);
+    const landed = tasks.filter((task) => task.status === "landed").length;
+    const tiles = make("div", "log-tiles");
+    for (const [label, value, note] of [
+      [t("Spent today"), money(days.at(-1)?.total || 0), state.staminaTotal?.today?.allowance ? `${t("of")} ${money(state.staminaTotal.today.allowance)}` : ""],
+      [t("This week"), money(week), t("last 7 days")],
+      [t("Sessions"), String(tasks.length), `${landed} ${t("landed")}`],
+      [t("Waiting for you"), String(tasks.filter((task) => ["review", "approved"].includes(task.status)).length), ""],
+    ]) {
+      const tile = make("div", "log-tile");
+      tile.append(make("div", "took-label", label), make("div", "took-value", value));
+      if (note) tile.append(make("div", "took-note", note));
+      tiles.append(tile);
+    }
+    page.replaceChildren(head, tiles, spendingChart(days), byStudent(days, tasks), pastSessions(tasks));
+  }
+  function spendingChart(days) {
+    const panel = make("section", "panel log-chart");
+    panel.append(make("h2", "", t("Spending by day")));
+    const personas = [...new Set(days.flatMap((day) => Object.keys(day.personas)))].sort((a, b) => seriesOf(a) - seriesOf(b) || a.localeCompare(b));
+    if (!days.some((day) => day.total > 0)) {
+      panel.append(make("p", "row-note", t("Nothing spent in the last two weeks.")));
+      return panel;
+    }
+    const legend = make("div", "log-legend");
+    for (const persona of personas) {
+      const item = make("span", "log-key");
+      const swatch = make("span", "log-swatch");
+      swatch.style.background = `var(--series-${seriesOf(persona)})`;
+      item.append(swatch, document.createTextNode(called(persona)));
+      legend.append(item);
+    }
+    const most = Math.max(...days.map((day) => day.total), 0.0001);
+    const plot = make("div", "log-plot");
+    plot.setAttribute("role", "img");
+    plot.setAttribute("aria-label", `${t("Spending by day")}: ${days.map((day) => `${day.day} ${money(day.total)}`).join(", ")}`);
+    const scale = make("div", "log-scale");
+    scale.append(make("span", "", money(most)), make("span", "", "$0"));
+    const bars = make("div", "log-bars");
+    const tip = make("div", "log-tip");
+    tip.hidden = true;
+    for (const day of days) {
+      const column = make("div", "log-day");
+      const stack = make("div", "log-stack");
+      stack.style.height = `${Math.max(day.total ? 2 : 0, (day.total / most) * 100)}%`;
+      const parts = personas.filter((persona) => day.personas[persona] > 0);
+      const other = Math.max(0, day.total - parts.reduce((sum, persona) => sum + day.personas[persona], 0));
+      for (const persona of parts) {
+        const segment = make("span", "log-segment");
+        segment.style.flexGrow = String(day.personas[persona] / day.total);  // (shares adding up to 1 fill the bar)
+        segment.style.background = `var(--series-${seriesOf(persona)})`;
+        stack.append(segment);
+      }
+      if (other > 0.00005) {  // spent by no persona (a run of nobody's, say)
+        const segment = make("span", "log-segment is-other");
+        segment.style.flexGrow = String(other / day.total);
+        stack.append(segment);
+      }
+      column.append(stack, make("span", "log-label", day.day.slice(5)));
+      column.onpointerenter = () => {
+        tip.replaceChildren(make("strong", "", `${day.day} · ${money(day.total)}`),
+                            ...parts.map((persona) => make("span", "", `${called(persona)}: ${money(day.personas[persona])}`)));
+        tip.hidden = false;
+        const box = column.getBoundingClientRect(), outer = plot.getBoundingClientRect();
+        tip.style.left = `${Math.min(outer.width - 180, Math.max(0, box.left - outer.left - 60))}px`;
+      };
+      column.onpointerleave = () => { tip.hidden = true; };
+      bars.append(column);
+    }
+    plot.append(scale, bars, tip);
+    const table = make("details", "log-table");
+    const rows = days.filter((day) => day.total > 0).reverse().map((day) => [day.day, money(day.total),
+      personas.map((persona) => day.personas[persona] ? `${called(persona)} ${money(day.personas[persona])}` : "").filter(Boolean).join(" · ")]);
+    table.append(make("summary", "", t("As a table")), simpleTable([t("Day"), t("Spent"), t("By whom")], rows));
+    panel.append(legend, plot, table);
+    return panel;
+  }
+  function simpleTable(headers, rows) {
+    const table = make("table", "took-table");
+    const head = make("tr");
+    for (const label of headers) { const cell = make("th", "", label); cell.scope = "col"; head.append(cell); }
+    const thead = make("thead");
+    thead.append(head);
+    const tbody = make("tbody");
+    for (const row of rows) {
+      const line = make("tr");
+      row.forEach((value, index) => {
+        const cell = make(index ? "td" : "th");
+        if (!index) cell.scope = "row";
+        cell.append(value instanceof Node ? value : String(value));
+        line.append(cell);
+      });
+      tbody.append(line);
+    }
+    table.append(thead, tbody);
+    return table;
+  }
+  function byStudent(days, tasks) {
+    const panel = make("section", "panel");
+    panel.append(make("h2", "", t("By student")));
+    const spent = {};
+    for (const day of days) for (const [persona, dollars] of Object.entries(day.personas)) spent[persona] = (spent[persona] || 0) + dollars;
+    const rows = state.team.map((seat) => {
+      const mine = tasks.filter((task) => (task.lineup || []).some((entry) => entry.persona === seat.persona));
+      const who = make("span", "log-who");
+      const swatch = make("span", "log-swatch");
+      swatch.style.background = `var(--series-${seriesOf(seat.persona)})`;
+      who.append(swatch, document.createTextNode(called(seat.persona)));
+      return [who, String(mine.length), String(mine.filter((task) => task.status === "landed").length),
+              String(mine.filter((task) => task.status === "discarded").length), money(spent[seat.persona] || 0),
+              `Lv ${seat.level || 1}`];
+    });
+    panel.append(simpleTable([t("Student"), t("Sessions"), t("Landed"), t("Discarded"), t("Spent (14 days)"), t("Level")], rows));
+    return panel;
+  }
+  function pastSessions(tasks) {
+    const panel = make("section", "panel");
+    panel.append(make("h2", "", t("Every session")));
+    if (!tasks.length) {
+      panel.append(make("p", "row-note", t("No sessions yet.")));
+      return panel;
+    }
+    const list = make("ul", "log-sessions");
+    for (const task of [...tasks].sort((a, b) => b.updated - a.updated)) {
+      const item = make("li");
+      const button = make("button", "log-session");
+      button.type = "button";
+      const totals = task.data?.totals || {};
+      button.append(make("span", "log-when", new Date(task.created * 1000).toLocaleDateString()),
+                    make("span", "log-title", task.title),
+                    make("span", "log-team", (task.lineup || []).map(({ persona, role }) => `${called(persona)} ${verbOf(role, task.workflow)}`).join(", ")),
+                    make("span", `pill pill-${PILLS[task.status] || "done"}`, pillText(task)),
+                    make("span", "log-cost", totals.cost != null ? money(totals.cost) : "—"));
+      button.onclick = () => open(task.id);
+      item.append(button);
+      list.append(item);
+    }
+    panel.append(list);
+    return panel;
+  }
+
   function markdown(text) {
     const body = make("div", "markdown");
     if (window.Markdown) window.Markdown.into(body, text, []);

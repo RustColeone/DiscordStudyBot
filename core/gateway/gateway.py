@@ -106,8 +106,13 @@ class Port:
     def prices(self):
         return self._gateway.manager.providers.prices
 
-    def stamina(self, persona: str):
+    def spending(self, days: int = 14):
+        return self._gateway.manager.stamina.history(days)
+
+    def stamina(self, persona: str | None = None):
         manager = self._gateway.manager
+        if not persona:
+            return manager.stamina.view_total()
         return manager.stamina.view(str(persona)) if str(persona) in manager.personas else None
 
     def facts(self, persona: str, sender_id: str | None = None):

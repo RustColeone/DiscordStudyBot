@@ -10,9 +10,9 @@ again once a day old, under the owner's own figures.
                         the listed cache price, else the input price), on the answer
 
 Settings (core.yml `prices:`): `models` ({"provider/model" or "provider": {input, output, cache_hit}}), `aliases`
-({"provider/model": slug}), `key_env` (ARTIFICIAL_ANALYSIS_API_KEY), `url`, `max_age_h` (24). The free list needs a
-free key from artificialanalysis.ai; their terms ask that the source be credited wherever the data is shown, and the
-pages do. Costs are estimates from list prices.
+({"provider/model": slug}), `key_env` (ARTIFICIAL_ANALYSIS_API_KEY, else AA_API_TOKEN), `url`, `max_age_h` (24). The
+free list needs a free key from artificialanalysis.ai; their terms ask that the source be credited wherever the data
+is shown, and the pages do. Costs are estimates from list prices.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from typing import Any, Callable, Mapping
 
 
 SOURCE = "https://artificialanalysis.ai/api/v2/language/models/free"
+KEY_ENVS = ("ARTIFICIAL_ANALYSIS_API_KEY", "AA_API_TOKEN")  # the key's name in .env, either
 ATTRIBUTION = {"name": "Artificial Analysis", "url": "https://artificialanalysis.ai"}
 RETRY_S = 3600.0
 # The makers Artificial Analysis names for each provider's models (matched loosely, lowercase, letters and digits).
@@ -53,7 +54,7 @@ class PriceBook:
                     if isinstance(value, Mapping)}
         self.aliases = {str(key): str(value) for key, value in dict(settings.get("aliases") or {}).items()}
         self.url = str(settings.get("url") or SOURCE)
-        self.key_env = str(settings.get("key_env") or "ARTIFICIAL_ANALYSIS_API_KEY")
+        self.key_envs = [str(settings["key_env"])] if settings.get("key_env") else list(KEY_ENVS)
         self.max_age_s = float(settings.get("max_age_h", 24)) * 3600
         self._lock = asyncio.Lock()
         self.cache: dict = self._load()
@@ -70,6 +71,10 @@ class PriceBook:
         scratch = self.path.with_suffix(".tmp")
         scratch.write_text(json.dumps(self.cache, ensure_ascii=False), encoding="utf-8")
         scratch.replace(self.path)
+
+    @property
+    def key_env(self) -> str:
+        return next((name for name in self.key_envs if os.getenv(name, "").strip()), self.key_envs[0])
 
     @property
     def key(self) -> str:

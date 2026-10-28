@@ -123,11 +123,16 @@ class InterfacePort(Protocol):
     def prices(self) -> Any:
         """Added in 1.12: the core's model prices (contracts.Prices), to show them on a page."""
 
-    def stamina(self, persona: str) -> Mapping[str, Any] | None:
+    def spending(self, days: int = 14) -> Sequence[Mapping[str, Any]]:
+        """Added in 1.12: what was spent each day (everything: chats, sessions, memories), newest last, for the last
+        `days` days: `[{day, total, personas: {name: dollars}}]`."""
+
+    def stamina(self, persona: str | None = None) -> Mapping[str, Any] | None:
         """Added in 1.12: what a persona has spent today against her daily allowance, and the account she spends from:
         `{today: {spent, allowance, left, day}, account: {provider, kind (balance or budget), currency, total, left,
         as_of}}` (allowance and left None without a daily limit; account None when none is set up). None for one the
-        core does not know. A run that reaches her allowance (or its own `budget_usd`) waits for the owner."""
+        core does not know. With no persona: everyone's day against the day's total, `{today: {...}}`. A run that
+        reaches her allowance, the total, or its own `budget_usd` waits for the owner."""
 
     def facts(self, persona: str, sender_id: str | None = None) -> Mapping[str, Any]:
         """What modules publish about a persona (`<module>.<key>` → value, see contracts.Facts), and with

@@ -1,6 +1,7 @@
 "use strict";
 (() => {
   const $ = (selector) => document.querySelector(selector);
+  const t = (text, values) => (window.t ? window.t(text, values) : text);  // (i18n.js)
   const make = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -281,7 +282,7 @@
     if (person.own_ready === false) {
       body.append(make("p", "card-note is-warn", "Her own company's key isn't set, so she answers on a classmate's model."));
     }
-    if (person.description) body.append(make("p", "card-note", person.description));
+    if (person.description) body.append(make("p", "card-note student-description", person.description));
     body.append(make("p", "card-note", "Bond grows here, in MomoChat, as mneme-llm reads how your talks go. " +
                                        "Her level grows in the Classroom, with the work you land."));
     const model = modelLine(name);
@@ -459,8 +460,8 @@
   const shownName = (display) => standingOf(display).alias || display;
   function lastLine(chat) {
     const last = chat.last;
-    if (!last) return isDirect(chat) ? "Say hello" : `${membersOf(chat).length} classmates`;
-    if (last.kind === "user") return `You: ${last.text}`;
+    if (!last) return isDirect(chat) ? t("Say hello") : t("{0} classmates", { 0: membersOf(chat).length });
+    if (last.kind === "user") return `${t("You")}: ${last.text}`;
     const who = classmateIn(last.speaker) || last.speaker;
     return isDirect(chat) || !who ? last.text : `${shownName(who)}: ${last.text}`;
   }
@@ -948,6 +949,7 @@
                              roster: s.roster || s.classmates.map((name) => ({ name: keyOf(name), display: name })) });
       state.progress = new Map(s.progress.map((item) => [item.run_id, item]));
       state.people = s.people || [];
+      state.staminaTotal = s.stamina;
       renderStaminaBar();
       renderMembers();
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
@@ -988,9 +990,11 @@
     } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed, stamina spent
       noteBonds(state.roster, event.roster);
       state.roster = event.roster;
-      renderStaminaBar();
       renderMembers();
       renderChats();
+    } else if (event.type === "stamina") {  // everyone's day against the total
+      state.staminaTotal = event.total;
+      renderStaminaBar();
     } else if (event.type === "models") {
       receiveModels(event);
     } else if (event.type === "message") {
@@ -1034,13 +1038,18 @@
     }
   }
 
-  // The stamina pill in the header: each student with her own key (the others spend a classmate's account).
+  // The stamina pill in the header: everyone's spending today against the day's total, which you set here.
   function renderStaminaBar() {
-    window.renderStamina?.($("#stamina"), state.roster
-      .filter((item) => state.people.find((person) => person.name === item.name)?.own_ready !== false)
-      .map((item) => ({ name: item.alias || item.display, href: `students#${encodeURIComponent(item.name)}`,
-                        picture: state.avatars.has(keyOf(item.display)) ? `avatars/${keyOf(item.display)}` : "",
-                        plate: look(keyOf(item.display)).plate, stamina: item.stamina })));
+    window.renderStaminaTotal?.($("#stamina"), state.staminaTotal, { set: async (total) => {
+      try {
+        const response = await fetch("api/stamina", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                      body: JSON.stringify({ total }) });
+        const answer = await response.json();
+        state.staminaTotal = answer.total;
+        renderStaminaBar();
+        toast(answer.text || "Done.");
+      } catch { toast("Not changed."); }
+    } });
   }
 
   // A bond that moved, said in the chat with her (or a group she is in) as it happens; it is not kept.
@@ -1136,7 +1145,7 @@
       if (match.kind === "command") {
         const usage = match.item.usage || match.item.name;
         option.append(make("span", "option-usage", usage.startsWith("$") ? usage : `$${usage}`),
-          make("span", "option-description", match.item.description));
+          make("span", "option-description student-description", match.item.description));
       } else {
         option.classList.add("option-person");
         option.append(avatar(match.item), make("span", "option-name", match.item),

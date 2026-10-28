@@ -9,6 +9,7 @@ spoke in. It needs mneme-llm 0.2 or newer: without it, it is not loaded (and say
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -32,9 +33,19 @@ def compose(folder: Path, files) -> str:
     return "".join(text)
 
 
+ART_TYPES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+ART_KIND = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+
+
 def pictures(folder: Path, given) -> dict[str, str]:
-    """Her `pictures:` (kind → file in her folder) as absolute paths; a missing file is left out until it exists."""
+    """Her `pictures:` (kind → file in her folder) as absolute paths, then every picture in her `art/` folder by its
+    file name (art/stage-2.webp is her `stage-2`; tools/draw_students.py draws them); a missing file is left out
+    until it exists."""
     found = {}
+    art = folder / "art"
+    for path in sorted(art.iterdir()) if art.is_dir() else ():
+        if path.suffix.lower() in ART_TYPES and ART_KIND.fullmatch(path.stem) and path.is_file():
+            found[path.stem] = str(path.resolve())
     for kind, name in dict(given or {}).items():
         path = (folder / str(name)).resolve()
         if folder.resolve() not in path.parents:
@@ -44,9 +55,28 @@ def pictures(folder: Path, given) -> dict[str, str]:
     return found
 
 
+LADDER_TIERS = ("chibi", "chuugakusei", "koukousei", "daigakusei")
+
+
+def ladder(folder: Path, models) -> dict[str, str]:
+    """Her models from the weakest to the strongest (art.yml `ladders:`) as pictures a page can read in order:
+    `ladder-<n>-<tier>-<model>` (`ladder-3-koukousei-claude-opus-5-5`) → her chibi, or her `model-<tier>` picture."""
+    found = {}
+    for index, (model, tier) in enumerate(dict(models or {}).items(), 1):
+        if tier not in LADDER_TIERS:
+            continue
+        drawn = folder / "art" / ("chibi.webp" if tier == "chibi" else f"model-{tier}.webp")
+        kind = f"ladder-{index}-{tier}-{re.sub(r'[^a-z0-9_-]', '-', str(model).lower())}"  # (gpt-6.1-sol: gpt-6-1-sol)
+        if drawn.is_file() and ART_KIND.fullmatch(kind):
+            found[kind] = str(drawn.resolve())
+    return found
+
+
 def read_students(root: Path = HERE) -> list[dict]:
     """Every student's `student.yml`, with her prompt composed and her pictures found, in `order`."""
     found = []
+    plan = root / "art.yml"
+    ladders = dict((yaml.safe_load(plan.read_text(encoding="utf-8")) or {}).get("ladders") or {}) if plan.is_file() else {}
     for folder in sorted(path for path in root.iterdir() if (path / "student.yml").is_file()):
         data = yaml.safe_load((folder / "student.yml").read_text(encoding="utf-8")) or {}
         if data.get("name") != folder.name:
@@ -54,7 +84,7 @@ def read_students(root: Path = HERE) -> list[dict]:
         if not data.get("models"):
             raise ValueError(f"{folder.name}/student.yml: no `models`")
         found.append({**data, "prompt": compose(folder, data.get("prompt") or ["prompt.md"]),
-                      "pictures": pictures(folder, data.get("pictures"))})
+                      "pictures": {**pictures(folder, data.get("pictures")), **ladder(folder, ladders.get(folder.name))}})
     return sorted(found, key=lambda data: (data.get("order", 1000), data["name"]))
 
 

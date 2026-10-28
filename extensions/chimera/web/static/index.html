@@ -7,6 +7,8 @@
   <title>{{title}}</title>
   <link rel="stylesheet" href="static/style.css">
   <link rel="icon" type="image/png" href="favicon.ico">
+  <script defer src="static/i18n-zh.js"></script>
+  <script defer src="static/i18n.js"></script>
   <script defer src="static/markdown.js"></script>
   <script defer src="static/places.js"></script>
   <script defer src="static/app.js"></script>
@@ -41,6 +43,8 @@
     <section class="team-page" id="team-page" aria-label="New session" hidden></section>
     <!-- After a session (or while it waits for you): what the team says, what it took, and your call. -->
     <section class="report-page" id="report-page" aria-label="Session report" hidden></section>
+    <!-- The Logbook: what was spent each day and by whom, and every session with its verdict. -->
+    <section class="logbook-page" id="logbook-page" aria-labelledby="logbook-title" hidden></section>
     <div class="scrim" id="scrim" hidden></div>
 
     <aside class="sidebar" id="sidebar" aria-label="Tasks">

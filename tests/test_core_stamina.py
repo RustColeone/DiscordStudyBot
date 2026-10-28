@@ -102,6 +102,53 @@ class StaminaTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.run_of("spend 3").status, "done")
         self.assertIsNone(self.chat.port.stamina("p")["today"]["allowance"])  # no daily limit
 
+    async def test_everyones_day_has_a_total_that_waits_like_hers(self):
+        await self.start({"allowance": 0, "total": 0.02})
+        await self.chat.say("spend 3", sender="boss", name="Boss")
+        await settle(self.core)
+        self.assertEqual(self.run_of("spend 3").status, "waiting_approval")
+        card = self.card()
+        self.assertIn("Everyone together has spent today's $0.020. Let them spend", card.text)
+        self.assertEqual(self.chat.port.stamina()["today"]["spent"], 0.03)  # no persona: everyone's day
+        await self.chat.say(f"$approve {card.data['approval_id']}", sender="boss", name="Boss")
+        await settle(self.core)
+        self.assertEqual(self.run_of("spend 3").status, "done")
+
+    async def test_stamina_shows_the_day_and_changes_the_total_an_allowance_and_a_budget(self):
+        await self.start({"allowance": 0.5})
+        for text in ("$stamina total 3", "$stamina p 0.8", "$stamina budget fake 20", "$stamina"):
+            await self.chat.say(text, sender="boss", name="Boss")
+            await settle(self.core)
+        said = self.chat.texts()
+        self.assertTrue(any("Everyone's day: $3.00" in text for text in said), said)
+        self.assertTrue(any(text.startswith("Today (") and "for everyone" in text and "Pat: $0.000 of $0.80" in text
+                            for text in said), said)
+        port = self.chat.port
+        self.assertEqual((port.stamina()["today"]["allowance"], port.stamina("p")["today"]["allowance"]), (3.0, 0.8))
+        self.core.manager.stamina.personas = lambda: {"p": self.core.manager.personas["p"]}
+        stamina = self.core.manager.stamina
+        self.assertEqual(stamina.account("fake")["total"], 20.0)  # a budget entered with $stamina, from today
+        await self.chat.say("$stamina total 3", sender="alice", name="Alice")  # not an owner: refused
+        await settle(self.core)
+        self.assertEqual(stamina.total(), 3.0)
+
+    async def test_spending_by_day_for_the_logbook(self):
+        await self.start({"allowance": 0})
+        await self.chat.say("spend 2", sender="boss", name="Boss")
+        await settle(self.core)
+        days = self.chat.port.spending(3)
+        self.assertEqual([len(days), days[-1]["day"]], [3, self.core.manager.stamina.day()])
+        self.assertAlmostEqual(days[-1]["total"], 0.03)
+        self.assertEqual(days[-1]["personas"], {"p": 0.03})
+        self.assertEqual(days[0]["total"], 0.0)
+
+    def test_a_balance_is_read_from_deepseek_and_from_openrouter(self):
+        from core.manager.stamina import read_balance
+        self.assertEqual(read_balance("deepseek", {"is_available": True, "balance_infos": [
+            {"currency": "CNY", "total_balance": "118.40"}]}), (118.4, "CNY"))
+        self.assertEqual(read_balance("openrouter", {"data": {"total_credits": 25, "total_usage": 4.5}}), (20.5, "USD"))
+        self.assertIsNone(read_balance("deepseek", {"balance_infos": []}))
+
     async def test_an_entered_budget_counts_down_and_a_reported_balance_is_shown(self):
         await self.start({"allowance": 0, "accounts": {"fake": {"budget": 1.0, "since": "2026-01-01"}}})
         await self.chat.say("spend 2", sender="boss", name="Boss")

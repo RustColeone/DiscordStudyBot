@@ -139,6 +139,7 @@ class WebUI(Interface):
         self.ready: dict[str, bool] = {}
         self.views: dict[str, dict] = {}  # the core's personas (contracts 1.11), by name: description, models, tiers
         self._standing_shown: list[dict] | None = None  # the roster pages were last sent
+        self._total_shown = None  # and everyone's day against the total
         self._meet({})
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
         self.networks = [ipaddress.ip_network(str(item), strict=False) for item in config.get("networks") or []]
@@ -239,7 +240,16 @@ class WebUI(Interface):
                 if roster != self._standing_shown:
                     self._standing_shown = roster
                     await self._broadcast({"type": "roster", "roster": roster})
+                total = self.stamina_total()
+                if total != self._total_shown:  # everyone's day against the total (the header's pill)
+                    self._total_shown = total
+                    await self._broadcast({"type": "stamina", "total": total})
             await asyncio.sleep(self.places_poll_s)
+
+    def stamina_total(self):
+        """Everyone's spending today against the day's total (contracts 1.12), None from a core before it."""
+        asking = getattr(self.port, "stamina", None) if self.port is not None else None
+        return asking() if callable(asking) else None
 
     # ---- lifecycle -------------------------------------------------------------------------------
     async def start(self, port) -> None:
@@ -265,6 +275,7 @@ class WebUI(Interface):
             web.get("/api/cafe", self._cafe_state), web.get("/rooms/{name}", self._room),
             web.get("/students", self._students_page), web.get("/api/students", self._students_state),
             web.get("/pictures/{name}/{kind}", self._picture), web.post("/api/alias", self._alias),
+            web.post("/api/stamina", self._stamina),
             web.get("/files/{file_id}", self._file), web.get("/api/history", self._history),
             web.post("/api/upload", self._upload), web.get("/ws", self._socket)])
         self._runner = web.AppRunner(app, access_log=None)
@@ -367,7 +378,8 @@ class WebUI(Interface):
         if origin is not None and origin != f"{scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
             return self._refuse(request, "origin", "Cross-site requests are refused.")
-        public = request.path in ("/login", "/static/style.css", "/favicon.ico") or bool(
+        public = request.path in ("/login", "/static/style.css", "/static/i18n.js", "/static/i18n-zh.js",
+                                 "/favicon.ico") or bool(
             re.fullmatch(r"/static/nunito[a-z-]*\.woff2", request.path))  # the sign-in page uses the font too
         if self.passphrase and not public and not self._signed_in(request):
             if request.method == "GET" and request.path in ("/", "/cafe", "/students"):  # the pages: sign in first
@@ -559,11 +571,12 @@ class WebUI(Interface):
                      bool(ready(item["name"])) if callable(ready) else True,
                      "own_ready": people.get(item["name"], {}).get("own_ready", True),
                      "description": people.get(item["name"], {}).get("description", ""),
+                     "pictures": sorted(self._pictures_of(item["name"])),  # her chibi walks the cafe when she has one
                      # the chats she is in here (a chat that names nobody has the whole class)
                      "chats": sum(1 for chat in chats if not chat.get("personas") or item["name"] in chat["personas"])}
                     for item in self.standing()]
         return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
-                "here": self.here(), "places": self._places()}
+                "here": self.here(), "places": self._places(), "stamina": self.stamina_total()}
 
     def students(self) -> dict:
         """Every student for the Students page: who she is and where she stands with you (as the cafe has it), her
@@ -585,7 +598,7 @@ class WebUI(Interface):
                           "strong": people.get(name, {}).get("strong", []), "pictures": sorted(pictures),
                           "folder": files[:40]})
         return {"title": self.title, "students": found, "avatars": self.avatars(), "here": self.here(),
-                "places": self._places()}
+                "places": self._places(), "stamina": self.stamina_total()}
 
     def _pictures_of(self, name: str) -> dict[str, Path]:
         """Her pictures by kind (Persona.pictures: avatar, card, stage-2, mood-happy, chibi, ...) that exist."""
@@ -620,6 +633,25 @@ class WebUI(Interface):
             raise web.HTTPBadRequest()
         answer = await self._quietly(DEFAULT_CONVERSATION, f"$alias {persona} {name}", "alias")
         return web.json_response({"ok": bool(answer.get("ok")), "text": answer.get("text") or ""})
+
+    async def _stamina(self, request: web.Request) -> web.Response:
+        """The day's total for everyone (`{total}`), a student's allowance (`{persona, allowance}`) or an account's
+        budget (`{account, budget}`), changed from the pages: `$stamina ...`, sent quietly as you."""
+        try:
+            body = await request.json()
+            if "total" in body:
+                text = f"$stamina total {max(0.0, float(body['total'])):.2f}"
+            elif "persona" in body and str(body["persona"]) in self.personas:
+                text = f"$stamina {body['persona']} {max(0.0, float(body['allowance'])):.2f}"
+            elif "account" in body and re.fullmatch(r"[a-z0-9_-]{1,40}", str(body["account"])):
+                text = f"$stamina budget {body['account']} {max(0.0, float(body['budget'])):.2f}"
+            else:
+                raise ValueError
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise web.HTTPBadRequest() from None
+        answer = await self._quietly(DEFAULT_CONVERSATION, text, "stamina")
+        return web.json_response({"ok": bool(answer.get("ok")), "text": answer.get("text") or "",
+                                  "total": self.stamina_total()})
 
     async def _cafe_state(self, request: web.Request) -> web.Response:
         return web.json_response(self.cafe(), headers={"Cache-Control": "no-cache"})
@@ -698,6 +730,7 @@ class WebUI(Interface):
         self._standing_shown = self.standing()
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
                 "classmates": self.classmates, "roster": self._standing_shown, "people": self.people(),
+                "stamina": self.stamina_total(),
                 "avatars": self.avatars(),
                 "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),

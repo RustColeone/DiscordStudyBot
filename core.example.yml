@@ -54,24 +54,28 @@
 #   claude: {models_exclude: [fable, opus]}
 
 # Model prices (every answer carries its price and cost; the pages show them, stamina counts them): Artificial
-# Analysis's free list (a free key from artificialanalysis.ai in .env; credited wherever it is shown, as its terms
-# ask), fetched again once a day old, under your own figures. A model is matched by name (exact, the same words in
-# another order, else the one closest of the same maker); two equally close leave it unpriced: name one in `aliases`.
+# Analysis's free list (a free key from artificialanalysis.ai in .env as ARTIFICIAL_ANALYSIS_API_KEY or AA_API_TOKEN;
+# credited wherever it is shown, as its terms ask), fetched again once a day old, under your own figures. A model is
+# matched by name (exact, the same words in another order, else the one closest of the same maker); two equally close
+# leave it unpriced: name one in `aliases`.
 # prices:
-#   key_env: ARTIFICIAL_ANALYSIS_API_KEY
 #   models: {deepseek/deepseek-flash: {input: 0.07, output: 0.28, cache_hit: 0.007}, mylocal: {input: 0, output: 0}}
 #   aliases: {deepseek/deepseek-flash: deepseek-v4-flash}
 #   max_age_h: 24
 
-# Stamina: what each persona may spend a day (dollars at list price); a run that reaches it stops and asks you
-# before spending more (approve: she may spend `step` more today). Its account: a balance its provider reports
-# (DeepSeek's, asked with the same key) or a budget you enter, counting down from what is spent since `since`.
+# Stamina: what each persona may spend a day, and everyone together (dollars at list price); a run that reaches
+# either stops and asks you before spending more (approve: `step` more today). The pages' header shows the day's
+# total; each student's card her own. Its account: a balance its provider reports (DeepSeek's and OpenRouter's, asked
+# with the same key) or a budget you enter, counting down from what is spent since `since`. `$stamina` shows it all
+# and changes it (`$stamina total 3`, `$stamina claude 1`, `$stamina budget openai 20`), as do the pages.
 # stamina:
+#   total: 2.00                     # everyone's day together (0: no total)
 #   allowance: 0.50                 # each persona's day (0: no daily limit); `personas: {grok: 1.00}` for one
 #   step: 0.50                      # what one approval adds
 #   timezone: Asia/Shanghai         # when the day starts (default: this machine's)
 #   accounts:
 #     deepseek: {balance: true}
+#     openrouter: {balance: true}   # one key for every company's models: one balance to watch
 #     openai: {budget: 10.00, since: "2026-10-28"}
 
 # Model profiles: ordered candidates; candidates without an API key are skipped.

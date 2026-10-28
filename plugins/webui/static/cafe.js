@@ -3,6 +3,7 @@
 // her direct chat in MomoChat. Rooms are drawn here until pictures exist; any picture in rooms/ is a room as well.
 (() => {
   const $ = (selector) => document.querySelector(selector);
+  const t = (text, values) => (window.t ? window.t(text, values) : text);  // (i18n.js)
   const make = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -159,13 +160,21 @@
                                                    : `${name} (needs a model key)`);
       const figure = make("span", "chibi-figure");
       figure.style.animationDuration = `${0.7 + ((index * 0.37) % 0.7)}s`;  // each her own pace
-      const torso = make("span", "chibi-torso");
-      torso.style.background = colourOf(student.name);
       const mark = markOf(student);
       const above = make("span", "chibi-mark", mark);
       above.style.color = colourOf(student.name);
       above.hidden = !mark;
-      figure.append(above, face(student, "chibi-face"), torso);
+      if ((student.pictures || []).includes("chibi")) {  // her own chibi (tools/draw_students.py)
+        const art = make("img", "chibi-art");
+        art.src = `pictures/${encodeURIComponent(student.name)}/chibi`;
+        art.alt = "";
+        node.classList.add("has-art");
+        figure.append(above, art);
+      } else {  // a stand-in: her face on a small body
+        const torso = make("span", "chibi-torso");
+        torso.style.background = colourOf(student.name);
+        figure.append(above, face(student, "chibi-face"), torso);
+      }
       node.append(figure, make("span", "chibi-shadow"), make("span", "chibi-name", name));
       node.onclick = () => chat(student);
       const walker = { node, x: 0, y: 0, timer: 0 };
@@ -176,11 +185,11 @@
     state.walkers.forEach((walker, index) => { walker.timer = setTimeout(() => wander(walker), 600 + index * 700); });
     $("#people").replaceChildren(...state.students.map((student) => {
       const row = make("li");
-      const elsewhere = [`MomoChat (${student.chats} chat${student.chats === 1 ? "" : "s"})`];
-      if (state.classroom) elsewhere.push(state.classroom.has(student.name) ? "the Classroom (working now)" : "the Classroom");
-      const status = !student.ready ? "needs a model key"
-        : `also in ${elsewhere.join(" and ")}` +
-          (student.own_ready === false ? " · answers on a classmate's model until you add her key" : "");
+      const chats = t(student.chats === 1 ? "MomoChat (1 chat)" : "MomoChat ({0} chats)", { 0: student.chats });
+      const classroom = state.classroom && t(state.classroom.has(student.name) ? "the Classroom (working now)" : "the Classroom");
+      const status = !student.ready ? t("needs a model key")
+        : (classroom ? t("also in {0} and {1}", { 0: chats, 1: classroom }) : t("also in {0}", { 0: chats })) +
+          (student.own_ready === false ? ` · ${t("answers on a classmate's model until you add her key")}` : "");
       row.append(face(student, "person-face"), make("strong", "", shown(student)), make("span", "person-status", status));
       return row;
     }));
@@ -199,10 +208,13 @@
     state.avatars = new Set(data.avatars || []);
     state.rooms = data.rooms || [];
     window.renderPlaces?.($("#places-nav"), data.places || { here: data.here, others: [] }, "Cafe");
-    window.renderStamina?.($("#stamina"), state.students.filter((student) => student.own_ready !== false).map((student) => ({
-      name: shown(student), href: `students#${encodeURIComponent(student.name)}`, plate: colourOf(student.name),
-      picture: state.avatars.has(student.avatar) ? `avatars/${encodeURIComponent(student.avatar)}` : "",
-      stamina: student.stamina })));
+    window.renderStaminaTotal?.($("#stamina"), data.stamina, { set: async (total) => {
+      try {
+        await fetch("api/stamina", { method: "POST", headers: { "Content-Type": "application/json" },
+                                     body: JSON.stringify({ total }) });
+      } catch { /* shown again below */ }
+      refresh();
+    } });
     // the Classroom next door, when there is one: who is at work in it now
     const classroom = (data.places?.others || []).find((place) => place.place?.name === "Classroom");
     state.classroom = classroom ? new Set((classroom.people || []).map((person) => person.key)) : null;

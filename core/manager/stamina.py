@@ -7,14 +7,17 @@ reached (contracts 1.12).
                         (Request.extra `budget_usd`, with what you added)? ──► the run waits for the owner (`Paused`):
                         an approval card, `core.stamina` ("DeepSeek has spent her $0.50 for today. Let her spend
                         $0.50 more?"); approved, the limit grows by `step` and the run carries on; denied, it stops
+    and everyone's together against the day's total (`total`): reached, a run waits the same way
     the pages ──► InterfacePort.stamina(persona): {today: {spent, allowance, left, day}, account: {provider, kind,
-                  currency, total, left, as_of}}
+                  currency, total, left, as_of}}; with no persona, everyone's day against the total
 
-Settings (core.yml `stamina:`): `allowance` (dollars a day for each persona, default 0.50; 0: no daily limit),
-`personas` ({name: allowance}), `step` (what one approval adds; default the allowance, else $0.50), `timezone`
-(default this machine's), `accounts` ({provider: {balance: true}} for an account its provider reports (DeepSeek's), or
-{provider: {budget: 10.0, since: "2026-10-27"}} for a budget you enter, counting down from what is spent since),
-`balance_every_min` (10). A watcher's calls (a memory learning) are counted, never stopped.
+Settings (core.yml `stamina:`): `total` (dollars a day for everyone together, default 2.00; 0: no total),
+`allowance` (dollars a day for each persona, default 0.50; 0: no daily limit), `personas` ({name: allowance}),
+`step` (what one approval adds; default the allowance, else $0.50), `timezone` (default this machine's), `accounts`
+({provider: {balance: true}} for an account its provider reports (DeepSeek's, OpenRouter's), or {provider: {budget:
+10.0, since: "2026-10-27"}} for a budget you enter, counting down from what is spent since), `balance_every_min` (10).
+`$stamina` shows the day and changes the total, an allowance or a budget (kept in the core's store, over core.yml). A
+watcher's calls (a memory learning) are counted, never stopped.
 """
 
 from __future__ import annotations
@@ -28,7 +31,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from core.providers.prices import get_json
 
 DEFAULT_ALLOWANCE = 0.50
-BALANCES = {"deepseek": "https://api.deepseek.com/user/balance"}  # providers that report an account's balance
+DEFAULT_TOTAL = 2.00
+# Providers that report an account's balance: where to ask, and how to read the answer (OpenRouter is one account for
+# every model, so with it every student spends from the same balance).
+BALANCES = {"deepseek": "https://api.deepseek.com/user/balance", "openrouter": "https://openrouter.ai/api/v1/credits"}
 
 
 class Paused(BaseException):
@@ -59,9 +65,11 @@ class Stamina:
         return dt.datetime.fromtimestamp(self.clock(), self.zone).date().isoformat()
 
     def allowance(self, persona: str) -> float:
-        """Her daily allowance in dollars (0: no daily limit)."""
+        """Her daily allowance in dollars (0: no daily limit): what `$stamina` set, else core.yml's."""
         own = dict(self.settings.get("personas") or {})
-        value = own.get(persona, self.settings.get("allowance", DEFAULT_ALLOWANCE))
+        value = self.store.get(f"setting:allowance:{persona}")
+        if value is None:
+            value = own.get(persona, self.store.get("setting:allowance", self.settings.get("allowance", DEFAULT_ALLOWANCE)))
         try:
             return max(0.0, float(value))
         except (TypeError, ValueError):
@@ -74,6 +82,20 @@ class Stamina:
             given = 0.0
         return given if given > 0 else (self.allowance(persona) or DEFAULT_ALLOWANCE)
 
+    def total(self) -> float:
+        """The day's total for everyone together (0: none): what `$stamina` set, else core.yml's."""
+        value = self.store.get("setting:total", self.settings.get("total", DEFAULT_TOTAL))
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return DEFAULT_TOTAL
+
+    def spent_total(self) -> float:
+        return float(self.store.get(f"total:{self.day()}") or 0.0)
+
+    def added_total(self) -> float:
+        return float(self.store.get(f"more-total:{self.day()}") or 0.0)
+
     def spent_today(self, persona: str) -> float:
         return float(self.store.get(f"day:{self.day()}:{persona}") or 0.0)
 
@@ -84,7 +106,14 @@ class Stamina:
         return float(self.store.get(f"run:{run_id}") or 0.0)
 
     def check(self, record, persona: str | None, budget: float | None) -> dict | None:
-        """Why this run must wait before its next model call, or None: her day's allowance spent, or the run's budget."""
+        """Why this run must wait before its next model call, or None: her day's allowance spent, everyone's total
+        for the day, or the run's budget."""
+        total = self.total()
+        if total > 0:
+            limit, spent = total + self.added_total(), self.spent_total()
+            if spent >= limit:
+                return {"kind": "total", "persona": persona or "", "spent": round(spent, 6), "limit": round(limit, 6),
+                        "amount": self.step(persona or ""), "day": self.day()}
         if persona:
             allowance = self.allowance(persona)
             limit = allowance + self.added_today(persona)
@@ -111,6 +140,12 @@ class Stamina:
             spent = float(spent_now if spent_now is not None else arguments.get("spent") or 0)
             self.store.set(key, round(max(float(self.store.get(key) or 0.0) + amount, spent + amount - budget), 6))
             return f"The session may spend {money(amount)} more."
+        if arguments.get("kind") == "total":
+            day = str(arguments.get("day") or self.day())
+            key = f"more-total:{day}"
+            spent = float(self.store.get(f"total:{day}") or 0.0)
+            self.store.set(key, round(max(float(self.store.get(key) or 0.0) + amount, spent + amount - self.total()), 6))
+            return f"Everyone together may spend {money(amount)} more today."
         persona, day = str(arguments.get("persona") or ""), str(arguments.get("day") or self.day())
         key = f"more:{day}:{persona}"
         spent = float(self.store.get(f"day:{day}:{persona}") or 0.0)
@@ -120,9 +155,11 @@ class Stamina:
 
     # ---- the ledger --------------------------------------------------------------------------------------------
     def record(self, persona: str | None, provider: str, cost: float | None) -> None:
-        """One answer's cost: on her day, and on her account's provider."""
+        """One answer's cost: on everyone's day, on hers, and on her account's provider."""
         if not cost:
             return
+        key = f"total:{self.day()}"
+        self.store.set(key, round(float(self.store.get(key) or 0.0) + float(cost), 6))
         if persona:
             key = f"day:{self.day()}:{persona}"
             self.store.set(key, round(float(self.store.get(key) or 0.0) + float(cost), 6))
@@ -152,8 +189,8 @@ class Stamina:
 
     def account(self, provider: str) -> dict | None:
         """Her account: the balance its provider reported, or the budget you entered less what was spent since."""
-        given = self.accounts.get(provider)
-        if not provider or given is None:
+        given = {**(self.accounts.get(provider) or {}), **(self.store.get(f"setting:account:{provider}") or {})}
+        if not provider or not given:
             return None
         if given.get("balance"):
             balance = self.store.get(f"balance:{provider}")
@@ -185,16 +222,12 @@ class Stamina:
                 body = await asyncio.to_thread(get_json, url, {"Authorization": f"Bearer {key}"}, 15.0)
             except Exception:
                 continue
-            infos = body.get("balance_infos") or []
-            if not infos:
+            read = read_balance(provider, body)
+            if read is None:
                 continue
-            first = infos[0]
-            try:
-                total = float(first.get("total_balance"))
-            except (TypeError, ValueError):
-                continue
+            total, currency = read
             before = self.store.get(f"balance:{provider}") or {}
-            self.store.set(f"balance:{provider}", {"currency": str(first.get("currency") or ""), "left": total,
+            self.store.set(f"balance:{provider}", {"currency": currency, "left": total,
                                                     # the fullest it has been seen: what the pages measure it against
                                                     "peak": max(total, float(before.get("peak") or 0)),
                                                     "available": bool(body.get("is_available", True)),
@@ -222,6 +255,65 @@ class Stamina:
         found = self.personas().get(persona)
         return getattr(found, "display_name", "") or persona
 
+    def view_total(self) -> dict:
+        """Everyone's day against the total (InterfacePort.stamina with no persona)."""
+        total = self.total()
+        limit, spent = total + self.added_total(), self.spent_total()
+        return {"today": {"spent": round(spent, 4), "allowance": round(limit, 4) if total else None,
+                          "left": round(max(0.0, limit - spent), 4) if total else None, "day": self.day()}}
+
+    def history(self, days: int = 14) -> list[dict]:
+        """Spending by day, newest last, for the last `days` days (today included): everyone's total and each
+        persona's (InterfacePort.spending)."""
+        today = dt.datetime.fromtimestamp(self.clock(), self.zone).date()
+        wanted = [(today - dt.timedelta(days=back)).isoformat() for back in range(max(1, int(days)) - 1, -1, -1)]
+        found = {day: {"day": day, "total": float(self.store.get(f"total:{day}") or 0.0), "personas": {}} for day in wanted}
+        for key in self.store.keys("day:"):
+            _, day, persona = key.split(":", 2)
+            if day in found:
+                found[day]["personas"][persona] = round(float(self.store.get(key) or 0.0), 6)
+        for entry in found.values():  # (a day from before the total was kept has only its personas')
+            entry["total"] = round(max(entry["total"], sum(entry["personas"].values())), 6)
+        return [found[day] for day in wanted]
+
+    # ---- $stamina: the day, and what you change -------------------------------------------------------------------
+    def command(self, text: str) -> str:
+        """`$stamina` (the day), `$stamina total 3` (everyone's day), `$stamina <persona> 0.8` (her day; `reset`
+        goes back to core.yml's), `$stamina budget <provider> 20` (an account's budget, counted from today)."""
+        words = str(text or "").split()
+        if not words:
+            return self.report()
+        try:
+            if words[0] == "total" and len(words) == 2:
+                self.store.set("setting:total", max(0.0, float(words[1])))
+                return f"Everyone's day: {money(self.total())} ({money(self.spent_total())} spent so far)."
+            if words[0] == "budget" and len(words) == 3:
+                self.store.set(f"setting:account:{words[1]}", {"budget": max(0.0, float(words[2])), "since": self.day()})
+                return f"{words[1]}: a {money(float(words[2]))} budget, counted from today."
+            if len(words) == 2 and words[0] in self.personas():
+                if words[1] == "reset":
+                    self.store.delete(f"setting:allowance:{words[0]}")
+                else:
+                    self.store.set(f"setting:allowance:{words[0]}", max(0.0, float(words[1])))
+                return f"{self.name(words[0])}'s day: {money(self.allowance(words[0]))}."
+        except ValueError:
+            pass
+        return ("Usage: $stamina · $stamina total <dollars> · $stamina <persona> <dollars>|reset · "
+                "$stamina budget <provider> <dollars>")
+
+    def report(self) -> str:
+        total = self.view_total()["today"]
+        lines = [f"Today ({total['day']}): {money(total['spent'])} spent"
+                 + (f" of {money(total['allowance'])} for everyone" if total["allowance"] else " (no total set)")]
+        for persona in self.personas():
+            view = self.view(persona)
+            today, account = view["today"], view["account"]
+            line = f"{self.name(persona)}: {money(today['spent'])}" + (f" of {money(today['allowance'])}" if today["allowance"] else "")
+            if account and account.get("left") is not None:
+                line += f" · {account['provider']} {account['left']} {account.get('currency') or ''}".rstrip()
+            lines.append(line)
+        return "\n".join(lines)
+
     def view(self, persona: str) -> dict:
         """What a page shows of her (InterfacePort.stamina): today's spend against her allowance, and her account."""
         allowance = self.allowance(persona)
@@ -230,6 +322,18 @@ class Stamina:
         return {"today": {"spent": round(spent, 4), "allowance": round(limit, 4) if allowance else None,
                           "left": round(max(0.0, limit - spent), 4) if allowance else None, "day": self.day()},
                 "account": self.account(self.provider_of(persona))}
+
+
+def read_balance(provider: str, body: Mapping[str, Any]) -> tuple[float, str] | None:
+    """A provider's balance answer as (amount, currency): DeepSeek's `balance_infos`, OpenRouter's credits less usage."""
+    try:
+        if provider == "openrouter":
+            data = body.get("data") or {}
+            return round(float(data["total_credits"]) - float(data.get("total_usage") or 0), 4), "USD"
+        first = (body.get("balance_infos") or [None])[0]
+        return (float(first["total_balance"]), str(first.get("currency") or "")) if first else None
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def money(dollars: float) -> str:

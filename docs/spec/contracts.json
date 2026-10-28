@@ -2122,17 +2122,32 @@
      "doc": "Report whether the platform can send. While not ready, deliveries are refused (not uncertain) and the owner is told about each transition."
     },
     {
+     "name": "spending",
+     "async": false,
+     "parameters": [
+      {
+       "name": "days",
+       "type": "int",
+       "keyword_only": false,
+       "default": 14
+      }
+     ],
+     "returns": "Sequence",
+     "doc": "Added in 1.12: what was spent each day (everything: chats, sessions, memories), newest last, for the last `days` days: `[{day, total, personas: {name: dollars}}]`."
+    },
+    {
      "name": "stamina",
      "async": false,
      "parameters": [
       {
        "name": "persona",
-       "type": "str",
-       "keyword_only": false
+       "type": "str | none",
+       "keyword_only": false,
+       "default": null
       }
      ],
      "returns": "Mapping | none",
-     "doc": "Added in 1.12: what a persona has spent today against her daily allowance, and the account she spends from: `{today: {spent, allowance, left, day}, account: {provider, kind (balance or budget), currency, total, left, as_of}}` (allowance and left None without a daily limit; account None when none is set up). None for one the core does not know. A run that reaches her allowance (or its own `budget_usd`) waits for the owner."
+     "doc": "Added in 1.12: what a persona has spent today against her daily allowance, and the account she spends from: `{today: {spent, allowance, left, day}, account: {provider, kind (balance or budget), currency, total, left, as_of}}` (allowance and left None without a daily limit; account None when none is set up). None for one the core does not know. With no persona: everyone's day against the day's total, `{today: {...}}`. A run that reaches her allowance, the total, or its own `budget_usd` waits for the owner."
     },
     {
      "name": "submit",

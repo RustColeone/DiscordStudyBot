@@ -88,7 +88,7 @@ class ClassroomUI(Interface):
             web.get("/api/tasks/{task}", self._task_api), web.get("/api/tasks/{task}/diff", self._diff_api),
             web.get("/api/tasks/{task}/file", self._file_api), web.get("/files/{file}/{name}", self._file),
             web.get("/api/prices", self._prices_api), web.get("/api/presence", self._presence_api),
-            web.get("/api/stamina", self._stamina_api),
+            web.get("/api/stamina", self._stamina_api), web.get("/api/logbook", self._logbook_api),
             web.get("/api/state", self._state_api), web.get("/ws", self._socket),
             web.get("/avatars/{key}", self._avatar), web.get("/favicon.ico", self._favicon)])
         if self.page:  # the web page, one frontend of the API
@@ -305,12 +305,19 @@ class ClassroomUI(Interface):
                                   "fingerprint": change.get("fingerprint", ""), "patch": patch, "live": False})
 
     async def _stamina_api(self, request):
-        """Each seat's stamina (the core's, contracts 1.12), for the page's header and the team picker."""
-        return web.json_response({seat.persona: self._stamina(seat.persona) for seat in self.team.seats.values()})
+        """Each seat's stamina and everyone's day against the total (the core's, contracts 1.12), for the page's header
+        and the team picker."""
+        return web.json_response({"seats": {seat.persona: self._stamina(seat.persona) for seat in self.team.seats.values()},
+                                  "total": self._stamina(None)})
 
-    def _stamina(self, persona: str):
+    async def _logbook_api(self, request):
+        """What was spent each day for the Logbook (everything, chats and sessions: the core's, contracts 1.12)."""
+        asking = getattr(self.port, "spending", None) if self.port is not None else None
+        return web.json_response({"days": asking(14) if callable(asking) else []})
+
+    def _stamina(self, persona: str | None):
         asking = getattr(self.port, "stamina", None) if self.port is not None else None
-        return asking(persona) if callable(asking) else None
+        return (asking(persona) if persona else asking()) if callable(asking) else None
 
     async def _presence_api(self, request):
         return web.json_response(self.presence())
@@ -698,6 +705,7 @@ class ClassroomUI(Interface):
                              "command_filesystem": str(self.config.get("command_filesystem") or "all")},
                 "prices": self.prices.status(self._seat_models()) if self.prices else None, "workflows": catalog(),
                 "benchmarks": benchmarks(), "formations": {name: list(roles) for name, (_, roles) in FORMATIONS.items()},
+                "stamina": self._stamina(None),
                 "places": self.places(), "links": self.links(), "page": self.page}
 
 

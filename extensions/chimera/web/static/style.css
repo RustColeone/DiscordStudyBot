@@ -460,6 +460,10 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
 .site-header > .stamina { justify-self: end; }
 .site-brand { font-weight: 900; font-size: 20px; letter-spacing: -0.01em; }
 .site-page { display: none; }
+.lang-switch { margin-left: 10px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
+               background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 800;
+               vertical-align: 3px; cursor: pointer; opacity: .7; }  /* (i18n.js) */
+.lang-switch:hover { opacity: 1; background: var(--panel); }
 .places-nav { display: flex; flex-wrap: wrap; gap: 4px; }
 .places-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; padding: 6px 10px;
               border-radius: 14px; color: #4f3f33; text-decoration: none; font-size: 13px; font-weight: 800; }
@@ -485,21 +489,28 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
 }
 body.keyboard-open .places-nav { display: none; }
 
-/* the stamina pill (places.js): each student's account (thick bar) and what is left of today (thin bar) */
+/* the stamina pill (places.js): everyone's spending today against the day's total, which you set */
 .stamina-bolt { display: inline-flex; line-height: 0; }
-.stamina-who { display: flex; align-items: center; gap: 6px; text-decoration: none; color: inherit; border-radius: 999px; }
-.stamina-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; object-position: 50% 15%;
-                display: grid; place-items: center; background: #e4d4c0; font-weight: 900; font-size: 12px; }
-.stamina-bars { display: flex; flex-direction: column; gap: 3px; }
-.stamina-track { display: block; width: 64px; height: 6px; border-radius: 3px; background: #e4d4c0; overflow: hidden; }
-.stamina-track.is-today { height: 4px; border-radius: 2px; }
+.stamina { position: relative; }
+.stamina-open { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: inherit;
+                text-decoration: none; font: inherit; cursor: pointer; padding: 0; }
+.stamina-total { display: flex; flex-direction: column; gap: 3px; }
+.stamina-label { font-size: 13px; font-weight: 900; line-height: 1; }
+.stamina-track { display: block; width: 120px; height: 7px; border-radius: 4px; background: #e4d4c0; overflow: hidden; }
+.stamina-edit { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; display: flex; flex-wrap: wrap; align-items: center;
+                gap: 8px; width: 260px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper);
+                box-shadow: var(--shadow); }
+.stamina-edit input { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border: 1px solid var(--line-2, #d9c7b2);
+                      border-radius: 10px; background: var(--paper); color: var(--ink); font: inherit; font-weight: 800; }
+.stamina-edit button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--accent);
+                       color: #3b2208; font-weight: 900; cursor: pointer; }
+.stamina-hint { width: 100%; font-size: 12px; font-weight: 700; color: #6b5847; }
 .stamina-track.is-unknown { background: repeating-linear-gradient(90deg, #e4d4c0 0 4px, transparent 4px 7px); }
 .stamina-fill { display: block; height: 100%; border-radius: inherit; background: #e08a2e; }
 .stamina-note { font-size: 11px; font-weight: 700; line-height: 1.25; color: #6b5847; }
 @media (max-width: 760px) {
   .stamina { gap: 8px; padding: 4px 10px 4px 8px; }
-  .stamina-face { width: 24px; height: 24px; }
-  .stamina-track { width: 40px; }
+  .stamina-track { width: 72px; }
   .stamina-note { display: none; }
 }
 
@@ -705,6 +716,55 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .secondary-button { flex: 1 1 140px; min-height: 44px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--paper);
                     color: var(--ink); font-weight: 800; cursor: pointer; }
 .secondary-button.is-danger { flex: 1 1 100px; color: #8f3d1f; }
+/* the Logbook: tiles, spending by day (stacked by student, the categorical slots in a fixed order), the tables */
+:root { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4;
+        --series-6: #9a9890; }
+@media (prefers-color-scheme: dark) {
+  :root { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+          --series-6: #6f6d66; }
+}
+.logbook-page { grid-column: 1 / -1; grid-row: 2; overflow-y: auto; padding: 16px 24px 40px; }
+.logbook-page[hidden] { display: none; }
+.logbook-page > * { max-width: 1232px; margin-left: auto; margin-right: auto; }
+.logbook-page > .panel { margin-top: 16px; }
+.log-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 20px; }
+.log-tile { padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); }
+.log-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 10px; font-size: 13px; color: var(--ink-2); }
+.log-key, .log-who { display: inline-flex; align-items: center; gap: 6px; }
+.log-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.log-plot { position: relative; display: flex; gap: 8px; height: 190px; }
+.log-scale { display: flex; flex-direction: column; justify-content: space-between; padding-bottom: 20px; font-size: 11px;
+             color: var(--ink-2); text-align: right; min-width: 44px; }
+.log-bars { flex: 1; display: flex; align-items: stretch; gap: 6px; border-bottom: 1px solid var(--line); }
+.log-day { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+           gap: 4px; padding-bottom: 0; cursor: default; }
+.log-stack { width: min(28px, 70%); display: flex; flex-direction: column-reverse; gap: 2px; border-radius: 4px 4px 0 0;
+             overflow: hidden; }
+.log-segment { display: block; flex-basis: 0; min-height: 2px; }
+.log-segment.is-other { background: var(--series-6); }
+.log-label { margin-bottom: -18px; font-size: 10px; color: var(--ink-2); white-space: nowrap; }
+.log-day:hover .log-stack { outline: 2px solid var(--line-2); outline-offset: 2px; }
+.log-tip { position: absolute; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 2px; width: 180px; padding: 8px 10px;
+           border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: var(--shadow); font-size: 12px;
+           pointer-events: none; }
+.log-tip[hidden] { display: none; }
+.log-table { margin-top: 26px; font-size: 13px; }
+.log-table summary { cursor: pointer; font-weight: 800; color: #8a4a12; }
+.log-sessions { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.log-session { width: 100%; display: grid; grid-template-columns: 90px minmax(0, 2fr) minmax(0, 2fr) auto 70px; gap: 12px;
+               align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+               color: var(--ink); text-align: left; font-size: 14px; cursor: pointer; }
+.log-session:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.log-when, .log-team { font-size: 13px; color: var(--ink-2); }
+.log-title { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-team { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-cost { text-align: right; font-weight: 800; }
+@media (max-width: 760px) {
+  .logbook-page { padding: 12px 16px 96px; }
+  .log-session { grid-template-columns: minmax(0, 1fr) auto; }
+  .log-when, .log-team { display: none; }
+}
+
 @media (max-width: 760px) {
   .sessions, .team-page, .report-page { padding: 12px 16px 96px; }
   .sessions-heading h1 { font-size: 26px; }

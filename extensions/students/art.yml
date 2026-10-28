@@ -1,0 +1,117 @@
+# The students' art: drawn by `python tools/draw_students.py` with OpenAI's image model, from each student's own
+# avatar.png as the reference, into her art/ folder (WebP). The students module picks up every picture in art/ by its
+# file name (art/stage-2.webp is her `stage-2`), so the pages show it at once. Tune a prompt here and draw that kind
+# again: `python tools/draw_students.py --students claude --kinds stage-3 --force`.
+#
+# A prompt is the style, then her line (who she is), then the kind's own words. `{name}` is her display name,
+# `{look}` her look and `{motif}` her motifs (below), `{role}` her place in the club.
+model: gpt-image-2.5-sunburst
+style: >-
+  Japanese anime gacha-game character art of the same girl as in the reference picture: keep her face, eye colour,
+  hair colour and hairstyle, and every feature that makes her her ({look}) exactly as in the reference. Wholesome and
+  modest: she is fully and neatly dressed, nothing revealing, no fan service. Clean lineart, soft cel shading, bright
+  appealing colours, no text, no watermark, no logo.
+
+students:
+  gpt:
+    look: long white hair, violet eyes, curved dragon horns, pointed ears, a white flower ornament
+    motif: dragons, moonlight and silver
+    role: the calm, dependable student-council president
+  gemini:
+    look: purple hair, cat ears, bright curious eyes, a star hair ornament
+    motif: stars, gadgets and circuit patterns
+    role: the curious, lively junior from the tech club
+  claude:
+    look: long orange hair, sharp elegant eyes, a flower hair ornament
+    motif: autumn colours, books and a fountain pen
+    role: the sharp-eyed, elegant disciplinary-committee member
+  deepseek:
+    look: long blue hair, blue eyes, whale-fin ears, a white maid headdress with a blue bow
+    motif: whales, the deep sea and bubbles
+    role: the clever, lazy junior who naps whenever she can
+  grok:
+    look: blonde twin tails, blue eyes, small fangs, black bat-wing bows in her hair
+    motif: night, bats and crimson roses
+    role: the cocky, mischievous young lady
+
+kinds:
+  # The Cafe: a chibi walking about (transparent background, the whole figure).
+  chibi:
+    size: 1024x1024
+    quality: medium
+    background: transparent
+    prompt: >-
+      A super-deformed chibi of {name}, {role}: full body, standing, big head and small body (about 2.5 heads tall),
+      cute and simple, holding a little cup of tea, on a transparent background with nothing else in the picture.
+
+  # Her art stages: each a new, better illustration, more detailed at every stage (and drawn with more effort).
+  stage-2:
+    size: 1024x1536
+    quality: low
+    prompt: >-
+      Stage 2 card art of {name}, {role}: a waist-up portrait in her school uniform, a gentle confident expression,
+      a simple soft pastel background with a hint of {motif}.
+  stage-3:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      Stage 3 card art of {name}, {role}: a detailed knee-up illustration in an evolved version of her uniform with
+      touches of {motif}, a dynamic pose, a background that fits her place in the club, warm rim light and richer
+      textures in hair and cloth.
+  stage-4:
+    size: 1024x1536
+    quality: high
+    prompt: >-
+      Stage 4 awakened SSR splash art of {name}, {role}: a full-body, highly detailed illustration in an ornate,
+      fully covering awakened outfit built on her motifs ({motif}): a long coat over a high-collared dress, gloves and
+      boots. Flowing hair and coat tails, dramatic lighting, glowing particles, an elaborate detailed background, the
+      finest detail of all her stages.
+
+  # Bond: more casual and personal as she grows closer to you (her closeness opens each one).
+  bond-1:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      A casual snapshot of {name} off duty: an everyday outfit (an oversized cardigan or hoodie), a relaxed natural
+      smile, sitting at a café table with a drink, warm afternoon daylight, like a photo taken while hanging out.
+  bond-2:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      {name} at ease with someone she trusts: cosy at-home clothes, curled up on a sofa with a snack and a game
+      controller, a playful teasing expression, soft evening lamp light, a lived-in room.
+  bond-3:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      A special memory with {name}: a summer-festival yukata with patterns of {motif}, fireworks in the night sky
+      behind her, a bright happy blush, holding out her hand towards the viewer, sparkling and warm.
+
+  # Her models, weakest to strongest: a chibi (the Cafe's), a middle-school, a high-school, a university student.
+  model-chuugakusei:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      {name} drawn as a middle-school girl: younger proportions, a sailor-style middle-school uniform, a slightly
+      shy eager expression, a simple classroom background, waist-up.
+  model-koukousei:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      {name} drawn as a high-school girl: a smart blazer uniform with a ribbon, a confident capable expression, a
+      school hallway in soft light, waist-up.
+  model-daigakusei:
+    size: 1024x1536
+    quality: medium
+    prompt: >-
+      {name} drawn as a university student: stylish grown-up casual clothes, a mature composed expression, books
+      under her arm, a sunny campus courtyard, waist-up.
+
+# Which of her models is which: the weakest a chibi, the strongest a high-school or university student. A model
+# drawn as `chibi` shows her chibi; the others their `model-<tier>` picture.
+ladders:
+  gpt: {gpt-6-luna: chibi, gpt-6.1-sol: koukousei}
+  claude: {claude-haiku-5-5: chibi, claude-sonnet-5-5: chuugakusei, claude-opus-5-5: koukousei, claude-fable-5-1: daigakusei}
+  deepseek: {deepseek-flash: chibi, deepseek-v4-pro: koukousei}
+  gemini: {gemini-3.8-flash: chibi, gemini-3.8-pro: koukousei}
+  grok: {grok-4-fast: chibi, grok-4: koukousei}

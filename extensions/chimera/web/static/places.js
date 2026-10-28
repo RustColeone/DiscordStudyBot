@@ -45,48 +45,67 @@
       amount,
     };
   };
-  // `students`: [{name, href, picture, plate, stamina}]; only those with an account or a daily allowance show.
-  window.renderStamina = (holder, students) => {
+  // The stamina pill in the header: everyone's spending today against the day's total, which you set. `total` is
+  // `port.stamina()` (`{today: {spent, allowance, left}}`); `set(dollars)`, when given, makes it editable (a click
+  // opens a field), else `href` is where a click goes.
+  window.renderStaminaTotal = (holder, total, { set = null, href = "" } = {}) => {
     if (!holder) return;
-    const shown = (students || []).filter((item) => item.stamina && (item.stamina.account || item.stamina.today?.allowance));
-    holder.hidden = !shown.length;
-    if (!shown.length) { holder.replaceChildren(); return; }
+    const today = total?.today;
+    holder.hidden = !today;
+    if (!today) { holder.replaceChildren(); return; }
+    const fraction = today.allowance ? Math.max(0, Math.min(1, today.left / today.allowance)) : null;
+    const text = today.allowance ? `${amount(today.spent)} / ${amount(today.allowance)}` : `${amount(today.spent)}`;
+    const opener = document.createElement(set ? "button" : "a");
+    opener.className = "stamina-open";
+    if (set) opener.type = "button"; else opener.href = href || "#";
+    const said = today.allowance ? `Stamina: ${amount(today.spent)} of today's ${amount(today.allowance)} spent, everyone together`
+                                 : `Stamina: ${amount(today.spent)} spent today (no daily total set)`;
+    opener.setAttribute("aria-label", said);
+    opener.title = said;
     const bolt = document.createElement("span");
     bolt.className = "stamina-bolt";
     bolt.setAttribute("aria-hidden", "true");
     bolt.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#f0a04b" stroke="#a8601c" stroke-width="1.5" ' +
                      'stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>';
-    const people = shown.map((item) => {
-      const view = window.staminaOf(item.stamina);
-      const link = document.createElement("a");
-      link.className = "stamina-who";
-      link.href = item.href || "#";
-      link.setAttribute("aria-label", `${item.name}: ${[view.accountText, view.todayText && `today ${view.todayText} left`]
-        .filter(Boolean).join("; ")}`);
-      link.title = link.getAttribute("aria-label");
-      const face = document.createElement(item.picture ? "img" : "span");
-      face.className = "stamina-face";
-      if (item.picture) { face.src = item.picture; face.alt = ""; } else face.textContent = item.name.charAt(0);
-      const bars = document.createElement("span");
-      bars.className = "stamina-bars";
-      for (const [fraction, kind] of [[view.account, "account"], [view.today, "today"]]) {
-        const track = document.createElement("span");
-        track.className = `stamina-track is-${kind}`;
-        const fill = document.createElement("span");
-        fill.className = "stamina-fill";
-        fill.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
-        if (kind === "today") fill.style.background = item.plate || "#5a5296";
-        if (fraction == null) track.classList.add("is-unknown");
-        track.append(fill);
-        bars.append(track);
-      }
-      link.append(face, bars);
-      return link;
-    });
+    const bars = document.createElement("span");
+    bars.className = "stamina-total";
+    const label = document.createElement("span");
+    label.className = "stamina-label";
+    label.textContent = text;
+    const track = document.createElement("span");
+    track.className = `stamina-track${fraction == null ? " is-unknown" : ""}`;
+    const fill = document.createElement("span");
+    fill.className = "stamina-fill";
+    fill.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
+    track.append(fill);
+    bars.append(label, track);
     const note = document.createElement("span");
     note.className = "stamina-note";
-    note.innerHTML = "stamina<br>and today";
-    holder.replaceChildren(bolt, ...people, note);
+    note.innerHTML = window.t ? window.t("stamina<br>today") : "stamina<br>today";
+    opener.append(bolt, bars, note);
+    holder.replaceChildren(opener);
+    if (!set) return;
+    opener.onclick = () => {
+      if (holder.querySelector(".stamina-edit")) { holder.querySelector(".stamina-edit").remove(); return; }
+      const form = document.createElement("form");
+      form.className = "stamina-edit";
+      const field = document.createElement("input");
+      field.type = "number";
+      field.min = "0";
+      field.step = "0.10";
+      field.value = today.allowance != null ? String(today.allowance) : "2.00";
+      field.setAttribute("aria-label", "Today's total for everyone, in dollars");
+      const save = document.createElement("button");
+      save.type = "submit";
+      save.textContent = window.t ? window.t("Set") : "Set";
+      const hint = document.createElement("span");
+      hint.className = "stamina-hint";
+      hint.textContent = window.t ? window.t("Everyone's daily total ($); 0 for none") : "Everyone's daily total ($); 0 for none";
+      form.append(hint, field, save);
+      form.onsubmit = (event) => { event.preventDefault(); set(Math.max(0, parseFloat(field.value) || 0)); form.remove(); };
+      holder.append(form);
+      field.focus();
+    };
   };
 
   window.renderPlaces = (nav, places, current) => {

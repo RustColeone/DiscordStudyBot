@@ -80,6 +80,10 @@ kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 6p
 .site-header > .stamina { justify-self: end; }
 .site-brand { font-weight: 900; font-size: 20px; letter-spacing: -0.01em; }
 .site-page { display: none; }
+.lang-switch { margin-left: 10px; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
+               background: transparent; color: inherit; font: inherit; font-size: 12px; font-weight: 800;
+               vertical-align: 3px; cursor: pointer; opacity: .7; }  /* (i18n.js) */
+.lang-switch:hover { opacity: 1; background: var(--panel); }
 .places-nav { display: flex; flex-wrap: wrap; gap: 4px; }
 .places-nav[hidden] { display: none; }
 .places-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; padding: 6px 10px;
@@ -497,21 +501,28 @@ body.keyboard-open .places-nav { display: none; }  /* typing on a phone: every l
                 font-weight: 700; }
 .login-error { color: #b4512d !important; min-height: 1.2em; }
 
-/* the stamina pill (places.js): each student's account (thick bar) and what is left of today (thin bar) */
+/* the stamina pill (places.js): everyone's spending today against the day's total, which you set */
 .stamina-bolt { display: inline-flex; line-height: 0; }
-.stamina-who { display: flex; align-items: center; gap: 6px; text-decoration: none; color: inherit; border-radius: 999px; }
-.stamina-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; object-position: 50% 15%;
-                display: grid; place-items: center; background: #e4d4c0; font-weight: 900; font-size: 12px; }
-.stamina-bars { display: flex; flex-direction: column; gap: 3px; }
-.stamina-track { display: block; width: 64px; height: 6px; border-radius: 3px; background: #e4d4c0; overflow: hidden; }
-.stamina-track.is-today { height: 4px; border-radius: 2px; }
+.stamina { position: relative; }
+.stamina-open { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: inherit;
+                text-decoration: none; font: inherit; cursor: pointer; padding: 0; }
+.stamina-total { display: flex; flex-direction: column; gap: 3px; }
+.stamina-label { font-size: 13px; font-weight: 900; line-height: 1; }
+.stamina-track { display: block; width: 120px; height: 7px; border-radius: 4px; background: #e4d4c0; overflow: hidden; }
+.stamina-edit { position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; display: flex; flex-wrap: wrap; align-items: center;
+                gap: 8px; width: 260px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper);
+                box-shadow: var(--shadow); }
+.stamina-edit input { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border: 1px solid var(--line-2, #d9c7b2);
+                      border-radius: 10px; background: var(--paper); color: var(--ink); font: inherit; font-weight: 800; }
+.stamina-edit button { min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--accent);
+                       color: #3b2208; font-weight: 900; cursor: pointer; }
+.stamina-hint { width: 100%; font-size: 12px; font-weight: 700; color: #6b5847; }
 .stamina-track.is-unknown { background: repeating-linear-gradient(90deg, #e4d4c0 0 4px, transparent 4px 7px); }
 .stamina-fill { display: block; height: 100%; border-radius: inherit; background: #e08a2e; }
 .stamina-note { font-size: 11px; font-weight: 700; line-height: 1.25; color: #6b5847; }
 @media (max-width: 760px) {
   .stamina { gap: 8px; padding: 4px 10px 4px 8px; }
-  .stamina-face { width: 24px; height: 24px; }
-  .stamina-track { width: 40px; }
+  .stamina-track { width: 72px; }
   .stamina-note { display: none; }
 }
 
