@@ -1,0 +1,19 @@
+# MomoChat settings. Copy to config.yml (git-ignored); extension_config.momochat in core.yml overrides it.
+# Each is the default of the assignment option of the same name (an assignment's `options` win).
+# The room's and the assistant's config.yml are read here too until you move them (2026-10-27).
+style: brief                    # brief (a speaker in a conversation) or full (a chat client: complete answers)
+effort: low                     # low | medium | high
+max_steps: 8                    # steps (tool rounds) of one speaker per message
+max_turns: 12                   # speakers' turns per message, hand-offs and follow-ups included
+max_handoffs: 3                 # hand-offs (ask_classmate) per message; 0: none
+max_tokens: 1500
+timeout_s: 35                   # seconds a model call may take
+tool_calls: true                # function calls where the model can make them (false: JSON steps only)
+history_limit: 30               # messages every speaker reads word for word (at most 150)
+history_chars: 0                # and at most this many characters of them (0: no budget)
+compact: true                   # fold older messages into the conversation's rolling summary
+compact_every: 20               # ...once this many have scrolled out (one call to compact_profile)
+compact_profile: default        # the model profile that writes the summary
+chime_in: false                 # a group message naming no one: whose turn it is answers, the others may join in
+new_chat_text: "New chat started."   # the answer to /new
+aliases: {}                     # more names that call on a persona in a group, beyond her own aliases

@@ -21,15 +21,13 @@ build:
 | [`basic`](../../extensions/basic/README.md), [`system`](../../extensions/system/README.md), [`reminders`](../../extensions/reminders/README.md) | Capabilities | The smallest capabilities: declaring one, risk tiers, a `$command`, a store, scheduling |
 | [`images`](../../extensions/images/README.md), [`web`](../../extensions/web/README.md), [`media`](../../extensions/media/README.md) | Capabilities | Outside services with keys, fallbacks, files and sources in results, long work with progress |
 | [`host`](../../extensions/host/README.md), [`terminal`](../../extensions/terminal/README.md) | Capabilities (terminal also an engine) | Sensitive actions: owner-only, private data, secret paths, approvals and confirmations |
-| [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
-| [`room`](../../extensions/room/README.md) | Engine | Several personas on one work board, parallel jobs |
-| [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, her pictures and other names, a rename that keeps her data (`formerly`), shipping your own model profiles and a provider |
-| [`students`](../../extensions/students/README.md) | Agents, prompt part, watcher, capabilities | Agents described for every engine (prompts, tiers, pictures, descriptions), and their memory without importing any engine: a computed `turn` part, a watcher that learns from every conversation engine, facts the pages show, typed-only commands, a permission rule for its own capability, a required package |
-| [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
+| [`momochat`](../../extensions/momochat/README.md) | Engine | The reference engine: one turn loop for every speaker (tools as function calls or JSON, questions, approvals, resuming after a restart), group chats, hand-offs, a rolling summary, former names |
+| [`students`](../../extensions/students/README.md) | Agents, prompt part, watcher, capabilities | Characters as data (one folder each, prompts in plain files, pictures, other names, tiers, a rename that keeps her data), shipping model profiles and a provider, and their memory without importing any engine: a computed `turn` part, a watcher that learns from every conversation engine, facts the pages show, typed-only commands, a required package, a module taken in (`formerly`) |
+| [`chimera`](../../extensions/chimera/README.md) | Engine, capabilities, interface | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, seats built from other modules' agents (`context.personas()`), and running a module on its own |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
 | [`webui`](../../plugins/webui/README.md) | Interface (plugin) | An interface you can drop in: a web page, its protocol and its security |
-| [`whale_chan`](../../plugins/whale_chan/README.md) | Interface, engine, persona (plugin) | A complete plugin: its own bot, engine, persona and model profile |
+| [`whale_chan`](../../plugins/whale_chan/README.md) | Interface, capability (plugin) | A complete plugin: its own bot on MomoChat, a student's voice, defaults that make it work as soon as it is dropped in |
 | [`wechat`](../../plugins/wechat/README.md) | Interface (plugin) | A plugin that stays dormant until configured, with a desktop transport |
 
 ## Ground rules
@@ -91,8 +89,8 @@ routine output routed to a conversation) is only delivered to admitted conversat
 ```yaml
 assignments:
   "*":
-    engine: assistant
-    personas: [assistant]          # or persona: assistant
+    engine: momochat
+    personas: [assistant]          # or persona: assistant (the core's own agent)
     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
     trusted: false                 # routines only: may use owner-only capabilities
     lane: conversation             # or sender
@@ -219,8 +217,8 @@ place for it. Each persona has its own, set in core.yml or by its module; changi
 or of the part's file, not a command.
 
 ```yaml
-personas:
-  assistant:                      # the built-in persona: its prompt stays, the parts are added
+agents:                           # (`personas:` before 2026-10-27, still read)
+  assistant:                      # the built-in agent: its prompt stays, the parts are added
     parts:
       - {name: personality, file: personas/assistant.md}       # relative to core.yml's folder
       - {name: house, text: "Answer in the person's language."}
@@ -255,8 +253,7 @@ load). A part's `text` may be a function of a `PartContext` (`persona`, `address
 (never awaited) each time the part is used, so it should be quick. A persona's own part shadows a module's part
 of the same name. A part that raises or returns something other than text is left out and audited
 (`prompt_part_problem`, with the module that added it), once until it renders again; it never fails the run.
-Engines get the rendered parts with `session.prompt(persona, place)`; the assistant, room and whale_chan
-engines place them as above. An engine that never calls it ignores parts.
+Engines get the rendered parts with `session.prompt(persona, place)`; MomoChat places them as above. An engine that never calls it ignores parts.
 
 ### Watchers
 
@@ -379,7 +376,7 @@ def setup(context) -> Contributions:
                          prompt_parts=[...], watchers=[...])
 
 EXTENSION = Extension("my_extension", setup, contracts="1", version="1", description="...",
-                      requires=("students",), uses=("room",))   # see Dependencies below
+                      requires=("students",), uses=("momochat",))   # see Dependencies below
 ```
 
 * `name`: lowercase letters, digits and `_`; unique across loaded extensions.
@@ -452,14 +449,15 @@ Since contracts 1.10 every module declares, in its `Extension(...)`, the other m
 | `uses` | The module works without these, minus what they would add. | It loads; `context.present` says which of them are there, so it offers only what it can |
 
 ```python
-EXTENSION = Extension("webui", setup, uses=("room", "students"))            # its chats need both; the page opens without
-EXTENSION = Extension("whale_chan", setup, requires=("students",))          # her bot is a student's bot
+EXTENSION = Extension("webui", setup, uses=("momochat", "students"))        # its chats need both; the page opens without
+EXTENSION = Extension("whale_chan", setup, requires=("students", "momochat"))  # her bot is a student's, on MomoChat
 EXTENSION = Extension("students", setup, requires=("package:mneme-llm>=0.2",))  # a student has her memory
 ```
 
 * **Declaring is not optional.** After setup, the core checks every engine and persona your suggested
   `assignments` name. Each must be your own, the core's, or one a module in your `requires` or `uses` adds;
-  otherwise your module is left out with "names the engine 'room' of the room module, which it does not declare".
+  otherwise your module is left out with "names the engine 'momochat' of the momochat module, which it does not
+  declare".
   You find out the first time you run it.
 * **Order:** a module loads after the modules it requires or uses that are there, so `context.present` is known at
   setup. Modules that depend on each other in a circle are both left out.
@@ -472,7 +470,7 @@ EXTENSION = Extension("students", setup, requires=("package:mneme-llm>=0.2",))  
   exits with 1.
 * **What stays fatal:** what the owner wrote. An assignment in core.yml (or set at run time) naming an engine or
   persona that is not loaded stops the core with that message, as do two modules of the same name.
-* **The core needs no module.** Its own default assignments (`*` and `routine:*`, to the `assistant` engine) apply
+* **The core needs no module.** Its own default assignments (`*` and `routine:*`, to the `momochat` engine) apply
   only while that engine is loaded. With no engine at all, the typed `$` commands still work through any
   interface, and a plain message in the owner's own direct chat gets one line saying nothing answers there.
 
@@ -817,45 +815,48 @@ optional, with the run's last saved `state`, for putting right what still shows 
 * Track which events you have processed (by index).
 * Prefer at-most-once for messages: save that you are about to speak, then speak.
 
-### The built-in `assistant` engine
+### The built-in `momochat` engine
 
-[`extensions/assistant`](../../extensions/assistant/engine.py) is a reference engine you may assign
-to any conversation:
+[`extensions/momochat`](../../extensions/momochat/README.md) is the conversation harness: direct chats, group chats,
+tools and questions, for students and agents alike. It was three engines until 2026-10-27, `assistant`, `chat`
+(Whale-chan's) and `room`; those are its former names (`EngineSpec.formerly`), so assignments naming them reach it.
+The core's own defaults (`*`, `routine:*`) assign it with the core's `assistant` agent. Read its source as the
+reference engine: state, events, tool calls, approvals, questions, images and resumable work in one place.
 
-* One persona. The system prompt is the persona prompt, its display name, its stable prompt parts,
-  `options.instructions`, then a turn contract; the turn's context, after the history, holds the time, its
-  turn parts, the diary and the other open runs. Each step the model returns `{message, status, actions}` (`continue` with
-  actions, or `complete` / `needs_input` / `blocked` without), validated with up to two corrections.
-* It speaks `message` before running actions, runs them in order with saved `call_id`s, stops a batch
-  at the first failure, and sends files from successful results itself. It tells the model never to
-  announce an outcome before the result arrives.
-* `needs_approval` → `WAIT_APPROVAL`; `needs_input` from the model → `WAIT_INPUT`. New inbox messages
-  are added before each step. Other open runs in the conversation (`activity()`) are listed in the
-  turn's context so the model does not repeat work in progress.
-* In non-direct conversations it prefixes speakers' names and quotes the latest request (where
-  `display.quotes`). `options.history_scope: sender` limits history to that sender's messages and
-  the replies to them.
-* At its step limit it asks the model for a short closing message without actions; it never emits
-  fixed text of its own. Model failures fail the run (the interface phrases `run_failed`).
-* A failed or refused text delivery does not stop it; file deliveries are reported to the model as
-  delivered or not. It does not regenerate a reply when newer input arrives; it reads the inbox before
-  the next step instead. Engines needing different direct/group behaviour should be their own engine.
-* Assignment options: `instructions` (added to the system prompt), `owner_instructions` (added only
-  when an owner is speaking), `max_steps`, `history_limit`, `history_image_minutes`, `history_scope: sender`,
-  `quote: latest` (default; quote the newest message of the run) or `quote: trigger` (keep quoting
-  the original request).
-* Module settings (`extensions/assistant/config.yml`): `max_steps` (8), `history_limit` (16), `effort`
-  (`low`), `diary` (false).
-* Images attached to the run's messages, found by its tools, or sent by the person in history shortly
-  before the request (`history_image_minutes`, default 30; WeChat sends a picture and its question as
-  separate messages) are shown to the model on every turn (latest 6). History lines carry the time,
-  the speaker, what they replied to and their attachments.
-* Diary (off by default, as in every engine: the companion module keeps what a student remembers; turn it on with
-  the assignment option `diary: true` or the module setting): the turn's context includes the persona's notes about
-  the sender (matching ones first), and a turn may add `diary: [{key, kind, note, importance}]` (at most 2;
-  importance 3+ is kept).
+* **Who speaks.** One persona: she does. Several (a group chat): those the message calls on ("Luna, …", "@Luna"),
+  everyone for "大家", "everyone" and similar, those it names in passing may add a word after the answer, and a
+  message naming no one goes to whose turn it is (a rotation kept per conversation); with `chime_in` the others may
+  join in after her. Joining in is one short remark or `pass` (stay silent): no tools, questions or hand-offs.
+* **One turn for every speaker.** Each step is her words and her calls: as function calls where her model can make
+  them (`tool_calls`, on by default), otherwise one JSON object `{message, status, actions}`, validated with
+  corrections; the transcript keeps both, so a step can fall back. The engine's own tools: `ask` (one question,
+  then `WAIT_INPUT`), `pass` (only when invited to join in) and, in a group, `ask_classmate` (the hand-off): the
+  classmate takes a turn of her own with the request right after, with her own tools, and the asker then gets a
+  short turn to finish with her answer. Actions run in order with saved `call_id`s, a batch stops at the first
+  failure, files from successful results are sent, `needs_approval` waits durably.
+* **What she reads.** Her system prompt (her prompt, display name, stable prompt parts, `instructions`, the
+  contract, and in a group the roster and the group's rules), the thread since the last `/new` (the last
+  `history_limit` messages word for word, `history_chars` at most if set, older ones in the conversation's rolling
+  summary, written by one `compact_profile` call once `compact_every` have scrolled out; `$commands` and their
+  answers left out), then the turn's context (the time, her turn parts, such as a student's memory of the person,
+  other open runs, what was said in this run before her, why she speaks if she was not the one asked), the message,
+  and her turn so far. Images attached, sent shortly before (`history_image_minutes`) or found by tools are shown.
+* **Two styles.** `brief` (the default): she speaks as she goes, in her own voice. `full` (a personal AI chat client,
+  as Whale-chan's bot uses it): complete answers in Markdown, her notes while working shown as progress and only the
+  answer posted. `/new` (`/reset`, `/clear`) starts a fresh thread in any conversation.
+* **Her own impulse.** A request an interface marks `extra.speak_up` (with its text starting `⟨speak-up⟩ `) is her
+  own wish to message someone: one step, no tools, from the motive.
+* **It keeps nothing of people.** No core diary: a student's memory is the students module's (its prompt part and
+  watcher), and an agent has none.
+* Assignment options: `instructions`, `owner_instructions`, `style`, `effort`, `max_steps` (per speaker),
+  `max_turns`, `max_handoffs`, `max_tokens`, `timeout_s`, `tool_calls`, `history_limit`, `history_chars`,
+  `history_scope: sender`, `history_image_minutes`, `compact`, `compact_every`, `compact_profile`, `chime_in`,
+  `new_chat_text`, `quote: latest|trigger`. Module settings (`extensions/momochat/config.yml`) are their defaults.
 
 ### Diaries
+
+No engine in this repository keeps a diary any more (a student's memory is the students module's; an agent
+keeps nothing); the core still offers it to engines that want one.
 
 `session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
 only by default; a DM disclosure never shows up in a server. A note is always filed in the conversation it
@@ -875,47 +876,6 @@ of paraphrasing it, and more than 4 changed notes per run; it keeps at most 200 
 person in each conversation, dropping the least important oldest. Routine runs have no person: `available` is false,
 `recall` is empty and `write` raises. People manage their notes with `$memory`, so engines need no
 commands of their own for this.
-
-### The built-in `room` engine
-
-[`extensions/room`](../../extensions/room/engine.py) is the shared room: several personas own one
-request together on a work board. Its usual characters, `gpt`, `gemini`, `claude`, `deepseek` and `grok`, come from
-the [`students`](../../extensions/students/README.md) module, with a model profile of the same name for each (her
-own model, then the others'; Grok's is xAI's, with `GROK_API_KEY`, falling back to GPT's chain) and Grok's
-provider. The students' `config.yml` overrides them, and core.yml overrides both.
-
-* Who answers: personas named in the message (name, display name or `aliases`), everyone for
-  "大家", "everyone" and similar, otherwise one persona in rotation per conversation. With `chime_in`,
-  the others may also add something or `pass` (stay silent).
-* Long conversations: the last `history_limit` messages word for word, older ones in the conversation's
-  rolling summary (rewritten by one `compact_profile` call once `compact_every` have scrolled out), and
-  `core.search_history` for their exact words.
-* Each turn returns `{status, message, work_note, actions, jobs}`, and `diary` when the diary is on. The message is spoken
-  (`speaker` set) before tools run; `work_note` is a short public explanation sent with label
-  `Work note` / `工作说明`. `jobs` hand teammates focused work; jobs without `after` run in
-  parallel, one job per persona at a time, and a blocked prerequisite blocks its dependents.
-* Each character's system prompt is her prompt, display name and stable prompt parts, then the room's
-  rules; the time, her turn parts (the companion's memory of the person among them) and, with the diary on, her
-  diary come in the turn's context, before the request, so for one
-  speaker the system prompt stays the same from turn to turn. Give a character more personality in core.yml (`personas: gpt:
-  parts:`, see [Prompt parts](#prompt-parts)) rather than by editing the module.
-* Every persona sees the conversation history (her own messages as hers; `$commands` and their answers
-  left out), the board, recent room messages, shared tool results, images (attached to the run's messages,
-  sent in the conversation within `history_image_minutes`, 30, before the request, or returned by tools),
-  and only her own memory.
-* Writes wait for the owner's approval while other jobs continue; `needs_input` waits for the
-  person's answer. Both keep the board in the run, so they survive restarts. New messages during a
-  run answer waiting questions or open new jobs.
-* Guards: an action that is not a read is never repeated in a run once it succeeded, a failed action is
-  retried once only if retryable, invalid turns get one correction, and a step limit (`max_steps`,
-  24) bounds the board. A failing persona reports it in the person's language; the others continue.
-* Module settings (`extensions/room/config.yml`): `max_steps`, `history_limit` (30), `chime_in`
-  (false), `compact` (true), `compact_every` (20), `compact_profile` (`default`), `max_tokens` (1500),
-  `aliases` (`{}`; the students' own are on the personas), `diary` (false: the companion keeps each student's
-  memory). Assignment options: `instructions`, `owner_instructions`, `max_steps`, `history_limit`, `chime_in`,
-  `compact`, `compact_every`, `compact_profile`, `history_image_minutes`, `diary`, and with the diary on the
-  core's `diary_scope`. Discord and the web UI differ only in these options.
-* Budget: a busy room makes many model calls; give its assignment a larger `budget`.
 
 ### The included Discord interface
 
@@ -969,7 +929,7 @@ ways in:
   one. A typed `$t` needs no mention on Discord.
 * A terminal conversation, where every message is a line for the shell. In a terminal conversation,
   type a line starting with `$` and a letter as `$t $HOME`; otherwise it is read as a command.
-* Models: in a run the creator started, the assistant can use `terminal.send` (one line; critical and
+* Models: in a run the creator started, a MomoChat speaker can use `terminal.send` (one line; critical and
   `never_auto`, so each line waits for the creator's approval, which shows the exact line, whatever the
   permissions say) and `terminal.peek` (new output; a private read, no approval). This is how "ask the
   bot to do something on my computer" works. Nobody but the creator can reach the shell, by command,

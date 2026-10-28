@@ -14,12 +14,12 @@
 # Modules: every folder with an extension.py loads, the built-in ones in extensions/ first, then the
 # external ones in plugins/. Turn one off by folder (extensions/terminal) or by name (terminal), and
 # add module folders that live elsewhere (they count as external). Built-in modules:
-#   discord, assistant, basic, cli (stdin chat, for local testing), room (the shared room's engine),
-#   students (gpt, gemini, claude, deepseek, grok: the characters, one folder each), companion ($alias, $bond;
-#   mneme-llm 0.2),
+#   discord, momochat (conversations, direct and in groups), chimera (the students on your code: the Classroom,
+#   :4157), basic, cli (stdin chat, for local testing), students (gpt, gemini, claude, deepseek, grok: one folder
+#   each, and each one's memory of you, $alias, $bond; needs mneme-llm 0.2),
 #   media ($video, $clip; yt-dlp + ffmpeg), images ($draw), system ($status), reminders ($remind),
 #   web ($search, $read, image search, maps, $wolfram with WOLFRAM_APPID), terminal (creator-only shell:
-#   $t <line>, a terminal channel, or the assistant with your approval; docs/core/EXTENSIONS.md),
+#   $t <line>, a terminal channel, or a MomoChat speaker with your approval; docs/core/EXTENSIONS.md),
 #   host (creator-only $screenshot, $getfile, $savefile, $clipboard, $copy, $open, $processes).
 # External ones here: whale_chan (鲸酱), wechat (dormant until extension_config.wechat is set; docs/WECHAT.md).
 # modules:
@@ -27,7 +27,7 @@
 #   paths: [../AudioManager/bot_extension]
 #
 # Module settings live with the module: copy its config.example.yml to config.yml (git-ignored) next
-# to it, e.g. extensions/discord/config.yml. This file holds what is shared (owners, models, personas,
+# to it, e.g. extensions/discord/config.yml. This file holds what is shared (owners, models, agents,
 # admission, assignments); a module's settings repeated here, under extension_config, override its own:
 # extension_config:
 #   discord: {thread_channels: ["123456789012345678"]}
@@ -60,8 +60,15 @@
 #     - {provider: deepseek, model: deepseek-flash}
 #     - {provider: openai, model: gpt-6-luna}
 
-# personas:
-#   assistant:
+# Agents: a persona with her models and nothing else (no memory of anyone; a student is the students module's
+# agent with her memory). `personas:` is this section's name before 2026-10-27, still read.
+# agents:
+#   helper:          # an agent of your own, in one entry
+#     display_name: Helper
+#     prompt: "You are a careful helper. Answer briefly."
+#     models: [deepseek/deepseek-flash, openai/gpt-6-luna]   # a profile of her name (or `profile: default`)
+#     description: "Helper, a careful assistant"            # optional: one line, for engines that write their own
+#   assistant:       # the core's own agent
 #     display_name: Assistant
 #     profile: default
 #     prompt: |
@@ -79,20 +86,21 @@
 # Most specific pattern wins: "interface:conversation", then "interface:*", then "*".
 # assignments:
 #   "*":
-#     engine: assistant
+#     engine: momochat        # (engine: assistant, room or chat, its names before, still reach it)
 #     personas: [assistant]
 #     budget: {model_calls: 24, tool_calls: 24, seconds: 900}
 #     lane: conversation      # or sender: members of a group are handled independently
-#     options: {instructions: "Keep replies short.", diary: true}   # diary: persona notes about each person
-#     # owner_instructions: private text added only when an owner speaks; max_steps: per-assignment step limit
+#     options: {instructions: "Keep replies short."}   # extensions/momochat/README.md lists them all
+#     # owner_instructions: private text added only when an owner speaks; max_steps: per-speaker step limit
 #   "discord:123456789012345678":   # a server channel
-#     engine: assistant
+#     engine: momochat
 #     persona: assistant
 #     enabled: false          # record messages, never answer
-#   "discord:234567890123456789":   # the shared room: five characters on one work board
-#     engine: room
+#   "discord:234567890123456789":   # a group chat with the five students
+#     engine: momochat
 #     personas: [gpt, gemini, claude, deepseek, grok]    # this order is also the rotation order
 #     budget: {model_calls: 40, tool_calls: 24, seconds: 900}
+#     options: {chime_in: true}
 
 # Permissions: what a conversation may use (use), what runs there without asking per tier (tiers:
 # read, prepare, write, critical → auto | ask | always-ask; critical never auto) and exceptions per

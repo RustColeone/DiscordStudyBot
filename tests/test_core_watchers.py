@@ -211,8 +211,8 @@ SEEN = []
         manager, tank = core.manager, core.tank
         tank.record_message("chat:room", "out", "I hum.", sender_name="Luna")
         tank.store("persona:luna").set("rotation", 3)
-        tank.store('extension:room {"persona": "luna"}').set("seat", "front")
-        tank.store('extension:room {"persona": "gpt"}').set("seat", "back")  # hers already: it wins
+        tank.store('extension:seats {"persona": "luna"}').set("seat", "front")
+        tank.store('extension:seats {"persona": "gpt"}').set("seat", "back")  # hers already: it wins
         tank.save_note("luna", "chat:room", "alice", "tea", "fact", "Alice likes tea.", 4, keep=20)
         manager.model_choices.set("chat:room", "luna", "fake/strong")
         manager._overrides.set("chat:side", {"pattern": "chat:side", "engine": "probe", "personas": ["luna"]})
@@ -227,7 +227,7 @@ SEEN = []
         self.assertEqual(manager.assignments["chat:side"].personas, ("gpt",))
         self.assertEqual([part.name for part in manager.personas["gpt"].parts], ["habit"])
         self.assertEqual(tank.store("persona:gpt").get("rotation"), 3)
-        self.assertEqual(tank.store('extension:room {"persona": "gpt"}').get("seat"), "back")
+        self.assertEqual(tank.store('extension:seats {"persona": "gpt"}').get("seat"), "back")
         self.assertEqual(tank.store("persona:luna").keys(), [])
         self.assertEqual([note.note for note in tank.notes("gpt", "chat:room", "alice")], ["Alice likes tea."])
         self.assertEqual(manager.model_choices.get("chat:room", "gpt"), "fake/strong")

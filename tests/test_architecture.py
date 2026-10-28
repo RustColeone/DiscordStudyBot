@@ -36,7 +36,7 @@ class ArchitecturePageTests(unittest.TestCase):
         data = load()
         for part in data["core"]:
             self.assertTrue(part["target"] in data["files"] or part["target"] in data["folders"], part)
-        self.assertIn("engines", data["modules"]["extensions/room"]["slots"])
+        self.assertIn("engines", data["modules"]["extensions/momochat"]["slots"])
         self.assertIn("interfaces", data["modules"]["extensions/discord"]["slots"])
 
 

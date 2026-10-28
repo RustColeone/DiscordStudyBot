@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from tests import test_core_room as room
+from tests import test_momochat as room
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
 
 NAMES = ("gpt", "gemini", "claude", "deepseek")
@@ -52,7 +52,7 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
 
     async def start(self, handler, settings=None, assignments=None):
         extensions = [*make_config(self.tmp).raw["modules"]["paths"],
-                      *(str(ROOT / "extensions" / name) for name in ("room", "students"))]
+                      str(ROOT / "extensions" / "students")]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "extension_config": {"students": {"learn": True, **(settings or {})}},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},

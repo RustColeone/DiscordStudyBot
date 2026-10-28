@@ -161,11 +161,11 @@ class WeChatCase(unittest.IsolatedAsyncioTestCase):
         return make_config(self.tmp, {
             "extensions": [str(ROOT / "plugins" / "wechat"), str(FIXTURES / "fake"), str(FIXTURES / "probe"),
                            str(FIXTURES / "tools"), str(ROOT / "extensions" / "basic"),
-                           str(ROOT / "extensions" / "assistant")],
+                           str(ROOT / "extensions" / "momochat")],
             "extension_config": {"wechat": settings},
             "admission": {"wechat:*": {"enabled": False}, FRIEND: {"enabled": True},
                           ROOM: {"enabled": True, "max_age_s": 900}},
-            # These tests drive the transport with the probe engine (the module's default is the assistant).
+            # These tests drive the transport with the probe engine (the module's default is MomoChat).
             "assignments": {"wechat:*": {"engine": "probe", "personas": ["p"]}},
             **(overrides or {})})
 

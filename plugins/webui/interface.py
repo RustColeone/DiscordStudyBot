@@ -160,6 +160,7 @@ class WebUI(Interface):
         # The mini map: MomoChat and the other places interfaces publish in the core's directory (the Classroom next
         # door, say; contracts 1.7). `map: false` turns it off; with no other place there is simply no map.
         self.map = config.get("map", True) is not False
+        self.momochat = True  # whether MomoChat (and the students) are loaded, so anyone answers here: the module says
         self.places_poll_s = max(2.0, float(config.get("places_poll_s", 5)))
         self.places: dict | None = None
 
@@ -259,11 +260,12 @@ class WebUI(Interface):
         """MomoChat as a place (contracts.PLACE_STATUS): the students, for any interface's map. `views` are this
         page's entries in every page's places bar, which sorts all places' views by `order` (paths relative to the
         published link)."""
-        return {"place": {"name": "MomoChat", "icon": "💬", "note": ""},
+        off = {} if self.momochat else {"off": True, "note": "not loaded"}  # greyed in every page's places bar
+        return {"place": {"name": "MomoChat", "icon": "💬", "note": "" if self.momochat else "not loaded"},
                 "people": [{"key": place_key(item["name"]), "name": item["display"],
                             "avatar": avatar_key(item["name"])} for item in self.roster],
                 "views": [{"name": "Cafe", "icon": "☕", "path": "cafe", "order": 10},
-                          {"name": "MomoChat", "icon": "💬", "path": "", "order": 20}]}
+                          {"name": "MomoChat", "icon": "💬", "path": "", "order": 20, **off}]}
 
     def here(self) -> dict:
         return {"interface": self.name, "link": self.address_shown, **self.place()}
@@ -597,6 +599,7 @@ class WebUI(Interface):
                 "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
                 "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb, "here": self.here(),
+                "momochat": self.momochat,
                 "places": self._places() if self.map and self.port is not None and
                 callable(getattr(self.port, "directory", None)) else None}
 

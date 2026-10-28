@@ -20,7 +20,8 @@ window.renderPlaces = (nav, places, current) => {
           href = url.href;
         } catch { continue; }  // a place without a link has nowhere to go
       }
-      entries.push({ name: view.name, icon: String(view.icon || "📍"), href, order: Number(view.order) || 100 });
+      entries.push({ name: view.name, icon: String(view.icon || "📍"), href, order: Number(view.order) || 100,
+                     off: view.off === true, note: String(view.note || "") });
     }
   };
   add(places?.here, true);
@@ -28,8 +29,9 @@ window.renderPlaces = (nav, places, current) => {
   entries.sort((a, b) => a.order - b.order);
   nav.replaceChildren(...entries.map((entry) => {
     const link = document.createElement("a");
-    link.className = `places-tab${entry.name === current ? " is-current" : ""}`;
+    link.className = `places-tab${entry.name === current ? " is-current" : ""}${entry.off ? " is-off" : ""}`;
     link.href = entry.href;
+    if (entry.off) link.title = `${entry.name}: ${entry.note || "not available"}`;  // greyed: nobody is there
     if (entry.name === current) link.setAttribute("aria-current", "page");
     const icon = document.createElement("span");
     icon.className = "places-icon";

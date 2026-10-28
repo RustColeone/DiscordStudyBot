@@ -221,7 +221,8 @@ class Core:
             self.manager.register_capability(capability, name)
         for persona in contributions.personas:
             self.manager.register_persona(persona, name)
-            self._owners.setdefault(("persona", persona.name), name)  # the first module's persona wins
+            for item in (persona.name, *persona.formerly):  # the first module's persona wins; her old names are hers
+                self._owners.setdefault(("persona", item), name)
         for part in contributions.prompt_parts:
             self.manager.register_prompt_part(part, name)
         for watcher in contributions.watchers:

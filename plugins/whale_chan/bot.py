@@ -1,14 +1,17 @@
 """Whale-chan's own Discord bot (its own application and token). Deliberately small: DMs, mentions and
-replies in servers, text with rendered math, files, image attachments and a progress line. Everything
-else (policy, tools, models) belongs to the core."""
+replies in servers, text with rendered math, files, image attachments, a progress line, and her voice (short
+replies spoken as voice messages where `/voice on` asks for it, and her own first messages). Everything else
+(policy, tools, models, the conversation itself: MomoChat) belongs to the core."""
 
 from __future__ import annotations
 
 import asyncio
 import base64
 import dataclasses
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 from collections import OrderedDict
 from pathlib import Path
@@ -17,17 +20,17 @@ import discord
 
 from contracts import Address, Command, Delivery, Display, FileRef, Interface, Option, Reply, Request, Sender
 
-from . import slash
+from . import slash, voice
 from .math_render import MathRenderer, fallback_text, split_math
 from .speakup import MARK, Ledger, Settings, SpeakUp
-from .voice import VOICE_NAME
+from .voice import VOICE_NAME, speakable
 
-# Her own commands become plain messages her engine understands (`/speakup` the bot answers itself); the rest
-# come from the core's catalog.
+# Her own commands: `/new` becomes the message MomoChat starts a fresh thread on; `/voice` and `/speakup` the bot
+# answers itself. The rest come from the core's catalog.
 LOCAL = {
     "new": (Command("new", "Start a fresh chat (earlier messages stop being context)"), "/new"),
     "voice": (Command("voice", "Her replies here as voice messages: on or off",
-                      (Option("mode", "on or off", choices=("on", "off")),)), "/voice {mode}"),
+                      (Option("mode", "on or off", choices=("on", "off")),)), None),
     "speakup": (Command("speakup", "鲸酱 messaging first: status, rehearse, now, on, off or dry (owner only)",
                         (Option("do", "what to do", choices=("status", "rehearse", "now", "on", "off", "dry")),),
                         access="creator"), None),
@@ -96,8 +99,13 @@ class SimpleMessage:
 
 class WhaleChanBot(Interface):
     def __init__(self, name: str, token: str, data_dir: Path, attachment_max_mb: float = 25.0, config=None,
-                 persona: str = "deepseek"):
+                 persona: str = "deepseek", voice: dict | None = None):
         self.name, self.token, self.persona = name, token, persona
+        self.data_dir = Path(data_dir)
+        # Her voice (voice.py): None when it is off. `speak_up` her own first messages as voice too; `max_chars`
+        # longer replies stay text.
+        self.voice = dict(voice) if voice and voice.get("enabled", True) is not False else None
+        self._voiced: OrderedDict[str, bool] = OrderedDict()  # runs that already sent a voice message
         self.port = None
         self.attachments = Path(data_dir) / "attachments"
         self.attachment_max = int(attachment_max_mb * 1024 * 1024)
@@ -211,6 +219,10 @@ class WhaleChanBot(Interface):
             text = " ".join(f"[{file.name}]" for file in files)
         if text.startswith(MARK):  # only she starts messages with her impulse's mark
             text = text[len(MARK):]
+        if text.strip().lower().split()[:1] == ["/voice"]:
+            answer = self._voice_command(conversation, text.strip().lower().split()[1:2])
+            await message.channel.send(answer, reference=message, mention_author=False)
+            return
         if direct:
             self.speak_up.ledger.heard(str(message.author.id), message.created_at.timestamp())
         limit = message.guild.filesize_limit if message.guild else 10 * 1024 * 1024
@@ -277,6 +289,11 @@ class WhaleChanBot(Interface):
                 if command.name == "speakup":
                     await interaction.response.send_message(await self._speak_up_command(
                         str(interaction.user.id), str(values.get("do") or "status")), ephemeral=True)
+                    return
+                if command.name == "voice":
+                    conversation = f"dm:{interaction.user.id}" if interaction.guild is None else str(interaction.channel_id)
+                    await interaction.response.send_message(self._voice_command(
+                        conversation, [str(values.get("mode") or "")] if values.get("mode") else []))
                     return
                 await interaction.response.defer(thinking=True)
                 if command.name in LOCAL:
@@ -355,6 +372,56 @@ class WhaleChanBot(Interface):
                 f"({item['reason']})" for item in recent))
         return "\n".join(lines)[:1900]
 
+    # ---- her voice ---------------------------------------------------------------------------------------
+    def _voice_command(self, conversation: str, words: list[str]) -> str:
+        """`/voice on|off`: her replies in this chat as voice messages (kept in the bot's own bottle)."""
+        if self.voice is None:
+            return "🐳 人家的声音还没有设置好呢（voice 没有开）。"
+        key = f"voice:{conversation}"
+        if words and words[0] in ("on", "off"):
+            self.port.bottle.set(key, words[0])
+        on = self.port.bottle.get(key) == "on"
+        if not words:
+            return f"🎙️ 语音回复现在是{'开' if on else '关'}着的（/voice on 或 /voice off）"
+        return "🎙️ 好～之后人家会用语音回你！" if on else "💬 好的，之后用文字回你～"
+
+    def _wants_voice(self, reply: Reply) -> bool:
+        """A short answer in a chat switched to voice, or one to her own impulse (speaking up), once per run."""
+        if self.voice is None or reply.kind != "text" or not reply.run_id or reply.run_id in self._voiced:
+            return False
+        speak_up = str(reply.in_reply_to or "").startswith("speak-up-") and self.voice.get("speak_up", True)
+        if not speak_up and self.port.bottle.get(f"voice:{reply.address.conversation}") != "on":
+            return False
+        spoken = speakable(reply.text)
+        return bool(spoken) and len(spoken) <= int(self.voice.get("max_chars", 400))
+
+    async def _speak(self, channel, reply: Reply) -> None:
+        """Her reply said aloud too, as a voice message (a failure is logged, the text is already there)."""
+        self._mark_voiced(reply.run_id)
+        backend = voice.backend(self.voice)
+        if backend.ready():
+            self.port.log("voice_not_ready", detail=backend.ready())
+            return
+        folder = self.data_dir / "voice"
+        folder.mkdir(parents=True, exist_ok=True)
+        descriptor, raw = tempfile.mkstemp(prefix="voice-", suffix=".ogg", dir=folder)
+        os.close(descriptor)
+        try:
+            path = await asyncio.to_thread(backend.synthesize, speakable(reply.text), Path(raw))
+            if await self._send_voice(channel, path) is None:
+                await channel.send(file=discord.File(str(path), filename=VOICE_NAME if path.suffix == ".ogg"
+                                                     else "voice.wav"))
+        except Exception as error:
+            self.port.log("voice_failed", error=type(error).__name__, detail=str(error)[:200])
+        finally:
+            Path(raw).unlink(missing_ok=True)
+
+    def _mark_voiced(self, run_id: str | None) -> None:
+        if run_id:
+            self._voiced[run_id] = True
+            while len(self._voiced) > 200:
+                self._voiced.popitem(last=False)
+
     def _view(self, reply: Reply):
         if not reply.actions:
             return None
@@ -403,6 +470,8 @@ class WhaleChanBot(Interface):
                          if pending is None and reply.quote and str(reply.quote).isdigit() else None)
             if reply.address.conversation.startswith("dm:") and reply.kind in ("text", "file"):
                 self.speak_up.ledger.spoke(reply.address.conversation[3:], time.time())
+            if reply.kind == "file" and reply.file.name == VOICE_NAME:
+                self._mark_voiced(reply.run_id)  # she sent one herself: no second one for her answer
             if reply.kind == "file" and reply.file.name == VOICE_NAME and pending is None:
                 sent = await self._send_voice(channel, Path(reply.file.path))
                 if sent is not None:
@@ -426,6 +495,8 @@ class WhaleChanBot(Interface):
                     sent = await post(content=value, reference=reference if first is None else None,
                                       view=view if index == len(parts) - 1 else None)
                 first = first or sent
+            if self._wants_voice(reply):
+                await self._speak(channel, reply)
             return Delivery(True, message_id=str(first.id))
         except (discord.Forbidden, discord.NotFound) as error:
             return Delivery(False, detail=type(error).__name__)

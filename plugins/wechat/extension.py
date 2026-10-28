@@ -66,13 +66,13 @@ def setup(context) -> Contributions:
         context.log("not_configured")
         return Contributions()
     # Defaults core.yml overrides: no chat is answered until core.yml opens it (`admission`, chat by chat), and
-    # the chats it opens get the assistant as 本鲸 (this module's persona).
+    # the chats it opens get MomoChat with 本鲸 (this module's agent).
     return Contributions(interfaces=[WeChatInterface(settings_from(context.config, context.data_dir))],
                          personas=[PERSONA], admission={"wechat:*": {"enabled": False}},
-                         assignments={"wechat:*": {"engine": "assistant", "personas": [PERSONA.name]}})
+                         assignments={"wechat:*": {"engine": "momochat", "personas": [PERSONA.name]}})
 
 
-EXTENSION = Extension("wechat", setup, contracts="1", version="1", uses=("assistant",),
+EXTENSION = Extension("wechat", setup, contracts="1", version="1", uses=("momochat",),
                       description="WeChat account: native database reads, desktop sends, owner operations", settings=(
     Setting("database_root", "The account's …/xwechat_files/wxid_…/db_storage folder (see docs/WECHAT.md)", "path"),
     Setting("database_keys", "Key file from key_setup (default: in the module's data folder)", "path"),

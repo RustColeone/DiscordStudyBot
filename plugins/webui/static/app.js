@@ -732,6 +732,21 @@
     map.replaceChildren(tile(places.here, true), corridor, ...(places.others || []).slice(0, 1).map((place) => tile(place, false)));
   }
 
+  // MomoChat not loaded here (no momochat engine, or no students): the page stays readable, greyed, and says why
+  // instead of taking messages nobody answers.
+  function offline(off) {
+    document.body.classList.toggle("momochat-off", off);
+    $("#input").disabled = off;
+    $("#send").disabled = off;
+    let note = $("#offline-note");
+    if (off && !note) {
+      note = make("div", "offline-note", "MomoChat isn't loaded, so nobody answers here. `python -m core --check` " +
+                  "says why (it needs the momochat and students modules, and the students need mneme-llm).");
+      note.id = "offline-note";
+      $("#composer").before(note);
+    } else if (!off && note) note.remove();
+  }
+
   function receive(event) {
     if (event.type === "hello") {
       const s = event.state;
@@ -746,6 +761,7 @@
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
       state.places = s.places;
       state.here = s.here;
+      offline(s.momochat === false);
       renderMap();
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       // A link to a chat (#<chat>, from the Classroom's "open the chat", say) opens it; #dm=<student>, from the

@@ -1,22 +1,15 @@
-"""Persona diaries: core rules, the $memory command and the assistant engine's use of them."""
+"""Persona diaries: core rules and the $memory command, through a test engine that keeps one (tests/core_fixtures/
+diarist: no engine of this repository does since 2026-10-27)."""
 
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-from tests.core_support import FakeAdapter, iface, settle, start_core, turn_context
+from tests.core_support import FIXTURES, FakeAdapter, iface, make_config, settle, start_core
 
-
-def turn(message="", status="complete", actions=(), diary=None):
-    value = {"message": message, "status": status, "actions": [dict(tool=t, arguments=a) for t, a in actions]}
-    if diary is not None:
-        value["diary"] = diary
-    return value
-
-
-def note(key, text, importance=4, kind="fact"):
-    return {"key": key, "kind": kind, "note": text, "importance": importance}
+DIARIST = {"extensions": [*make_config(Path(".")).raw["modules"]["paths"], str(FIXTURES / "diarist")],
+           "assignments": {"*": {"engine": "diarist", "personas": ["p"]}}}
 
 
 class DiaryTests(unittest.IsolatedAsyncioTestCase):
@@ -32,27 +25,21 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
 
     async def core(self, responses=(), overrides=None):
         adapter = FakeAdapter(list(responses))
-        core = await start_core(self.tmp, {"assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": True}}},
+        core = await start_core(self.tmp, {**DIARIST,
                                            "personas": {"q": {"display_name": "Quinn", "prompt": "You are Quinn."}},
                                            **(overrides or {})}, adapter)
         self.cores.append(core)
         return core, adapter
 
-    def context(self, adapter, index=0):
-        return turn_context(adapter.calls[index])
-
     async def test_notes_are_kept_per_person_and_conversation_and_recalled_next_time(self):
-        core, adapter = await self.core([
-            turn("Nice!", diary=[note("music.favorite", "Loves Andy Hui's songs"), note("mood", "fine", 2)]),
-            turn("Hi Bob."), turn("Hi again."), turn("Hello.")])
-        for text, options in (("I really love 古巨基", {}), ("hello", {"sender": "bob", "name": "Bob"}),
-                              ("any music for me?", {}), ("hi", {"conversation": "elsewhere"})):
+        core, _ = await self.core()
+        for text, options in (("note music.favorite 4 Loves Andy Hui's songs", {}),
+                              ("music?", {"sender": "bob", "name": "Bob"}),
+                              ("any music for me?", {}), ("music?", {"conversation": "elsewhere"})):
             await iface(core).say(text, **options)
             await settle(core)
-        self.assertNotIn("Andy Hui", self.context(adapter, 1))
-        self.assertIn('"note": "Loves Andy Hui\'s songs"', self.context(adapter, 2))
-        self.assertIn("Your diary about Alice", self.context(adapter, 2))
-        self.assertNotIn("Andy Hui", self.context(adapter, 3))
+        self.assertEqual(iface(core).texts("room"), ["noted", "notes: none", "notes: Loves Andy Hui's songs"])
+        self.assertEqual(iface(core).texts("elsewhere"), ["notes: none"])  # another conversation's
         notes = core.tank.notes("p", "chat:room", "alice")
         self.assertEqual([(n.key, n.importance) for n in notes], [("music.favorite", 4)])
 
@@ -126,23 +113,6 @@ class DiaryTests(unittest.IsolatedAsyncioTestCase):
         await chat.say(f"$memory forget {bob_note}", sender="bob", conversation="room")
         await settle(core)
         self.assertEqual(chat.texts("room")[-1], "Note removed.")
-
-    async def test_the_diary_is_off_unless_an_assignment_turns_it_on(self):
-        core, adapter = await self.core([turn("ok", diary=[note("k", "something real")])], {
-            "assignments": {"*": {"engine": "assistant", "personas": ["p"]}}})
-        await iface(core).say("I moved to Tokyo")
-        await settle(core)
-        self.assertNotIn("Your diary", self.context(adapter))
-        self.assertNotIn("diary", adapter.calls[0]["schema"]["properties"])  # nothing to write it with
-        self.assertEqual(core.tank.note_counts("chat:room", "alice"), {})
-
-    async def test_diary_can_be_switched_off_per_assignment(self):
-        core, adapter = await self.core([turn("ok", diary=[note("k", "something real")])], {
-            "assignments": {"*": {"engine": "assistant", "personas": ["p"], "options": {"diary": False}}}})
-        await iface(core).say("I moved to Tokyo")
-        await settle(core)
-        self.assertNotIn("Your diary", self.context(adapter))
-        self.assertEqual(core.tank.note_counts("chat:room", "alice"), {})
 
 
 if __name__ == "__main__":

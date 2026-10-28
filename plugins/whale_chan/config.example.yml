@@ -11,11 +11,12 @@ token_env: DISCORD_BOT_TOKEN_WHALE_CHAN
 # interface: whale_chan        # conversations are whale_chan:dm:<user> or whale_chan:<channel>
 
 # She is the DeepSeek student: her prompt, name (and the alias 鲸酱) and models are in extensions/students/deepseek/,
-# her memory and mood the companion's (extensions/companion/config.yml), the same as every student's.
+# her memory and mood the students module's (extensions/students/config.yml), the same as every student's.
 # persona: deepseek             # the student her bot speaks as
 # new_chat_text: "🐳 好的主人，新的对话开始啦～"   # the reply to /new
 
-# The engine: one ongoing thread per conversation; /new starts a fresh one.
+# Her chats are MomoChat's, as a chat client (complete answers, only the answer posted): one ongoing thread per
+# conversation, /new starts a fresh one. These are the options her bot's assignment gives MomoChat.
 effort: high                    # low | medium | high
 max_steps: 10                   # tool steps per message
 max_tokens: 8000
@@ -24,9 +25,6 @@ history_chars: 40000            # and at most this many characters of them
 
 # Tools as her model's own function calls where it can make them (DeepSeek, OpenAI); false: JSON steps only.
 # tool_calls: true
-
-# The core diary from her turns, as every engine can keep it (off: the companion keeps what she remembers).
-# diary: false
 
 # Speaking up: now and then she messages you first (a local dice roll every 30 minutes; a model is only
 # called when it hits). Off until you turn it on; then it starts as a dry run that only writes down what it

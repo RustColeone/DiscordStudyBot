@@ -386,9 +386,16 @@ a.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--line))
 .places-tab:hover { background: var(--panel); }
 .places-tab.is-current { background: var(--panel); box-shadow: inset 0 -3px 0 var(--accent); }
 .places-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.places-tab.is-off { opacity: .45; filter: grayscale(1); }  /* a place whose engine is not loaded: nobody there */
 .places-icon { font-size: 1.15rem; line-height: 1.25; }
 @media (max-width: 760px) {
   .places-nav { justify-content: space-between; padding: 4px 6px; }
   .places-tab { flex: 1; min-width: 0; padding: 4px 2px; font-size: .68rem; }
 }
 body.keyboard-open .places-nav { display: none; }  /* typing on a phone: every line counts */
+
+/* MomoChat not loaded (the momochat engine or the students): the page opens greyed, and says why. */
+body.momochat-off .messages, body.momochat-off .members { filter: grayscale(1); opacity: .6; }
+body.momochat-off .composer { opacity: .5; pointer-events: none; }
+.offline-note { margin: 10px auto; max-width: 560px; padding: 10px 14px; border-radius: 12px; background: var(--panel);
+                color: var(--muted); font-size: .9rem; text-align: center; }

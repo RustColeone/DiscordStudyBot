@@ -1,7 +1,9 @@
-"""Tests for the example drop-in plugin `plugins/whale_chan`: the chat engine and its setup."""
+"""Tests for the example drop-in plugin `plugins/whale_chan`: her chats on MomoChat as a chat client, her bot, her
+voice, her memory through the real core, and speaking up."""
 
 import json
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -15,6 +17,12 @@ PLUGIN = ROOT / "plugins" / "whale_chan"
 STUDENTS = ROOT / "extensions" / "students"  # she is the DeepSeek student, with her memory
 PROFILES = {name: [{"provider": "fake", "model": "pro"}] for name in ("gpt", "claude", "deepseek", "gemini", "grok")}
 QUIET = {"voice": {"enabled": False}}
+
+
+def chat_options(config=QUIET):
+    """MomoChat's options for her chats, as her plugin gives them (a chat client: complete answers, one thread)."""
+    from core.loader import import_extension
+    return import_extension(PLUGIN)[1].chat_options(config)
 # Her memory and mood are a student's: one Discord user is one person (`chat` stands for her bot here).
 MEMORY = {"platforms": {"chat": "discord"}}
 
@@ -46,7 +54,10 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
             "extensions": extensions, "profiles": PROFILES,
             "extension_config": {"whale_chan": plugin if plugin is not None else QUIET,
                                  "students": {"learn": True, **companion} if companion is not None else {}},
-            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"], "options": options or {}}},
+            # (`chat`: her own engine's name, MomoChat's former one)
+            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"],
+                                  "options": {**chat_options(plugin if plugin is not None else QUIET),
+                                              **(options or {})}}},
             **({"owners": owners} if owners else {})}, self.adapter)
         return iface(self.core)
 
@@ -93,9 +104,7 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.adapter.calls), 3)
 
     async def test_a_long_thread_is_trimmed_to_the_character_budget_newest_first(self):
-        chat = await self.start([step("ok")], {"history_limit": 100})
-        engine = self.core.manager.engines["chat"]
-        engine.history_chars = 50
+        chat = await self.start([step("ok")], {"history_limit": 100, "history_chars": 50})
         from contracts import Address, Sender
         now = time.time()
         for index in range(5):
@@ -114,12 +123,12 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
         await chat.say("dig deep")
         await settle(self.core)
         self.assertEqual(self.texts(chat), ["Best so far."])
-        self.assertIn("used all your steps", self.adapter.calls[-1]["messages"][-1]["content"])
+        self.assertIn("You must stop now", self.adapter.calls[-1]["messages"][-1]["content"])
 
 
 class PromptLayoutTests(ChatEngineTests):
     async def test_each_turn_reuses_her_system_prompt_and_the_thread_as_its_prefix(self):
-        chat = await self.start([step("嗨主人～"), step("还在哦"), step("好呀")], plugin={**QUIET, "diary": True})
+        chat = await self.start([step("嗨主人～"), step("还在哦"), step("好呀")])
         for text in ("你好", "在吗", "陪我聊天"):
             await chat.say(text)
             await settle(self.core)
@@ -142,7 +151,8 @@ class NativeChatTests(unittest.IsolatedAsyncioTestCase):
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "profiles": PROFILES,
             "extension_config": {"whale_chan": plugin if plugin is not None else QUIET},
-            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"], "options": options or {}}}},
+            "assignments": {"*": {"engine": "chat", "personas": ["deepseek"],
+                                  "options": {**chat_options(), **(options or {})}}}},
             self.adapter)
         return iface(self.core)
 
@@ -162,37 +172,16 @@ class NativeChatTests(unittest.IsolatedAsyncioTestCase):
         tool = next(message for message in second["messages"] if message["role"] == "tool")
         self.assertTrue(tool["content"].startswith("[tool basic.now → success]"))
 
-    async def test_with_the_core_diary_she_asks_and_remembers_by_calls(self):
-        chat = await self.start([
-            calls("", ("ask", {"question": "哪个城市？"})),
-            calls("好的！", ("remember", {"key": "home.city", "kind": "fact", "note": "住在杭州", "importance": 4})),
-            calls("杭州今天晴。")], plugin={**QUIET, "diary": True})
-        for text in ("天气怎么样？", "杭州", "今天呢？"):
+    async def test_she_asks_by_a_call_and_keeps_no_diary(self):
+        chat = await self.start([calls("", ("ask", {"question": "哪个城市？"})), calls("杭州今天晴。")],
+                                plugin={**QUIET, "diary": True})
+        for text in ("天气怎么样？", "杭州"):
             await chat.say(text)
             await settle(self.core)
-        self.assertEqual(self.texts(chat), ["哪个城市？", "好的！", "杭州今天晴。"])
-        context = turn_context(self.adapter.calls[0])
-        self.assertIn("call remember", context)
-        self.assertNotIn('A step may add "diary"', context)
-        self.assertIn("remember", [tool.name for tool in self.adapter.calls[0]["tools"]])
-        self.assertIn('"note": "住在杭州"', turn_context(self.adapter.calls[2]))  # kept, recalled later
-
-    async def test_a_run_from_before_gets_the_diary_rule_of_the_form_it_is_asked_in(self):
-        chat = await self.start([calls("Saving it.", ("tools.write_value", {"key": "k", "value": "v"})), calls("Saved.")],
-                                plugin={**QUIET, "diary": True})
-        await chat.say("save v")
-        await settle(self.core)
-        run = self.core.tank.runs(("waiting_approval",))[0]
-        state = dict(run.state)  # as the previous build saved it: the JSON rule inside her notes
-        state["memory_block"] += '\nA step may add "diary": [...] (at most 2) when Alice shares something.'
-        self.core.tank.update_run(run.id, state=state)
-        approval_id = iface(self.core, "owner").notices("approval_request")[0].data["approval_id"]
-        await iface(self.core, "owner").say(f"$approve {approval_id}", conversation="dm", sender="boss")
-        await settle(self.core)
-        self.assertEqual(self.texts(chat)[-1], "Saved.")
-        context = turn_context(self.adapter.calls[-1])
-        self.assertIn("call remember", context)
-        self.assertNotIn("A step may add", context)
+        self.assertEqual(self.texts(chat), ["哪个城市？", "杭州今天晴。"])
+        self.assertNotIn("remember", [tool.name for tool in self.adapter.calls[0]["tools"]])  # her memory is hers
+        moved = [event for event in self.core.audit.events if event.get("detail") == "settings_moved"]
+        self.assertEqual(moved[0]["keys"], ["diary"])
 
     async def test_her_last_step_and_a_speak_up_are_json(self):
         from contracts import Address, Request, Sender
@@ -235,10 +224,13 @@ class WhaleChanSetupTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             return extension.setup(context)
 
-    def test_without_a_token_only_the_engine_loads(self):
+    def test_without_a_token_only_her_voice_loads(self):
         contributions = self.setup_with({}, {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""})
-        self.assertEqual(([e.spec.name for e in contributions.engines], list(contributions.personas),
-                          list(contributions.interfaces), dict(contributions.profiles)), (["chat"], [], [], {}))
+        self.assertEqual((list(contributions.engines), list(contributions.personas), list(contributions.interfaces),
+                          [item.name for item in contributions.capabilities]), ([], [], [], ["whale_chan.speak"]))
+        from core.loader import import_extension
+        extension, _ = import_extension(PLUGIN)
+        self.assertEqual(extension.requires, ("students", "momochat"))  # her bot is a student's, on MomoChat
 
     def test_her_old_persona_settings_are_reported_as_moved(self):
         logged = []
@@ -257,17 +249,22 @@ class WhaleChanSetupTests(unittest.TestCase):
         from_env = self.setup_with({}, {"DISCORD_BOT_TOKEN_WHALE_CHAN": "secret"})
         self.assertEqual([interface.name for interface in from_env.interfaces], ["whale_chan"])
         self.assertEqual(from_env.interfaces[0].token, "secret")
-        self.assertEqual(from_env.assignments["whale_chan:*"]["engine"], "chat")
+        self.assertEqual(from_env.assignments["whale_chan:*"]["engine"], "momochat")
         self.assertEqual(from_env.assignments["whale_chan:*"]["personas"], ["deepseek"])  # the student she is
+        options = from_env.assignments["whale_chan:*"]["options"]
+        self.assertEqual((options["style"], options["effort"], options["history_limit"]), ("full", "high", 60))
         self.assertEqual(from_env.interfaces[0].persona, "deepseek")
         self.assertTrue(from_env.admission["whale_chan:*"]["require_mention_in_groups"])
         self.assertEqual(from_env.permissions["whale_chan:*"]["tiers"],
                          {"write": "always-ask", "critical": "always-ask"})
         self.assertNotIn("use", from_env.permissions["whale_chan:*"])  # what she may use is every student's
-        from_config = self.setup_with({"token": "local", "interface": "whale", "assignment": {"lane": "sender"}},
+        from_config = self.setup_with({"token": "local", "interface": "whale", "assignment": {"lane": "sender"},
+                                       "effort": "medium", "max_steps": 4},
                                       {"DISCORD_BOT_TOKEN_WHALE_CHAN": ""})
         self.assertEqual(from_config.interfaces[0].token, "local")
         self.assertEqual(from_config.assignments["whale:*"]["lane"], "sender")
+        options = from_config.assignments["whale:*"]["options"]  # her old engine settings are MomoChat's options
+        self.assertEqual((options["effort"], options["max_steps"], options["style"]), ("medium", 4, "full"))
         self.assertEqual(list(from_config.permissions), ["whale:*"])
 
     def test_long_text_splits_within_discords_limit(self):
@@ -424,15 +421,6 @@ class CompanionTests(ChatEngineTests):
         self.assertEqual(self.mneme_calls.count("impression"), 1)
         self.assertEqual(self.memory().memory.profile("discord:alice"), "A student who works hard.")
 
-    async def test_the_core_diary_is_still_there_when_asked_for(self):
-        diary = [{"key": "pet", "kind": "preference", "note": "Loves cats", "importance": 4}]
-        chat = await self.start([{**step("ok"), "diary": diary}, step("ok")], plugin={**QUIET, "diary": True})
-        await chat.say("I love cats")
-        await settle(self.core)
-        await chat.say("what do I love?")
-        await settle(self.core)
-        self.assertIn('"note": "Loves cats"', turn_context(self.adapter.calls[1]))
-
     async def test_mood_is_judged_by_her_own_model_and_told_once(self):
         # (how far it moves follows closeness: her creator's words count fully, a new acquaintance's a little)
         chat = await self.start([], companion={**MEMORY, "roles": {"discord:alice": "creator"}},
@@ -480,42 +468,72 @@ class CompanionTests(ChatEngineTests):
         self.assertEqual(moved[0]["keys"], ["memory", "mood"])
         self.assertIn("extensions/students/config.yml (mood)", moved[0]["to"])
 
-    async def test_voice_on_sends_short_replies_as_voice_messages(self):
-        chat = await self.start([step("晚安主人～做个好梦"), step("```python\nprint(1)\n```")],
-                                plugin={})
-        voice = plugin_module(self.core, "voice")
+
+class VoiceTests(unittest.IsolatedAsyncioTestCase):
+    """Her voice is her bot's: short answers in a chat switched on with `/voice on`, and her own first messages, also
+    come as voice messages, once per answer."""
+
+    def bot(self, voice=None):
+        from core.loader import import_extension
+        from tests.test_core_discord import FakeChannel
+        _, module = import_extension(PLUGIN)
+        self.module = __import__(module.__name__.rsplit(".", 1)[0] + ".bot", fromlist=["WhaleChanBot"])
+        bot = self.module.WhaleChanBot("whale_chan", "token", Path(tempfile.mkdtemp()),
+                                       voice={"enabled": True, **(voice or {})})
+        self.channel = FakeChannel(9, private=True)
+        bot.port = SimpleNamespace(bottle={}, log=lambda *a, **k: None, commands=lambda: [])
+        bot.port.bottle = type("Bottle", (dict,), {"set": dict.__setitem__})()
+        bot.client = SimpleNamespace(is_ready=lambda: True)
+        bot._channels["dm:1"] = self.channel
+        self.spoken = []
+
+        async def send_voice(channel, path):
+            self.spoken.append(path.read_bytes())
+            return SimpleNamespace(id=1)
+        bot._send_voice = send_voice
+        return bot
+
+    async def reply(self, bot, text, run="r1", to="m1", kind="text", file=None):
+        from contracts import Address, Reply
+        return await bot.deliver(Reply(Address("whale_chan", "dm:1"), kind, text, in_reply_to=to, run_id=run,
+                                       file=file))
+
+    async def test_voice_on_sends_short_answers_as_voice_messages_and_never_code(self):
+        bot = self.bot()
+        voice = sys.modules[self.module.__name__.rsplit(".", 1)[0] + ".voice"]
 
         def synthesize(self_, text, path):
-            path.write_bytes(b"OggS fake " + text.encode())
+            path.write_bytes(b"OggS " + text.encode())
             return path
+        self.assertEqual(bot._voice_command("dm:1", []), "🎙️ 语音回复现在是关着的（/voice on 或 /voice off）")
         with patch.object(voice.OpenAIVoice, "synthesize", synthesize), patch.dict(os.environ, {"OPENAI_API_KEY": "k"}):
-            await chat.say("/voice on")
-            await settle(self.core)
-            await chat.say("晚安")
-            await settle(self.core)
-            await chat.say("show code")
-            await settle(self.core)
-        self.assertEqual(self.texts(chat)[0], "🎙️ 好～之后人家会用语音回你！")
-        files = [reply.file for reply in chat.delivered if reply.kind == "file"]
-        self.assertEqual([file.name for file in files], [voice.VOICE_NAME])  # code is not read aloud
-        self.assertEqual(Path(files[0].path).read_bytes(), "OggS fake 晚安主人～做个好梦".encode())
-        self.assertIn("Voice replies are on in this chat", self.adapter.calls[0]["messages"][0]["content"])
+            await self.reply(bot, "晚安主人～做个好梦", run="r0")  # voice is off: text only
+            self.assertEqual(bot._voice_command("dm:1", ["on"]), "🎙️ 好～之后人家会用语音回你！")
+            await self.reply(bot, "晚安主人～做个好梦", run="r1")
+            await self.reply(bot, "and more of the same answer", run="r1")  # once per answer
+            await self.reply(bot, "```python\nprint(1)\n```", run="r2")  # code is not read aloud
+        self.assertEqual(self.spoken, ["OggS 晚安主人～做个好梦".encode()])
+        self.assertEqual(self.channel.texts()[:2], ["晚安主人～做个好梦", "晚安主人～做个好梦"])
 
-    async def test_no_second_voice_message_when_she_already_spoke(self):
-        chat = await self.start([step("Saying it.", "continue", [("whale_chan.speak", {"text": "晚安"})]),
-                                 step("晚安～")], plugin={})
-        voice = plugin_module(self.core, "voice")
+    async def test_her_own_first_message_is_spoken_and_no_second_voice_when_she_sent_one(self):
+        from contracts import FileRef
+        bot = self.bot()
+        voice = sys.modules[self.module.__name__.rsplit(".", 1)[0] + ".voice"]
+        with patch.object(voice.OpenAIVoice, "synthesize", lambda self_, text, path: (path.write_bytes(text.encode()),
+                                                                                       path)[1]), \
+                patch.dict(os.environ, {"OPENAI_API_KEY": "k"}):
+            await self.reply(bot, "主人～在干嘛呀", run="r1", to="speak-up-1-5")  # her impulse (voice off here)
+            bot._voice_command("dm:1", ["on"])
+            sent = Path(tempfile.mkdtemp()) / "voice-message.ogg"
+            sent.write_bytes(b"hers")
+            await self.reply(bot, "", run="r2", kind="file", file=FileRef(str(sent), voice.VOICE_NAME, "audio/ogg"))
+            await self.reply(bot, "晚安～", run="r2")  # she already spoke in this answer
+        self.assertEqual(self.spoken, ["主人～在干嘛呀".encode(), b"hers"])
 
-        def synthesize(self_, text, path):
-            path.write_bytes(text.encode())
-            return path
-        with patch.object(voice.OpenAIVoice, "synthesize", synthesize), patch.dict(os.environ, {"OPENAI_API_KEY": "k"}):
-            await chat.say("/voice on")
-            await settle(self.core)
-            await chat.say("说晚安给我听")
-            await settle(self.core)
-        self.assertEqual([Path(reply.file.path).read_bytes() for reply in chat.delivered if reply.kind == "file"],
-                         ["晚安".encode()])
+    async def test_without_her_voice_voice_on_says_so(self):
+        bot = self.bot()
+        bot.voice = None
+        self.assertIn("还没有设置好", bot._voice_command("dm:1", ["on"]))
 
 
 class SpeakUpRuleTests(unittest.TestCase):

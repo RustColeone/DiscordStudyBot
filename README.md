@@ -7,7 +7,7 @@ that touches a platform, decides what to say or does work is a module.
 ## Design in short
 
 * **The core stays small.** It runs conversations, approvals, routines and history. It knows no platform.
-* **Everything else is a module**: an interface (Discord), an engine (the assistant), or tools.
+* **Everything else is a module**: an interface (Discord), an engine (MomoChat, Chimera), the students, or tools.
 * **Don't touch the core if it can be a module.** If a module needs something new, add it to the
   contracts for every module, never for one platform.
 * **Interfaces translate.** A platform's habits (slash commands, threads, reactions) become the core's
@@ -48,8 +48,8 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 
 | | |
 |---|---|
-| Chat | The assistant engine (one persona), or the **room**: GPT, Gemini, Claude, DeepSeek and Grok sharing one work board, handing each other jobs, in parallel where independent |
-| Memory | Personas keep short notes about each person per conversation; `$memory` shows, forgets or clears yours |
+| Chat | **MomoChat**: one student or agent in a direct chat, or a group chat with GPT, Gemini, Claude, DeepSeek and Grok (those you call on answer, everyone for "you all", whose turn it is otherwise), handing each other parts of the work ("draw this", "search this") |
+| Students and agents | The five students are agents with their memory: each keeps what she knows of you, her mood and her bond with you (mneme-llm), wherever she speaks; `$alias` names one your way, `$bond` shows where each stands. An agent of your own is a prompt and its models in core.yml (`agents:`), with no memory |
 | Images | Attached and recent images are shown to the models; `$draw <prompt>` (Gemini or OpenAI) |
 | Web | `$search`, `$read <url>`, image search, Google Maps, `$wolfram` |
 | Video | `$video <url>` fitted to the upload limit; `$clip -u <url> -s 1:05 -e 1:20` then `$clip --confirm` |
@@ -60,9 +60,9 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (looking works in your private chats without asking; saving, opening and copying wait for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
-| Web UI | A chat page on your local network (`:4156`), no Discord needed: the five classmates in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
+| Web UI | MomoChat's page on your local network (`:4156`), no Discord needed: the five students in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
-| Workbench | Creator only: the club works on your code, HydraFusion-style. Each task is routed to one model, a cheap draft with a quality gate, or a draft reviewed by another model family; it is worked in its own git worktree and tested, and lands as one commit only after your second check and final approval. Before anything comes to you, a tester tries to break it against the request's acceptance criteria (the old code against the new). A page at `:4157`, `club` in any project folder, or remotely from a Discord channel. `venv/bin/python -m extensions.workbench` runs the core with just the Classroom (see [extensions/workbench](extensions/workbench/README.md)) |
+| Chimera | Creator only: the students work on your code together, HydraFusion-style. Each task is routed to one model, a cheap draft with a quality gate, or a draft reviewed by another model family; it is worked in its own git worktree and tested, and lands as one commit only after your second check and final approval. Before anything comes to you, a tester tries to break it against the request's acceptance criteria (the old code against the new). The Classroom page at `:4157`, `club` in any project folder, or remotely from a Discord channel. `venv/bin/python -m extensions.chimera` runs the core with just the Classroom (see [extensions/chimera](extensions/chimera/README.md)) |
 
 Reads and prepares run; writes and critical actions (sending elsewhere, changing settings, the shell)
 ask the owner, except what `permissions:` in core.yml lets run (by default anyone may use reminders,
@@ -86,7 +86,7 @@ bot as a web page on your local network.
   manager, engines, capabilities, storage) and its rules.
 * [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy, and which
   module to read for what.
-* Each module's own `README.md` (for example [extensions/room](extensions/room/README.md)): what it adds,
+* Each module's own `README.md` (for example [extensions/momochat](extensions/momochat/README.md)): what it adds,
   setup, how it is built, its tests and what to copy from it.
 * [plugins/README.md](plugins/README.md): external modules, settings and secrets.
 
@@ -139,7 +139,7 @@ module and modules never import the core ([`tests/test_core_boundaries.py`](test
 ```
 contracts/    public API between the core and modules
 core/         gateway, manager, providers, storage, loader
-extensions/   built-in modules (discord, cli, assistant, room, workbench, terminal, host, basic, media, images, web, reminders, system)
+extensions/   built-in modules (discord, cli, momochat, chimera, students, terminal, host, basic, media, images, web, reminders, system)
 plugins/      external modules (whale_chan example, wechat)
 tests/        tests and fixtures
 docs/         architecture, module guide, WeChat

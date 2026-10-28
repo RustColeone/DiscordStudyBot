@@ -1,15 +1,18 @@
 """Whale-chan (鲸酱): an example drop-in extension. Her own Discord bot, chatting like a personal AI web client
-(ChatGPT, Claude) inside the app. She is the DeepSeek student: the bot is one more way to reach her, as MomoChat and
-the room are, and what she is (her prompt, name, models) and remembers (the companion) is the same everywhere.
+(ChatGPT, Claude) inside the app: a frontend of MomoChat. She is the DeepSeek student: the bot is one more way to
+reach her, as MomoChat's other pages are, and what she is (her prompt, name, models) and remembers (her memory) is
+the same everywhere.
 
 Drop this folder into `plugins/` (it already is), put the bot token in `.env` as
 DISCORD_BOT_TOKEN_WHALE_CHAN (or in this folder's config.yml) and restart: the core loads it without
-changes to core.yml. Without a token the `chat` engine still loads, so it can be assigned to any conversation.
+changes to core.yml. Without a token only her voice loads.
 
-It contributes: the `whale_chan` interface (the Discord bot), the `chat` engine, her voice (`whale_chan.speak`) and
-defaults for its own conversations (`whale_chan:*` uses the chat engine with the DeepSeek student; in servers it
-answers mentions and replies; every write and critical action asks the owner first, with no exceptions, in case she
-misread a request or a page tried to trick her). core.yml settings win over all of these.
+It contributes: the `whale_chan` interface (the Discord bot, which also speaks her short replies as voice messages
+where `/voice on` asks it to, and her own first messages), her voice (`whale_chan.speak`, for her model to call) and
+defaults for its own conversations (`whale_chan:*` is MomoChat with the DeepSeek student, as a chat client: complete
+answers, one thread until `/new`; in servers it answers mentions and replies; every write and critical action asks
+the owner first, with no exceptions, in case she misread a request or a page tried to trick her). core.yml settings
+win over all of these. Until 2026-10-27 it also had an engine of its own, `chat`: that is MomoChat's former name.
 """
 
 from __future__ import annotations
@@ -20,7 +23,6 @@ from contracts import Contributions, Extension, Setting
 
 from . import voice
 from .bot import WhaleChanBot
-from .engine import ChatEngine
 
 
 async def check_token(token: str) -> str:
@@ -44,8 +46,18 @@ MOVED = {"prompt": "extensions/students/deepseek/ (whale.md, prompt.md)",
          "models": "extensions/students/deepseek/student.yml (models)",
          "display_name": "extensions/students/deepseek/student.yml (display_name, aliases)",
          "call_owner": "extensions/students/config.yml (call_owner)",
-         "memory": "extensions/students/config.yml (memory), or `diary: true` here for the core diary",
-         "mood": "extensions/students/config.yml (mood)"}
+         "memory": "extensions/students/config.yml (memory)",
+         "mood": "extensions/students/config.yml (mood)",
+         "diary": "nowhere: a student's memory is the students module's"}
+# How MomoChat runs her chats: a chat client's, as her own engine did. Her settings of these names (effort,
+# max_steps, ...) win, and the assignment's own `options` over them.
+OPTIONS = {"style": "full", "effort": "high", "max_steps": 10, "max_tokens": 8000, "history_limit": 60,
+           "history_chars": 40000, "timeout_s": 240, "compact": False, "new_chat_text": "🐳 好的主人，新的对话开始啦～"}
+
+
+def chat_options(config) -> dict:
+    """MomoChat's options for her chats: OPTIONS, with her settings of the same names (and `tool_calls`)."""
+    return {**OPTIONS, **{key: config[key] for key in (*OPTIONS, "tool_calls") if key in config}}
 
 
 def flag(value, default: bool = False) -> bool:
@@ -65,32 +77,27 @@ def setup(context) -> Contributions:
         context.log("settings_moved", keys=sorted(moved), to=sorted(set(moved.values())))
     speech = dict(config.get("voice") or {})
     speaking = speech.get("enabled", True) is not False
-    engine = ChatEngine(max_steps=int(config.get("max_steps", 10)), history_limit=int(config.get("history_limit", 60)),
-                        history_chars=int(config.get("history_chars", 40000)), effort=str(config.get("effort", "high")),
-                        max_tokens=int(config.get("max_tokens", 8000)),
-                        new_chat_text=str(config.get("new_chat_text", "🐳 好的主人，新的对话开始啦～")),
-                        diary=flag(config.get("diary")), tool_calls=config.get("tool_calls", True) is not False,
-                        voice={"speak_up": speech.get("speak_up", True), "max_chars": int(speech.get("max_chars", 400))}
-                        if speaking else None)
-    contributions = {"engines": [engine], "capabilities": [voice.capability(speech)] if speaking else []}
+    capabilities = [voice.capability(speech)] if speaking else []
     token = str(config.get("token") or os.getenv(str(config.get("token_env", "DISCORD_BOT_TOKEN_WHALE_CHAN")), ""))
     token = token.strip().strip("\"'")
     if not token:
-        context.log("no_token", hint="the chat engine only; set the bot token to start the Discord bot")
-        return Contributions(**contributions)
-    assignment = {"engine": "chat", "personas": [persona],
+        context.log("no_token", hint="her voice only; set the bot token to start the Discord bot")
+        return Contributions(capabilities=capabilities)
+    custom = dict(config.get("assignment") or {})
+    assignment = {"engine": "momochat", "personas": [persona],
                   "budget": {"model_calls": 30, "tool_calls": 24, "seconds": 1800},
-                  **dict(config.get("assignment") or {})}
-    bot = WhaleChanBot(name, token, context.data_dir, config=config, persona=persona)
-    return Contributions(**contributions, interfaces=[bot],
+                  **custom, "options": {**chat_options(config), **dict(custom.get("options") or {})}}
+    bot = WhaleChanBot(name, token, context.data_dir, config=config, persona=persona,
+                       voice={**speech, "enabled": speaking})
+    return Contributions(capabilities=capabilities, interfaces=[bot],
                          assignments={f"{name}:*": assignment},
                          admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": True}},
                          permissions={f"{name}:*": {"tiers": {"write": "always-ask", "critical": "always-ask"}}})
 
 
-EXTENSION = Extension("whale_chan", setup, contracts="1", version="2", requires=("students",),
-                      description="Example drop-in: 鲸酱's own Discord bot, a personal AI chat client, speaking as the "
-                                  "DeepSeek student", settings=(
+EXTENSION = Extension("whale_chan", setup, contracts="1", version="3", requires=("students", "momochat"),
+                      description="Example drop-in: 鲸酱's own Discord bot, a personal AI chat client on MomoChat, "
+                                  "speaking as the DeepSeek student", settings=(
     Setting("token", "鲸酱's own Discord bot token (a second application in the Developer Portal)", "secret",
             env="DISCORD_BOT_TOKEN_WHALE_CHAN", check=check_token),
     Setting("persona", "The student her bot speaks as", "text", "deepseek"),

@@ -1,9 +1,9 @@
-# `webui`: the bot as a chat page on your local network
+# `webui`: MomoChat's page on your local network
 
 An external module (in `plugins/`, tracked in git, loaded like any other module) that serves a chat page
-from the bot itself. Open `http://<this computer>:4156` from a laptop or phone at home and talk to the
-bot without Discord: each chat is a conversation of the shared room (GPT, Gemini, Claude, DeepSeek and
-Grok) by default, with Markdown and LaTeX, files both ways, live "typing" lines, approval cards with
+from the bot itself: MomoChat's page. Open `http://<this computer>:4156` from a laptop or phone at home and talk to
+the students without Discord: each chat is a MomoChat conversation, a group chat with GPT, Gemini, Claude, DeepSeek
+and Grok by default, with Markdown and LaTeX, files both ways, live "typing" lines, approval cards with
 buttons, and a per-chat model menu. Whoever opens the page acts as the bot's creator.
 
 The user-level tour is in [plugins/README.md, "The web UI"](../README.md#the-web-ui). This README is
@@ -15,16 +15,16 @@ to connect the core to a new platform, especially one you host yourself.
 | Kind | Name | Details |
 | --- | --- | --- |
 | Interface | `webui` (renamable with the `interface` key) | `Display(markdown=True, edits=False, progress=True, quotes=False, files=True, max_upload_mb=50, max_text_chars=20000)`; the last two come from `max_upload_mb` and `max_text_chars`. No `operations`. |
-| Default assignment | `webui:*` | `{engine: room, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
+| Default assignment | `webui:*` | `{engine: momochat, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
 | Runtime assignments | `webui:<chat>` | One per chat started with some of the classmates (not all), set with `core.set_assignment` and removed with the chat (below). |
 | Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
-| Declares | `uses=("room", "students")` | Its chats need both (contracts 1.10). Without either the page still opens, its default assignment is left out, and starting a chat says that no engine is assigned. |
+| Declares | `uses=("momochat", "students")` | Its chats need both (contracts 1.10). Without either the page still opens, greyed: its default assignment is left out, the composer is off and a note says why, and MomoChat's tab is greyed in every page's places bar (its view and place say `off`, "not loaded"). |
 | Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the default chat (`classroom`) becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
 
 It contributes no engines, capabilities, personas, profiles or permissions. The five personas come from
-[`extensions/students`](../../extensions/students), and the `room` engine from [`extensions/room`](../../extensions/room).
+[`extensions/students`](../../extensions/students), and the `momochat` engine from [`extensions/momochat`](../../extensions/momochat).
 It reads them from the core (contracts 1.9): their display names and pictures from `port.personas()`, and where each
-stands with you from `port.facts()` (the `alias`, `bond` and `mood` any module publishes; the companion does),
+stands with you from `port.facts()` (the `alias`, `bond` and `mood` any module publishes; the students' memory does),
 polled every `places_poll_s` seconds while a page is open and sent as a `roster` event when it changes. A persona
 named by a former name of hers (`formerly`) is read as her, and at start her old chats and bubbles are renamed to
 her (`persona_renamed` in the audit log).
@@ -89,7 +89,7 @@ network (passphrase required).`
 See [plugins/README.md, "The web UI"](../README.md#the-web-ui) for what a person sees: the chat list,
 the class list with presence and the model menu, `@` mentions, the `$`/`/` command palette, work notes,
 files and approval cards. Messages you send are always direct and addressed to the bot
-(`is_direct=True`, `mentions_me=True`), so every chat behaves like a private conversation with the room.
+(`is_direct=True`, `mentions_me=True`), so every chat behaves like a private conversation with its students.
 
 **Who is in a chat.** `＋ New chat` opens a picker with the classmates (all ticked). Untick some to start
 a smaller chat; leave one for a direct message with her. The 💬 button on a classmate's card in the class
@@ -97,13 +97,13 @@ list also opens your direct message with her (the existing one if there is one).
 listed under their own heading in the sidebar, with her picture, and the class list shows only the
 chat's members.
 
-**How the room behaves here.** The web UI's assignment sets the room's `options`: each classmate reads
+**How MomoChat behaves here.** The web UI's assignment sets MomoChat's `options`: each classmate reads
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
 (`compact`), a message naming no one gets an answer from whoever's turn it is while the others may chime
 in or stay silent (`chime_in`). What GPT learns about you in the group chat she still knows in your
-direct messages with her, and on Discord: the companion module keeps one memory per student, whatever the
-chat. Change any of these under
-`assignment: {options: ...}` (see [the room's options](../../extensions/room/README.md#setup)).
+direct messages with her, and on Discord: every student keeps one memory of you, whatever the chat. A classmate
+may hand part of the work to another (`ask_classmate`: "draw this", "search this"), who answers after her. Change
+any of these under `assignment: {options: ...}` (see [MomoChat's options](../../extensions/momochat/README.md#setup)).
 With `chime_in`, a message to the whole class can take up to five model calls.
 
 ## How it works
@@ -119,7 +119,7 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | [`static/style.css`](static/style.css) | Layout and theme (light and dark). |
 | [`avatars/`](avatars/README.md) | Pictures of your own for the classmates (over the students' own), served at `/avatars/<key>`. |
 | [`static/cafe.html`](static/cafe.html), [`static/cafe.js`](static/cafe.js), [`static/cafe.css`](static/cafe.css) | The cafe: every student walking around a room (drawn, or a picture from `rooms/`); a tap opens her direct chat (`/#dm=<persona>`). The page comes with its data (`{{data}}`, JSON that never ends its script tag). |
-| [`static/places.js`](static/places.js) | The places bar on both pages: every place's `views` from the core's directory, sorted by `order` (the workbench keeps a copy). |
+| [`static/places.js`](static/places.js) | The places bar on both pages: every place's `views` from the core's directory, sorted by `order` (Chimera's page keeps a copy). |
 | [`rooms/`](rooms/README.md) | The cafe's preset room pictures, served at `/rooms/<file>`. |
 
 ### HTTP routes
@@ -212,8 +212,8 @@ The page uses the core's ordinary `$commands` instead of a private API, but keep
   `assigned` record existed is adopted into it (`_adopt`, also when deleting), so it is removed too. On stop, setups still waiting are given up at once and
   their chats kept for `_tidy`, so stopping never waits for the core.
 
-The core still records these commands like typed ones; the room leaves commands out of what its
-characters read. A runtime assignment copies the `webui:*` one when the chat is made, so later changes
+The core still records these commands like typed ones; MomoChat leaves commands out of what its
+speakers read. A runtime assignment copies the `webui:*` one when the chat is made, so later changes
 to `webui:*` (in core.yml or the config) do not reach chats started with some of the classmates.
 
 ### Rendering each reply kind
@@ -339,7 +339,7 @@ The classmates' diaries about you are the core's, filed per chat and read across
 peers and Host headers pass; that a message reaches the engine as the creator and the answer arrives
 live and stays in history; the quiet model menu (overview, choose, reset, no bubbles, a malformed model
 never sent); new chats as their own conversations titled by their first line; chats started with some
-classmates (with the room and fake models: only they answer, a message sent at once waits for the
+classmates (with MomoChat and fake models: only they answer, a message sent at once waits for the
 assignment, everything else is copied from `webui:*`, nothing shows in the chat), one classmate as a
 direct chat, the whole class or unknown names setting no assignment, deleting a chat removing its
 assignment, and a chat the core cannot staff not being kept; a message queued behind a failed setup not
@@ -347,7 +347,8 @@ reaching the whole class (from the same page or another); an assignment that lan
 given up being removed; and the start-up sweep removing only this page's own leftovers; pinning, ordering and
 deleting with files; approval cards and button presses; typing lines until a run speaks; files both
 ways and inline only for media; avatars and nothing else from the folders; refusal of other sites and
-rebound names, and the CSP; the passphrase flow and cookie flags; and the default room assignment.
+rebound names, and the CSP; the passphrase flow and cookie flags; the default MomoChat assignment; and the page
+greyed without MomoChat.
 
 ```bash
 venv/bin/python -m unittest tests.test_plugin_webui
@@ -381,5 +382,5 @@ See also: [docs/core/EXTENSIONS.md, Interfaces](../../docs/core/EXTENSIONS.md#in
 [Delivering replies](../../docs/core/EXTENSIONS.md#delivering-replies),
 [docs/core/ARCHITECTURE.md](../../docs/core/ARCHITECTURE.md),
 [plugins/README.md](../README.md), [`extensions/cli`](../../extensions/cli/README.md) (the smallest
-interface), [`extensions/room`](../../extensions/room) (the engine behind the classmates),
+interface), [`extensions/momochat`](../../extensions/momochat) (the engine behind the classmates),
 [`extensions/discord`](../../extensions/discord/interface.py) (a full platform).

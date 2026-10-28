@@ -64,6 +64,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             "extensions": paths,
             "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo", **(settings or {})}},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in STUDENTS},
+            "agents": {"q": {"display_name": "Q", "prompt": "You are Q.", "profile": "none"}},  # no model to answer
             "assignments": {"webui:*": {"engine": "probe", "personas": ["p"]}}})
         self.web = iface(self.core, "webui")
         self.base = f"http://127.0.0.1:{self.web.port_number}"
@@ -473,15 +474,15 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
 
     # ---- who is in a chat -----------------------------------------------------------------------------
     async def start_room(self):
-        """The web UI with its own default (the room and the five classmates) and a fake model for each."""
+        """The web UI with its own default (MomoChat and the five students) and a fake model for each."""
         spoke = []
 
         def model(messages, schema):
             import re
             speaker = re.search(r"Your name here is (\w+)", messages[0]["content"]).group(1)
             spoke.append(speaker)
-            return {"status": "complete", "message": f"Hi from {speaker}", "work_note": "", "actions": [], "jobs": []}
-        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(ROOT / "extensions" / "students"), str(PLUGIN)]
+            return {"status": "complete", "message": f"Hi from {speaker}", "actions": []}
+        paths = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "students"), str(PLUGIN)]
         self.core = await start_core(self.tmp, {
             "extensions": paths,
             "extension_config": {"webui": {"host": "127.0.0.1", "port": 0, "user_name": "Leo"}},
@@ -509,7 +510,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(chat for chat in chats if chat["id"] == "chat-two")["personas"], ["gpt", "claude"])
         assigned = self.assignment("chat-two")
         self.assertEqual((assigned["pattern"], assigned["engine"], assigned["personas"]),
-                         ("webui:chat-two", "room", ["gpt", "claude"]))
+                         ("webui:chat-two", "momochat", ["gpt", "claude"]))
         self.assertEqual(assigned["options"]["chime_in"], True)  # everything else as the web UI's
         self.assertEqual(assigned["budget"]["model_calls"], 40)
         await settle(self.core)
@@ -632,7 +633,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_at_start_only_this_pages_own_leftover_assignments_are_removed(self):
         await self.start_room()
-        mine = {"engine": "room", "personas": ["gpt"]}
+        mine = {"engine": "momochat", "personas": ["gpt"]}
         for chat in ("dm-gone", "dm-kept", "set-by-hand"):
             self.core.manager.set_assignment(f"webui:{chat}", mine)
         self.web.store.ensure("dm-kept", "GPT", ["gpt"])
@@ -768,7 +769,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_deleting_a_chat_from_before_the_record_still_removes_its_assignment(self):
         await self.start_room()
-        self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["gpt"]})
+        self.core.manager.set_assignment("webui:dm-old", {"engine": "room", "personas": ["gpt"]})  # (its old name)
         self.web.store.ensure("dm-old", "GPT", ["gpt"])  # made by an older version: not in `assigned`
         ws, _ = await self.socket()
         await ws.send_json({"type": "delete", "conversation": "dm-old"})
@@ -780,7 +781,21 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.assignment("dm-old")["pattern"], self.web.store.assigned()), ("webui:*", []))
         await ws.close()
 
-    async def test_the_room_is_the_default_for_its_conversations(self):
+    async def test_without_momochat_the_page_opens_greyed_and_says_so(self):
+        paths = [path for path in make_config(self.tmp).raw["modules"]["paths"] if not path.endswith("momochat")]
+        self.core = await start_core(self.tmp, {
+            "extensions": [*paths, str(ROOT / "extensions" / "students"), str(PLUGIN)],
+            "extension_config": {"webui": {"host": "127.0.0.1", "port": 0}}})
+        self.web = iface(self.core, "webui")
+        self.base = f"http://127.0.0.1:{self.web.port_number}"
+        self.assertNotIn("webui:*", self.core.manager.assignments)  # its default named MomoChat: set aside
+        ws, state = await self.socket()
+        self.assertFalse(state["momochat"])
+        view = next(item for item in state["here"]["views"] if item["name"] == "MomoChat")
+        self.assertEqual((view.get("off"), state["here"]["place"]["note"]), (True, "not loaded"))
+        await ws.close()
+
+    async def test_momochat_is_the_default_for_its_conversations(self):
         from core.loader import import_extension
         extension, _ = import_extension(PLUGIN)
 
@@ -792,7 +807,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             def log(*args, **kwargs):
                 pass
         contributions = extension.setup(Context())
-        self.assertEqual(contributions.assignments["webui:*"]["engine"], "room")
+        self.assertEqual(contributions.assignments["webui:*"]["engine"], "momochat")
         self.assertEqual(contributions.assignments["webui:*"]["personas"],
                          ["gpt", "gemini", "claude", "deepseek", "grok"])
         self.assertFalse(contributions.admission["webui:*"]["require_mention_in_groups"])

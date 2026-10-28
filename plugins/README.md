@@ -36,9 +36,9 @@ for its own interfaces. See [docs/core/EXTENSIONS.md](../docs/core/EXTENSIONS.md
 
 ## The example: `whale_chan` (鲸酱)
 
-Her own Discord bot that chats like a personal AI web client (ChatGPT, Claude). She is the DeepSeek student, the
-whale girl of the club, and the bot is one more way to reach her: the same character, models and memory as in the
-room or MomoChat.
+Her own Discord bot that chats like a personal AI web client (ChatGPT, Claude): a frontend of MomoChat, the
+conversation harness. She is the DeepSeek student, the whale girl of the club, and the bot is one more way to reach
+her: the same character, models and memory as in MomoChat's web page or the main bot.
 
 * each DM or channel is one ongoing thread; send `/new` to start a fresh one;
 * full Markdown answers, math rendered as images, image attachments understood;
@@ -47,9 +47,9 @@ room or MomoChat.
 * she asks before every write or critical action (`always-ask`, no exceptions), in case she misread a
   request or a page tried to trick her; when you asked in your DM with her, the question comes from her,
   in that DM;
-* her memory of each person and her mood are the [companion's](../extensions/companion/README.md), as every
-  student's: one [mneme-llm](../../mneme-llm/README.md) file for DeepSeek, wherever you talk with her, so switching
-  her model or the way you reach her keeps what she knows;
+* her memory of each person and her mood are hers as a student ([the students module](../extensions/students/README.md)):
+  one [mneme-llm](../../mneme-llm/README.md) file for DeepSeek, wherever you talk with her, so switching her model
+  or the way you reach her keeps what she knows;
 * speaking up first now and then (off until you turn it on with `/speakup`; it starts as a dry run);
 * her voice: `/voice on` turns her short replies into Discord voice messages (OpenAI speech; Piper, a
   local voice, is optional);
@@ -65,21 +65,22 @@ To run it:
    or her voice (her models and personality are in `extensions/students/deepseek/`).
 4. Restart the bot. DM her, or mention her in a server.
 
-Without a token only the `chat` engine loads; assign it anywhere in core.yml, for example
-`"discord:123": {engine: chat, personas: [deepseek]}`.
+Without a token only her voice loads. To have the main bot talk with her the same way somewhere, assign MomoChat
+with her chats' options in core.yml, for example
+`"discord:123": {engine: momochat, personas: [deepseek], options: {style: full, effort: high}}`.
 
 ## The web UI
 
-[`webui`](webui) is the bot as a chat page on your local network, for when you would rather not set up
+[`webui`](webui) is MomoChat's page on your local network, for when you would rather not set up
 Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
 printed at startup) from a laptop or phone at home:
 
-* each chat is a conversation of the shared room by default: GPT, Gemini, Claude, DeepSeek and Grok,
+* each chat is a MomoChat group chat by default: GPT, Gemini, Claude, DeepSeek and Grok,
   each in their own bubble with their own picture (the students module's; drop `gpt.png` and so on into
   [`webui/avatars/`](webui/avatars/README.md) to use others);
 * the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
-  click someone, or type `@`, to ask them directly (`@GPT …` gets GPT's answer alone); with the companion,
-  each card also shows your name for her, her bond with you (♥ and her closeness) and her mood;
+  click someone, or type `@`, to ask them directly (`@GPT …` gets GPT's answer alone); each card also shows your
+  name for her, her bond with you (♥ and her closeness) and her mood, from her memory;
 * under each classmate, the model she answers with in this chat; click it (again to close) to choose
   another of the models the providers offer, or her own again (this is `$model`, for admins, asked in the
   background and kept per chat); each of her messages shows the model that wrote it;
@@ -90,8 +91,10 @@ printed at startup) from a laptop or phone at home:
   pin, move or delete (deleting removes its messages and files from the page; the core keeps its history);
 * ＋ New chat asks who is in it: everyone, a few classmates, or one for a direct message (also 💬 on her
   card); direct messages have their own heading in the sidebar;
-* a message naming no one gets an answer from whoever's turn it is, and the others may chime in; long
-  chats are summarised as they scroll out of view, and the classmates remember you across every web chat.
+* a message naming no one gets an answer from whoever's turn it is, and the others may chime in; a classmate
+  may hand part of the work to another ("draw this", "search this"), who answers after her; long chats are
+  summarised as they scroll out of view, and the classmates remember you across every web chat;
+* without MomoChat (or the students) the page still opens, greyed, and says why.
 
 Whoever opens the page is the bot's creator, like the console. So it answers only the local network
 (private and link-local addresses, or `networks:`), refuses other websites in your browser and

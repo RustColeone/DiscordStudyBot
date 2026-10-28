@@ -110,10 +110,11 @@ class ShippedStudentsTests(unittest.TestCase):
         self.assertEqual(contributions.profiles["gpt"], mine)
         self.assertEqual(contributions.profiles["grok"][0], {"provider": "grok", "model": "grok-4-fast"})
 
-    def test_the_room_runs_them_and_notes_models_left_in_its_own_config(self):
-        _, room = load("room")
+    def test_momochat_runs_them_and_notes_models_left_in_the_rooms_config(self):
+        extension, momochat = load("momochat")
+        self.assertIn("room", extension.formerly)  # the room's config.yml is read as MomoChat's
         context = Context({"providers": {"grok": {"models_exclude": ["imagine"]}}})
-        contributions = room.setup(context)
+        contributions = momochat.setup(context)
         self.assertEqual((contributions.personas, contributions.providers, contributions.profiles), ((), {}, {}))
         self.assertEqual(context.logged, [("settings_moved", {"keys": ["providers"],
                                                               "to": "extensions/students/config.yml"})])

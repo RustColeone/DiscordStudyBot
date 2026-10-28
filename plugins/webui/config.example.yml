@@ -17,13 +17,13 @@ port: 4156                      # open http://<this computer's address>:4156
 # remote_access: true                      # clients beyond the local network, via the proxy, with a passphrase
 # trusted_proxies: [127.0.0.1, ::1]        # whose X-Forwarded-For / X-Forwarded-Proto are believed
 
-# Who answers: by default the shared room's five classmates (the room engine). The new-chat picker offers
+# Who answers: by default the five students, in MomoChat (the momochat engine). The new-chat picker offers
 # these; a chat with some of them (one: a direct message) gets its own assignment, removed with the chat.
 # personas: [gpt, gemini, claude, deepseek, grok]
 # classmates: [GPT, Gemini, Claude, DeepSeek, Grok]    # names of your own for them (default: the students')
 # assignment:
 #   budget: {model_calls: 40, tool_calls: 24, seconds: 900}
-#   options:                    # the room's options here (these are the web UI's defaults)
+#   options:                    # MomoChat's options here (these are the web UI's defaults)
 #     history_limit: 40         # messages read word for word; older ones go into the chat's summary
 #     compact: true
 #     chime_in: true            # a message naming no one: one answers, the others may join in
@@ -36,7 +36,7 @@ port: 4156                      # open http://<this computer's address>:4156
 # passphrase_env: WEBUI_PASSPHRASE   # the .env variable holding the passphrase
 # user_id: creator               # your sender ID in the core (owners are configured by it)
 
-# The Classroom next door (the workbench module): a mini map in the sidebar shows who is in the Classroom and who
+# The Classroom next door (Chimera's page): a mini map in the sidebar shows who is in the Classroom and who
 # waits at its door with an invitation; this server asks the Classroom on this machine every few seconds while a page
 # is open.
 # map: true                     # the mini map of the places other interfaces publish (the Classroom); false: none

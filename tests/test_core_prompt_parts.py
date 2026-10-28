@@ -12,8 +12,8 @@ from core.config import ConfigError, CoreConfig
 from core.manager.secrets import Secrets
 from core.prompts import PLACE_LIMIT, FileText, parts_for, render, with_parts
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core, turn_context
-from tests.test_core_room import NAMES, Script
-from tests.test_core_room import turn as room_turn
+from tests.test_momochat import NAMES, Script
+from tests.test_momochat import turn as room_turn
 
 ASSISTANT = {"assignments": {"*": {"engine": "assistant", "personas": ["p"]}}}
 
@@ -428,7 +428,7 @@ class RoomTests(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def start(self, script, personas=None):
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "room"), str(ROOT / "extensions" / "students")]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(ROOT / "extensions" / "students")]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "personas": personas or {},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},

@@ -62,9 +62,10 @@ def default_config() -> dict:
         # own profiles (the room: one per character).
         "profiles": {"default": DEFAULT_CHAIN},
         "personas": {"assistant": {"display_name": "Assistant", "profile": "default", "prompt": DEFAULT_PROMPT}},
+        # The core's own agent, answering in MomoChat (extensions/momochat) wherever nothing else is assigned.
         "assignments": {
-            "*": {"engine": "assistant", "personas": ["assistant"]},
-            "routine:*": {"engine": "assistant", "personas": ["assistant"],
+            "*": {"engine": "momochat", "personas": ["assistant"]},
+            "routine:*": {"engine": "momochat", "personas": ["assistant"],
                           "budget": {"model_calls": 8, "tool_calls": 8, "seconds": 300}},
         },
         # Access (use), approval defaults per tier (tiers) and exceptions (rules); see ARCHITECTURE.md.

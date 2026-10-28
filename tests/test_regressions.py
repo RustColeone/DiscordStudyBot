@@ -792,16 +792,16 @@ class CoreRegressions(unittest.TestCase):
         self.assertEqual(gateway._published["lab"]["link"], "https://lab.example")
 
     def test_people_called_on_in_the_middle_are_addressed(self):
-        # Was: only the first and last segments counted, so "Luna, Gemini, what do you think?" left Gemini out.
-        from extensions.room.engine import RoomEngine
+        # Was: only the first and last segments counted, so "Luna, Gemini, what do you think?" left Gemini out (the
+        # room's rule then; MomoChat's group chats now).
+        from extensions.momochat.group import participants
         person = lambda name, shown: SimpleNamespace(name=name, display_name=shown)
-        session = SimpleNamespace(personas=[person("luna", "Luna"), person("gemini", "Gemini"), person("lulu", "露娜")])
-        engine = RoomEngine(aliases={})
+        personas = [person("luna", "Luna"), person("gemini", "Gemini"), person("lulu", "露娜")]
         for text in ("Luna, Gemini, what do you think?", "Luna, check v1.2. Gemini, check v1.3.",
                      "Ok Luna, so Gemini, what?", "Luna.\n\nGemini, thoughts?", "露娜，Gemini，帮我看看"):
-            addressed, _ = engine.participants(session, text)
+            addressed, _ = participants(personas, text, {})
             self.assertIn("gemini", addressed, text)
-        self.assertEqual(engine.participants(session, "Luna, what did Gemini and I do?"), (["luna"], ["gemini"]))
+        self.assertEqual(participants(personas, "Luna, what did Gemini and I do?", {}), (["luna"], ["gemini"]))
 
     def test_an_evidence_judge_sends_back_only_what_it_can_show_failing(self):
         # Found by measuring: both cascade send-backs in the cost experiment were correct drafts (all hidden tests

@@ -476,15 +476,15 @@ class DefaultConfigurationTests(unittest.TestCase):
         modules = config.modules()
         built_in = sorted(path.name for path in (ROOT / "extensions").iterdir() if (path / "extension.py").is_file())
         self.assertEqual([path.name for path in modules if config.builtin(path)], built_in)
-        self.assertTrue({"discord", "assistant", "terminal", "cli"} <= set(built_in))
+        self.assertTrue({"discord", "momochat", "chimera", "students", "terminal", "cli"} <= set(built_in))
         self.assertEqual(modules[:len(built_in)], [path for path in modules if config.builtin(path)])
         self.assertTrue({"wechat", "whale_chan"} <= {path.name for path in modules if not config.builtin(path)})
-        self.assertEqual(list(config.profiles), ["default"])  # the room ships its characters' own
+        self.assertEqual(list(config.profiles), ["default"])  # the students ship their own
         self.assertEqual(config.builtin_permissions["*"]["rules"]["reminders.create"], "auto")
         self.assertEqual(config.builtin_permissions["*"]["rules"]["discord.music"], "auto")
         self.assertEqual(config.builtin_permissions["routine:*"], {"use": ["basic.*"]})
         self.assertEqual(config.permissions, {})
-        self.assertEqual(config.assignments["*"].engine, "assistant")
+        self.assertEqual(config.assignments["*"].engine, "momochat")
         self.assertIsNone(config.control)
         with tempfile.TemporaryDirectory() as directory:
             override = Path(directory) / "core.yml"

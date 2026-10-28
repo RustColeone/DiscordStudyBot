@@ -103,7 +103,7 @@ def make_config(tmp: Path, overrides: dict | None = None) -> CoreConfig:
     raw = {
         "data_dir": str(tmp / "data"),
         "extensions": [str(FIXTURES / "fake"), str(FIXTURES / "probe"), str(FIXTURES / "tools"),
-                       str(ROOT / "extensions" / "basic"), str(ROOT / "extensions" / "assistant")],
+                       str(ROOT / "extensions" / "basic"), str(ROOT / "extensions" / "momochat")],
         "extension_config": {
             "fake": {"interfaces": {"chat": {"quotes": True, "max_upload_mb": 1},
                                     "owner": {"progress": True}}},
