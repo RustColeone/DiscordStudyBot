@@ -435,6 +435,39 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(seat["ready"] for seat in club.page._state()["team"]))
         self.assertEqual(club.board.get("ready")["grok"], True)
 
+    async def test_a_picked_team_takes_its_seats_on_its_models(self):
+        club = await self.club(DemoAdapter())
+        team = club.page._picked({"formation": "plan", "seats": {"planner": "gemini", "drafter": "grok"},
+                                  "tiers": {"planner": "cheap", "drafter": "fancy"}, "tester": False, "budget": "0.05"})
+        self.assertEqual(team, {"formation": "plan", "seats": {"planner": "gemini", "drafter": "grok"}, "tester": False,
+                                "tiers": {"planner": "cheap"}, "budget": 0.05})
+        task = f"t-team{time.time_ns() % 100000}"
+        club.board.create_task(task, f"classroom:{task}", "sample", "Sunday", request=SUNDAY, team=team,
+                               crew=["gemini", "grok"])
+        await club.say(task, SUNDAY, extra={"project": "sample", "workflow": "plan"})
+        steps = {step["id"]: step for step in club.board.steps(task)}
+        self.assertEqual((steps["r1.plan.1"]["seat"], steps["r1.execute.1"]["seat"]), ("gemini", "grok"))
+        plan_calls = [call for step in club.board.steps(task) if step["id"].startswith("r1.plan")
+                      for call in step["data"].get("calls", ())]
+        self.assertTrue(plan_calls and all(call["tier"] == "cheap" for call in plan_calls))  # her own model, as picked
+        view = club.page._task_view(club.task(task))
+        self.assertEqual(view["lineup"], [{"persona": "gemini", "role": "planner"}, {"persona": "grok", "role": "drafter"}])
+        self.assertEqual(view["data"]["team"]["budget"], 0.05)
+        self.assertGreater(view["spend"]["grok"]["calls"], 0)
+        self.assertIsNone(view["spend"]["grok"]["cost"])  # no prices configured
+
+    async def test_the_team_picker_refuses_a_team_that_does_not_hold(self):
+        club = await self.club(DemoAdapter())
+        for given in ({"formation": "plan", "seats": {"planner": "gemini"}},  # the builder's seat is empty
+                      {"formation": "alone", "seats": {"drafter": "nobody"}},
+                      {"formation": "relay", "seats": {"drafter": "grok"}},
+                      {"formation": "alone", "seats": {"drafter": "grok"}, "tester": True},  # a tester, but no seat for her
+                      "alone"):
+            self.assertIs(club.page._picked(given), False, given)
+        tested = club.page._picked({"formation": "alone", "seats": {"drafter": "grok", "tester": "gemini"}, "tester": True,
+                                    "budget": 1e9})
+        self.assertEqual((tested["seats"], tested["budget"]), ({"drafter": "grok", "tester": "gemini"}, 100.0))
+
     async def test_the_projects_own_agent_instructions_reach_the_drafter_and_the_judge(self):
         class Recording(DemoAdapter):
             seen: list = []

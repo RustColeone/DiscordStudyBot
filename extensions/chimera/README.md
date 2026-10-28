@@ -375,10 +375,27 @@ outside this repository); another round is another file there.
 
 Each page publishes its views in its directory status (`views`: name, icon, a path relative to its link, `order`),
 and every page draws one places bar from them (`static/places.js`). A student is in every place at once: the maps
-never take her out of one place while she works in another. The Classroom opens on its **sessions**: one strip each
-(open ones first), numbered like stages, with the students who took part (the task's `people`: who brought it, her
-crew, everyone who worked a step) faintly on its right, and **＋ New session**; a strip opens the session, and ‹ goes
-back. The page comes with its first hello inside (`{{state}}`), so the strips are there on the first paint.
+never take her out of one place while she works in another. The Classroom opens on its **sessions**: one card each
+(open ones first), with its status, the team on bookmark portraits (who held which seat, `lineup`), what it cost and
+how long it took. The page comes with its first hello inside (`{{state}}`), so the cards are there on the first paint.
+
+**A new session picks its team.** **New session** opens the team picker: the work (what to do, the project), the
+**formation** (Alone: one builder, the `single` workflow; Plan → build: a planner and a builder, `plan`; Draft →
+judge: a drafter, a judge and one who takes over, `cascade`), the **tester seat** (on or off for this session, over
+`verify: probe`), a student for each seat (her bookmark, her level, her model: her own or her strong one where she has
+one), and **This team**: the measured results when this exact team was benchmarked (`benchmarks/`), your sessions
+with it, the session's **budget**, the cheapest and the most-solved measured teams, and peak or off-peak prices.
+Starting sends the team with the task (`team`: `{formation, seats, tiers, tester, budget}`, checked against the
+formation's roles and the seats): the engine seats the picked classmate first in her role whatever her family (never
+as her own reviewer), on the picked model, and runs the tester only when the seat is on.
+
+**After a session, its report.** A session waiting for you or done opens on its report: what each student said, the
+signals that need no answer key (the project's tests, the tester, not stuck, confined), the change (its files, the
+diff a click away), what it took (time, cost and the peak price, the budget, each student's calls, tokens and cost,
+the share from the cache) and **your call**: the second check and the final approval as their cards (every box
+ticked first), send back with a note (another round on the same change set), or discard. Landing counts toward the
+next level of everyone who worked on it. "See the whole session" opens the timeline and the inspector, as a session
+at work shows.
 
 What the characters say still uses the old names ("the lab" for the Classroom, "the classroom" for MomoChat), since
 that wording is part of their prompts; renaming it is proposed separately.

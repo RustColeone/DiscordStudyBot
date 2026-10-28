@@ -39,14 +39,15 @@ The first message is `{"type": "hello", "state": {...}}`:
 | Key | What |
 | --- | --- |
 | `title`, `user` | The Classroom's title; you (`{"name"}`). |
-| `team` | Classmates: `persona`, `name`, `family`, `voice`, `avatar`, `cheap`, `strong`, `ready` (true or false: has a model key; null if unknown). |
+| `team` | Classmates: `persona`, `name`, `family`, `voice`, `avatar`, `cheap`, `strong` (empty when she has no strong model of her own), `ready` (true or false: has a model key; null if unknown), `alias` (your name for her, a module's `alias` fact), `level` (record.py), `alone` (her measured run alone, or null). |
+| `benchmarks`, `formations` | The measured teams (`benchmarks/*.json`); the team picker's formations, each its roles. |
 | `roles` | Role → ordered seat names. |
 | `projects` | `{name, path, test, test_line, link, land, source, detected}` each. |
 | `tasks` | Task views (below), newest first. |
 | `workflows` | `{name, title, text}` each: `auto` and every workflow in `workflows/`. |
 | `places` | `{"here": this Classroom as a place, "others": [places other interfaces published]}`; `links`: interface → its link. |
 | `progress` | Task → live "typing" lines. |
-| `settings`, `prices`, `avatars`, `page` | The second-check and commands settings; the price list; picture keys; whether the page is on. |
+| `settings`, `prices`, `avatars`, `page` | The second-check, commands and confinement settings (`command_network`, `command_filesystem`); the price list; picture keys; whether the page is on. |
 
 ### A task view
 
@@ -57,8 +58,11 @@ The first message is `{"type": "hello", "state": {...}}`:
 - `data`: `request`, `route`, `requirements` (the acceptance criteria: `{id, text, kind}`), `change`, `validation`,
   `review` (with per-criterion verdicts), `verification` (what the tester tried and found), `summary`, `totals`
   (calls, tokens, cost), `plan`, `branch`, `base`, `worktree`, `landed`, `failure`, `warning`, `invited`, `crew`,
-  `origin_address`, `reporting` (a report on its way), `reported` (`{at, to, status}`, once it was delivered), and
-  more.
+  `team` (the team picked for it), `origin_address`, `reporting` (a report on its way), `reported` (`{at, to,
+  status}`, once it was delivered), and more.
+- `lineup`: who held which seat, `[{persona, role}]`: the picked team's seats, else the roles played (the router
+  aside). `spend`: per classmate, `{calls, input_tokens, cached_input_tokens, output_tokens, cost, models}` (`cost`
+  None while any of her calls has no price).
 - `approval`: the approval the task waits for now, or null: `{id, capability, kind, tier, summary, command,
   message}` (`message`: the approval card's message ID), and for the second check `{fingerprint, checklist: [{id,
   label, ticked}], remaining}`. It is never one decided elsewhere (typed, in Discord) or expired with its run (the
@@ -90,7 +94,7 @@ falls behind and is disconnected; it reconnects and gets a new `hello`.
 
 | Type | Fields | Does |
 | --- | --- | --- |
-| `start` | `id`, `project`, `text`, `workflow` (a name from `workflows`), `crew` (seat names) | A new task. |
+| `start` | `id`, `project`, `text`, `workflow` (a name from `workflows`), `crew` (seat names); or `team` instead of both: `{formation, seats: {role: seat}, tiers: {role: cheap\|strong}, tester, budget}` | A new task. A `team` (the team picker) is checked against its formation's roles (`formations` in `hello`: alone, plan, cascade, plus `tester` when it is on) and the seats; its formation is the workflow and its seats come along. |
 | `send` | `id`, `task`, `text`, `action` (a button's label, optional) | Your message to a task: more work, an answer, or a `$command` such as `$approve <id>` (with `action`, the page shows it as a choice). |
 | `accept` | `id`, `task`, `text` (the brief), `project`, `workflow`, `crew` | Take up an invitation (status `invited`; it is `queued` at once, so a second accept is refused). |
 | `load` | `task` | A task's steps and messages, answered with `loaded` in order with the events: an event sent before the snapshot is in it, one sent after comes after it. |

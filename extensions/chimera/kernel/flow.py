@@ -328,7 +328,8 @@ class Round:
         is announced and replaced. `gone`: (seat, reason, stuck) of one who was asked by name and could not go on (her
         replacement is announced, and she is not asked again)."""
         ctx = self.ctx
-        tier = tier or ("strong" if role in ("strong", "critic") else "cheap")
+        # the model picked for this seat on the page wins; else the workflow's, else the role's usual
+        tier = ctx.pinned_tier(role) or tier or ("strong" if role in ("strong", "critic") else "cheap")
         candidates = [seat for seat in self.lineup(role, avoid, not_seat) if not gone or seat.persona != gone[0].persona]
         chosen = ctx.done.get(f"{key}.seat")
         if chosen:  # replaying: the seat that already answered here
@@ -501,8 +502,10 @@ class Round:
     def lineup(self, role: str, avoid: str | None = None, not_seat: str | None = None) -> list[Seat]:
         """Who may take `role`, best first: its list (the crew first), then its sibling role's, then anyone else
         in the club; another family than `avoid` before the rest, and `not_seat` (the drafter) last, or for a
-        review not at all. Seats known to have no key are left out, unless nobody has one."""
+        review not at all. Seats known to have no key are left out, unless nobody has one. The classmate you seated in
+        the role for this session comes first, whatever her family (never as her own reviewer)."""
         ctx = self.ctx
+        pinned = ctx.pinned(role)
         order = [*ctx.candidates(role), *ctx.candidates(SIBLING.get(role, role)),
                  *(seat for seat in ctx.team.seats.values() if seat.persona in ctx.present)]
         rank = {}
@@ -512,7 +515,8 @@ class Round:
         seats = [ctx.team.seats[persona] for persona in rank
                  if not (role in ("judge", "critic") and persona == not_seat)]  # never her own reviewer
         ready = [seat for seat in seats if ctx.able(seat)] or seats
-        return sorted(ready, key=lambda seat: (avoid is not None and seat.family == avoid,
+        return sorted(ready, key=lambda seat: (pinned is None or seat.persona != pinned.persona,
+                                               avoid is not None and seat.family == avoid,
                                                not_seat is not None and seat.persona == not_seat,
                                                rank[seat.persona][0], rank[seat.persona][1]))
 

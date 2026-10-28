@@ -20,6 +20,7 @@ def chimera(name):
 
 record = chimera("record")
 Board = chimera("board").Board
+verify = chimera("kernel.verify")
 
 
 class FakeFacts:
@@ -94,6 +95,19 @@ class RecordTests(unittest.TestCase):
         for number in range(3):
             self.session(f"t{number}", "landed", "gpt")
         self.assertEqual((facts.values[("gpt", "record")]["level"], facts.values[("gpt", "record")]["landed"]), (2, 3))
+
+
+class TesterSwitchTests(unittest.TestCase):
+    def test_the_tester_seat_switch_of_a_picked_team_wins_over_the_setting(self):
+        outcome = SimpleNamespace(kind="change", ok=True, change={"files": [{"path": "a.py"}]})
+        tiny = SimpleNamespace(signals={"size": "tiny"}, requirements=[])
+        def ctx(team, probe="auto"):
+            return SimpleNamespace(picked=lambda: team, settings={"verify": {"probe": probe}})
+        self.assertFalse(verify.wanted(ctx({}), tiny, outcome))  # auto: a tiny change goes untested
+        self.assertTrue(verify.wanted(ctx({"tester": True}), tiny, outcome))  # switched on for the session
+        self.assertFalse(verify.wanted(ctx({"tester": False}, probe=True), tiny, outcome))  # switched off
+        nothing = SimpleNamespace(kind="change", ok=True, change={"files": []})
+        self.assertFalse(verify.wanted(ctx({"tester": True}), tiny, nothing))  # nothing changed: nothing to test
 
 
 if __name__ == "__main__":

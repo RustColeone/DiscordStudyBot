@@ -147,7 +147,10 @@
         state.steps.set(taskId, new Map(event.steps.map((step) => [step.id, step])));
         state.messages.set(taskId, new Map(event.messages.map((item) => [item.id, item])));
         state.loaded.add(taskId);
-        if (state.current === taskId) { renderHeader(); renderComposer(); render(true); if (isOpen("inspector")) renderInspector(); }
+        if (state.current === taskId) {
+          if (state.view === "report") renderReport();
+          else { renderHeader(); renderComposer(); render(true); if (isOpen("inspector")) renderInspector(); }
+        }
         return;
       }
       case "task": return taskChanged(event.task);
@@ -163,7 +166,7 @@
         const item = event.item;
         if (!state.loaded.has(item.task)) return;
         messagesOf(item.task).set(item.id, item);
-        if (item.task === state.current) schedule();
+        if (item.task === state.current) state.view === "report" ? renderReport() : schedule();
         return;
       }
       case "progress": {
@@ -182,6 +185,7 @@
         state.team = event.team;
         state.seats = new Map(event.team.map((seat) => [seat.persona, seat]));
         renderTeam(); renderComposer(); schedule();
+        if (state.view === "new") renderTeamPage();
         return;
       case "deleted":
         state.tasks.delete(event.id);
@@ -223,6 +227,7 @@
     state.projects = data.projects;
     state.settings = data.settings;
     state.prices = data.prices;
+    state.benchmarks = data.benchmarks || [];
     state.places = data.places;
     state.links = data.links || {};
     if (data.workflows) WORKFLOWS = data.workflows.map((item) => [item.name, item.title, item.text]);
@@ -243,7 +248,7 @@
     renderProjects();
     renderTeam();
     if (linked && state.tasks.has(linked)) open(linked, false);
-    else if (linked === "new") open(null, false);
+    else if (linked === "new") showTeamPage();
     else showList();
     showView();
   }
@@ -268,55 +273,105 @@
   const statusLine = (task) => task.status === "working" && task.phase ? task.phase
     : task.status === "invited" ? `${task.data?.invited?.by || nameOf(task.data?.invited?.lead) || "A classmate"} is waiting`
     : STATUS[task.status] || task.status;
+  // One of the Classroom's pages at a time: the sessions ("list"), a new session ("new"), a report ("report"), or the
+  // whole of one session ("task": the sidebar, the timeline and the inspector).
+  function showPage(view) {
+    state.view = view;
+    document.body.classList.toggle("view-list", view !== "task");
+    $("#sessions").hidden = view !== "list";
+    $("#team-page").hidden = view !== "new";
+    $("#report-page").hidden = view !== "report";
+  }
   function showList(tab) {
-    state.view = "list";
+    showPage("list");
     if (tab) state.sessionTab = tab;
-    document.body.classList.add("view-list");
-    $("#sessions").hidden = false;
     if (!VIEW_OF[location.hash.slice(1)]) history.replaceState(null, "", location.pathname + location.search);
     renderSessions();
     renderPlaces();
   }
-  function stripFace(seat) {
-    const picture = seat.avatar || seat.persona;
-    const face = paint(make("span", "strip-face"), seat.persona);
-    if (state.avatars.has(picture)) {
-      const image = make("img");
-      image.src = `avatars/${picture}`;
-      image.alt = "";
-      face.append(image);
-    } else {
-      face.textContent = (seat.name || "?").charAt(0).toUpperCase();
-    }
-    return face;
+  // ---- the new look: each student's plate colour, her bookmark portrait, your name for her ------------------------
+  const PLATES = { gpt: "#5a5296", gemini: "#683fa0", claude: "#9a4916", deepseek: "#2f4f9e", grok: "#6f5900",
+                   flash: "#1b6f9e", pro: "#3f4cb8" };
+  function plateOf(persona) {
+    if (PLATES[persona]) return PLATES[persona];
+    let hash = 0;
+    for (const char of String(persona || "")) hash = (hash * 31 + char.charCodeAt(0)) % 360;
+    return `hsl(${hash} 40% 36%)`;
   }
-  function strip(task, number) {
+  const COMPANIES = { openai: "OpenAI", deepseek: "DeepSeek", anthropic: "Anthropic", google: "Google", xai: "xAI" };
+  const called = (persona) => { const seat = state.seats.get(persona); return seat ? seat.alias || seat.name : String(persona || ""); };
+  const modelOf = (label) => String(label || "").split("/").slice(1).join("/") || String(label || "");
+  // A model's short name, as the seats' toggles show it: gpt-6-luna → luna, claude-sonnet-5-5 → sonnet.
+  function nick(label) {
+    const words = modelOf(label).split(/[-_.]/).filter((word) => /^[a-z]+$/i.test(word));
+    return words.length > 1 ? words[words.length - 1] : words[0] || modelOf(label);
+  }
+  function picture(persona) {
+    const seat = state.seats.get(persona);
+    const key = seat ? seat.avatar || seat.persona : persona;
+    return state.avatars.has(key) ? `avatars/${key}` : "";
+  }
+  // A bookmark: her portrait in a tall frame with a notch at the bottom, the frame in her colour (or another).
+  function bookmark(persona, className, { frame = "", grey = false } = {}) {
+    const outer = make("span", `bookmark ${className}`);
+    outer.style.setProperty("--plate", frame || plateOf(persona));
+    const inner = make("span", "bookmark-inner");
+    const source = picture(persona);
+    if (source) {
+      const image = make("img");
+      image.src = source;
+      image.alt = "";
+      if (grey) image.classList.add("is-grey");
+      inner.append(image);
+    } else {
+      inner.append(make("span", "bookmark-initial", called(persona).charAt(0).toUpperCase() || "?"));
+    }
+    outer.append(inner);
+    return outer;
+  }
+  // A role's name in a session: the drafter of a single or plan session is its builder.
+  const roleTitle = (role, workflow) => role === "drafter" && !["cascade", "critique"].includes(workflow) ? "builder"
+    : { planner: "planner", drafter: "drafter", judge: "judge", strong: "takes over", critic: "critic", tester: "tester" }[role] || role;
+  // What a role is called in a session: the drafter of a single or plan session builds.
+  function verbOf(role, workflow) {
+    if (role === "drafter") return ["cascade", "critique"].includes(workflow) ? "drafts" : "builds";
+    return { planner: "plans", judge: "judges", strong: "takes over", critic: "reviews", tester: "tests" }[role] || role;
+  }
+  const PILLS = { working: "working", queued: "working", review: "waiting", approved: "waiting", invited: "waiting",
+                  failed: "back", cancelled: "back", discarded: "back", landed: "done", answered: "done" };
+  function pillText(task) {
+    if (task.status === "working") return task.phase ? `Working · ${task.phase}` : "Working";
+    if (["review", "approved"].includes(task.status)) return "Waiting for you";
+    return statusLine(task);
+  }
+  function strip(task) {
     const item = make("li");
-    const button = make("button", `strip st-${task.status}${state.unread.has(task.id) ? " is-unread" : ""}`);
-    button.type = "button";
-    const people = (task.people || []).map((name) => state.seats.get(name)).filter(Boolean);
-    const art = make("span", "strip-art");
-    art.setAttribute("aria-hidden", "true");
-    art.append(...people.slice(0, 4).map(stripFace));
-    const top = make("span", "strip-top");
-    top.append(make("span", `chip st-${task.status}`, statusLine(task)), make("span", "strip-project", `📁 ${task.project}`));
+    const card = make("button", `session-card st-${task.status}${state.unread.has(task.id) ? " is-unread" : ""}`);
+    card.type = "button";
+    const top = make("span", "session-top");
+    top.append(make("span", `pill pill-${PILLS[task.status] || "done"}`, pillText(task)), make("span", "session-project", task.project));
+    const bottom = make("span", "session-bottom");
+    const seats = (task.lineup || []).length ? task.lineup : (task.people || []).map((persona) => ({ persona, role: "" }));
+    for (const { persona, role } of seats.slice(0, 4)) {
+      const holder = make("span", "session-seat");
+      holder.append(bookmark(persona, "is-small"),
+                    make("span", "session-seat-name", role ? `${called(persona)} ${verbOf(role, task.workflow)}` : called(persona)));
+      bottom.append(holder);
+    }
     const totals = task.data?.totals || {};
     const ended = ["queued", "working"].includes(task.status) ? Date.now() / 1000 : task.updated;
-    const meta = [task.workflow ? task.workflow[0].toUpperCase() + task.workflow.slice(1) : "",
-                  people.map((seat) => seat.name).join(", "),
-                  totals.cost != null && totals.calls ? money(totals.cost) : "",
-                  totals.calls ? span(Math.max(0, ended - task.created)) : "", ago(task.updated)].filter(Boolean);
-    const body = make("span", "strip-body");
-    body.append(top, make("span", "strip-title", task.title), make("span", "strip-meta", meta.join(" · ")));
-    button.append(art, make("span", "strip-no", String(number).padStart(2, "0")), body, make("span", "strip-go", "›"));
-    button.onclick = () => open(task.id);
-    item.append(button);
+    const cost = make("span", "session-cost");
+    cost.append(make("strong", "", totals.calls ? (totals.cost != null ? money(totals.cost) : "no price yet") : "—"),
+                make("span", "", totals.calls ? span(Math.max(0, ended - task.created)) : ago(task.updated)));
+    bottom.append(cost);
+    card.append(top, make("strong", "session-title", task.title), bottom);
+    card.onclick = () => open(task.id);
+    item.append(card);
     return item;
   }
   function renderSessions() {
     if (state.view !== "list") return;
     const all = [...state.tasks.values()];
-    const numbers = new Map([...all].sort((a, b) => a.created - b.created).map((task, index) => [task.id, index + 1]));
     const counts = { all: all.length, working: 0, waiting: 0, done: 0 };
     for (const task of all) counts[groupOf(task)] += 1;
     $("#session-tabs").replaceChildren(...Object.entries(GROUPS).map(([key, label]) => {
@@ -338,11 +393,11 @@
       $("#strips").replaceChildren(empty);
       return;
     }
-    $("#strips").replaceChildren(...shown.map((task) => strip(task, numbers.get(task.id))));
+    $("#strips").replaceChildren(...shown.map((task) => strip(task)));
   }
   $("#sessions-search").addEventListener("input", renderSessions);
-  $("#add-session").onclick = () => open(null);
-  $("#add-fab").onclick = () => open(null);
+  $("#add-session").onclick = () => showTeamPage();
+  $("#add-fab").onclick = () => showTeamPage();
   $("#back-to-sessions").onclick = () => showList();
   window.addEventListener("hashchange", () => { if (VIEW_OF[location.hash.slice(1)]) showView(); else renderPlaces(); });
 
@@ -353,7 +408,10 @@
     if (document.hidden && task.status === "review" && before?.status !== "review") document.title = `● ${state.title}`;
     renderSidebar();
     renderSessions();
-    if (task.id === state.current) {
+    if (task.id === state.current && state.view === "report") {
+      if (REPORTED.has(task.status)) renderReport();
+      else open(task.id, false);  // sent back: working again, shown live
+    } else if (task.id === state.current) {
       renderHeader();
       renderComposer();
       schedule();
@@ -361,6 +419,562 @@
       if (state.diff && state.diff.task === task.id && state.diff.fingerprint !== fingerprint) state.diff.stale = true;
       if (isOpen("inspector")) renderInspector();
     }
+  }
+
+  // ---- a new session: the work, then the team --------------------------------------------------------------
+  // The picker's seats, as the design names them (`role` is the engine's: the builder of Alone and Plan is its drafter).
+  const SEATS = {
+    planner: { title: "Planner", verb: "plans", tier: "strong", role: "planner", does: "Reads the task and writes the plan. Writes no code." },
+    builder: { title: "Builder", verb: "builds", tier: "cheap", role: "drafter", does: "Makes the change in her own worktree." },
+    drafter: { title: "Drafter", verb: "drafts", tier: "cheap", role: "drafter", does: "Writes a cheap first draft." },
+    judge: { title: "Judge", verb: "judges", tier: "cheap", role: "judge", does: "Reads the draft and its test results." },
+    strong: { title: "Takes over", verb: "takes over", tier: "strong", role: "strong", does: "Redoes a draft the judge turned down." },
+    tester: { title: "Tester", verb: "tests", tier: "cheap", role: "tester", does: "Tests the change against the base version." },
+  };
+  const FORMATIONS = { alone: ["builder"], plan: ["planner", "builder"], cascade: ["drafter", "judge", "strong"] };
+  const FORMATION_TITLES = { alone: "Alone", plan: "Plan → build", cascade: "Draft → judge" };
+  const REPORTED = new Set(["review", "approved", "landed", "discarded", "failed", "answered", "cancelled"]);
+  const able = (persona) => state.seats.get(persona)?.ready !== false;
+  function usual(seatName) {  // who usually takes a seat: the first of its role's order who has a key
+    const order = [...(state.roles?.[SEATS[seatName].role] || []), ...state.team.map((seat) => seat.persona)];
+    return order.find((persona) => state.seats.has(persona) && able(persona)) || state.team[0]?.persona || "";
+  }
+  function pick() {
+    if (!state.pick) {
+      state.pick = { formation: store.get("chimera.formation", "plan"), tester: false, choosing: "", seats: {}, tiers: {},
+                     budget: Number(store.get("chimera.budget", "0.10")) || 0.10, unit: "usd", peak: false, text: "" };
+      if (!FORMATIONS[state.pick.formation]) state.pick.formation = "plan";
+    }
+    const chosen = state.pick;
+    for (const seatName of Object.keys(SEATS)) {
+      if (!state.seats.has(chosen.seats[seatName])) chosen.seats[seatName] = usual(seatName);
+    }
+    return chosen;
+  }
+  const seatList = (chosen) => [...FORMATIONS[chosen.formation], ...(chosen.tester ? ["tester"] : [])];
+  const tierOf = (chosen, seatName) => chosen.tiers[seatName] || SEATS[seatName].tier;
+  const hasStrong = (persona) => Boolean(state.seats.get(persona)?.strong);
+  const modelFor = (chosen, seatName) => {
+    const seat = state.seats.get(chosen.seats[seatName]);
+    if (!seat) return "";
+    return modelOf(tierOf(chosen, seatName) === "strong" && seat.strong ? seat.strong : seat.cheap);
+  };
+  // The money a session costs, in dollars or in stamina points (1,000 points to the dollar).
+  const priced = (chosen, dollars) => dollars == null ? "—" : chosen.unit === "pts" ? `${Math.round(dollars * 1000)} pts`
+    : `$${dollars < 1 ? dollars.toFixed(3) : dollars.toFixed(2)}`;
+  // The measured team this one is, if any: same formation, tester, students in the same seats on the same models.
+  function measured(chosen) {
+    if (chosen.formation === "cascade") return null;
+    const list = seatList(chosen);
+    for (const summary of state.benchmarks || []) {
+      for (const team of summary.teams || []) {
+        const seats = team.seats || {};
+        if (team.formation !== chosen.formation || Boolean(seats.tester) !== chosen.tester) continue;
+        if (Object.keys(seats).length !== list.length) continue;
+        const same = list.every((seatName) => {
+          const holder = chosen.seats[seatName];
+          if (seats[seatName] !== holder) return false;
+          if (!hasStrong(holder)) return true;
+          return (team.tiers?.[holder] || "cheap") === tierOf(chosen, seatName);
+        });
+        if (same) return { ...team, summary };
+      }
+    }
+    return null;
+  }
+  const perSession = (team, peak) => (peak ? team.peak : team.offpeak) / Math.max(1, team.exercises || 1);
+  function measuredPicks() {  // the cheapest and the most solved teams whose students all have a key now
+    const teams = (state.benchmarks || []).flatMap((summary) => summary.teams || [])
+      .filter((team) => Object.values(team.seats || {}).every((persona) => state.seats.has(persona) && able(persona)));
+    const cheapest = [...teams].sort((a, b) => a.offpeak - b.offpeak)[0];
+    const most = [...teams].sort((a, b) => b.solved - a.solved || a.offpeak - b.offpeak)[0];
+    return { cheapest, most };
+  }
+  function useTeam(team) {  // take a measured team as it was run
+    const chosen = pick();
+    chosen.formation = team.formation;
+    chosen.tester = Boolean(team.seats?.tester);
+    for (const [seatName, persona] of Object.entries(team.seats || {})) {
+      chosen.seats[seatName] = persona;
+      if (hasStrong(persona)) chosen.tiers[seatName] = team.tiers?.[persona] || "cheap";
+    }
+    chosen.choosing = "";
+    renderTeamPage();
+  }
+  const teamLine = (chosen) => seatList(chosen).map((seatName) => {
+    const persona = chosen.seats[seatName];
+    const strong = hasStrong(persona) ? ` (${nick(tierOf(chosen, seatName) === "strong" ? state.seats.get(persona).strong : state.seats.get(persona).cheap)})` : "";
+    return `${called(persona)}${strong} ${SEATS[seatName].verb}`;
+  }).join(", ");
+
+  function showTeamPage() {
+    showPage("new");
+    state.current = null;
+    history.replaceState(null, "", "#new");
+    pick();
+    renderTeamPage();
+    renderPlaces();
+  }
+  function segmented(label, items, current, choose, small = false) {
+    const group = make("div", `segmented${small ? " is-small" : ""}`);
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", label);
+    for (const [key, text] of items) {
+      const button = make("button", "", text);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(key === current));
+      button.onclick = () => choose(key);
+      group.append(button);
+    }
+    return group;
+  }
+
+  function renderTeamPage() {
+    if (state.view !== "new") return;
+    const chosen = pick();
+    const page = $("#team-page");
+    const list = seatList(chosen);
+    if (!list.includes(chosen.choosing)) chosen.choosing = list.includes("builder") ? "builder" : list[0];
+    const back = make("a", "back-link", "‹ Classroom");
+    back.href = "#";
+    back.onclick = (event) => { event.preventDefault(); showList(); };
+
+    // the work
+    const work = make("section", "panel task-panel");
+    work.append(make("div", "eyebrow", "New session"));
+    const text = make("textarea", "task-text");
+    text.rows = 2;
+    text.placeholder = "What should they do? Describe a change, or ask about the code…";
+    text.value = chosen.text;
+    text.setAttribute("aria-label", "The task");
+    text.oninput = () => { chosen.text = text.value; startButton.disabled = !text.value.trim(); };
+    const chips = make("div", "task-chips");
+    const project = make("select", "chip-select");
+    project.setAttribute("aria-label", "Project");
+    selectedProject();
+    project.append(...state.projects.map((item) => {
+      const option = make("option", "", `Project: ${item.source === "sample" ? `${item.name} (practice)` : item.name}`);
+      option.value = item.name;
+      option.selected = item.name === state.project;
+      return option;
+    }), Object.assign(make("option", "", "＋ Add a project…"), { value: "__add" }));
+    project.onchange = () => {
+      if (project.value === "__add") { openDialog("projects"); project.value = state.project || ""; return; }
+      state.project = project.value;
+      store.set("chimera.project", project.value);
+    };
+    chips.append(project, make("span", "chip-plain", "You approve every change before it lands"));
+    const ideas = selectedProject()?.source === "sample" ? SAMPLE_IDEAS : [];
+    work.append(text, chips);
+    if (ideas.length && !chosen.text) {
+      const row = make("div", "idea-row");
+      for (const idea of ideas.slice(0, 3)) {
+        const button = make("button", "idea", idea);
+        button.type = "button";
+        button.onclick = () => { chosen.text = idea; renderTeamPage(); };
+        row.append(button);
+      }
+      work.append(row);
+    }
+
+    // the formation and the seats
+    const main = make("div", "team-main");
+    const tools = make("div", "team-tools");
+    const switcher = make("button", "switch");
+    switcher.type = "button";
+    switcher.setAttribute("role", "switch");
+    switcher.setAttribute("aria-checked", String(chosen.tester));
+    switcher.append(make("span", "switch-track"), document.createTextNode("Tester seat"));
+    switcher.onclick = () => { chosen.tester = !chosen.tester; renderTeamPage(); };
+    tools.append(segmented("Formation", Object.entries(FORMATION_TITLES), chosen.formation, (key) => {
+      chosen.formation = key;
+      store.set("chimera.formation", key);
+      renderTeamPage();
+    }), switcher);
+    const seatsRow = make("div", "seat-row");
+    const maker = chosen.formation === "cascade" ? "drafter" : "builder";
+    list.forEach((seatName, index) => {
+      const persona = chosen.seats[seatName];
+      const seat = state.seats.get(persona);
+      const info = SEATS[seatName];
+      if (index > 0) {
+        const arrow = make("span", "seat-arrow");
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.textContent = "→";
+        seatsRow.append(arrow);
+      }
+      const column = make("div", "team-seat");
+      const button = make("button", "seat-button");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(chosen.choosing === seatName));
+      button.setAttribute("aria-label", `${info.title}: ${called(persona)}${chosen.choosing === seatName ? " (choosing)" : ""}`);
+      button.onclick = () => { chosen.choosing = seatName; renderTeamPage(); };
+      const frame = bookmark(persona, "is-seat", { frame: chosen.choosing === seatName ? "#d97a1e" : "#e4d4c0" });
+      const inner = frame.querySelector(".bookmark-inner");
+      inner.append(make("span", "seat-tag", info.title), make("span", "seat-level", `Lv ${seat?.level || 1}`));
+      const plate = make("span", "seat-plate");
+      plate.style.background = plateOf(persona);
+      plate.append(make("span", "seat-name", called(persona)),
+                   make("span", "seat-model", `${seat?.alias ? `${seat.name} · ` : ""}${modelFor(chosen, seatName)}`));
+      inner.append(plate);
+      button.append(frame);
+      column.append(button);
+      if (hasStrong(persona)) {
+        const tier = tierOf(chosen, seatName);
+        column.append(segmented(`${seat.name}'s model for the ${info.title.toLowerCase()}`,
+                                [["cheap", nick(seat.cheap)], ["strong", nick(seat.strong)]], tier,
+                                (value) => { chosen.tiers[seatName] = value; renderTeamPage(); }, true));
+      }
+      column.append(make("span", "seat-does", info.does));
+      const checks = seatName === "judge" ? "drafter" : seatName === "tester" ? maker : "";
+      if (checks) {
+        const other = state.seats.get(chosen.seats[checks]);
+        const same = other && seat && other.persona === seat.persona;
+        const family = other && seat && !same && other.family === seat.family;
+        const rule = make("span", `seat-rule${same || family ? " is-warn" : ""}`);
+        rule.textContent = same ? `She can't check her own ${SEATS[checks].title.toLowerCase()} work: another classmate will`
+          : family ? `Same company as the ${SEATS[checks].title.toLowerCase()}: allowed, but another company catches different mistakes`
+          : `Another company than the ${SEATS[checks].title.toLowerCase()}`;
+        column.append(rule);
+      }
+      seatsRow.append(column);
+    });
+    const people = make("div", "student-row");
+    for (const seat of state.team) {
+      const keyless = seat.ready === false;
+      const seatedIn = list.filter((seatName) => chosen.seats[seatName] === seat.persona).map((seatName) => SEATS[seatName].title);
+      const button = make("button", `student-pick${keyless ? " is-keyless" : ""}`);
+      button.type = "button";
+      button.disabled = keyless;
+      button.setAttribute("aria-label", keyless ? `${seat.name} has no model key here`
+        : `Seat ${called(seat.persona)} as ${SEATS[chosen.choosing].title}`);
+      const frame = bookmark(seat.persona, "is-pick", { frame: seatedIn.length ? "#d97a1e" : "#e4d4c0", grey: keyless });
+      const inner = frame.querySelector(".bookmark-inner");
+      inner.append(make("span", "pick-level", keyless ? "key?" : `Lv ${seat.level || 1}`));
+      const plate = make("span", "pick-plate", called(seat.persona));
+      plate.style.background = keyless ? "#6b5847" : plateOf(seat.persona);
+      inner.append(plate);
+      const alone = seat.alone;
+      const stat = keyless ? `Needs a ${COMPANIES[seat.family] || seat.family} key`
+        : alone ? `Alone${alone.model ? ` (${nick(alone.model)})` : ""}: ${(100 * alone.points / Math.max(1, alone.total)).toFixed(1)}%, ${priced(chosen, chosen.peak ? alone.session_peak : alone.session_offpeak)}`
+        : "Not measured yet";
+      button.append(frame, make("span", "pick-stat", stat), make("span", "pick-seated", seatedIn.join(", ")));
+      button.onclick = () => { if (!keyless) { chosen.seats[chosen.choosing] = seat.persona; renderTeamPage(); } };
+      people.append(button);
+    }
+    main.append(tools, seatsRow, make("h2", "row-title", "Students"),
+                make("p", "row-note", `Choose a seat above, then a student for it. Now choosing: ${SEATS[chosen.choosing].title}. ` +
+                                      "Nobody is ever busy: a student can sit in many sessions at once."), people);
+
+    // the estimate, the budget and the start
+    const aside = make("aside", "panel team-aside");
+    const head = make("div", "aside-head");
+    head.append(make("h2", "", "This team"), segmented("Units", [["usd", "Dollars"], ["pts", "Points"]], chosen.unit,
+                                                        (unit) => { chosen.unit = unit; renderTeamPage(); }, true));
+    aside.append(head, make("div", "team-line", teamLine(chosen)));
+    const team = measured(chosen);
+    if (team) {
+      aside.append(make("div", "eyebrow", `Benchmark · ${team.summary.name}, ${team.summary.about || ""} · ${team.summary.date}`));
+      const grid = make("dl", "stat-grid");
+      for (const [label, value] of [["Hidden-test points", `${(100 * team.points / Math.max(1, team.total)).toFixed(1)}%`],
+                                    ["Fully solved", `${team.solved} of ${team.exercises}`],
+                                    ["Cost a session", priced(chosen, perSession(team, chosen.peak))],
+                                    ["Median time", `${team.median_min} min`]]) {
+        const cell = make("div", "stat");
+        cell.append(make("dt", "", label), make("dd", "", value));
+        grid.append(cell);
+      }
+      aside.append(grid);
+    } else {
+      aside.append(make("p", "soft-note-box", "Nobody has measured this team yet. It can still run: its cost, its time and your " +
+                                              "verdict go into the logbook, and this panel fills in."));
+    }
+    const same = [...state.tasks.values()].filter((task) => {
+      const seats = task.data?.team?.seats || {};
+      return task.data?.team?.formation === chosen.formation && list.every((seatName) =>
+        seats[SEATS[seatName].role] === chosen.seats[seatName]);
+    });
+    const you = make("div", "aside-block");
+    you.append(make("div", "eyebrow", "With you"),
+               make("p", "", same.length ? `${same.length} session${same.length === 1 ? "" : "s"} with this team: ` +
+                                           `${same.filter((task) => task.status === "landed").length} landed. Landing a session also levels up the students in it.`
+                                         : "No sessions with this team in your logbook yet. Landing a session also levels up the students in it."));
+    aside.append(you);
+    const stamina = make("div", "stamina-box");
+    stamina.append(make("div", "stamina-title", "⚡ Stamina"));
+    const budget = make("label", "budget");
+    const field = make("input");
+    field.type = "number";
+    field.min = "0";
+    field.step = chosen.unit === "pts" ? "10" : "0.01";
+    field.value = chosen.unit === "pts" ? String(Math.round(chosen.budget * 1000)) : String(chosen.budget);
+    field.setAttribute("aria-label", "Budget for this session");
+    const estimate = team ? perSession(team, chosen.peak) : null;
+    const line = make("div", "budget-line");
+    const sayBudget = () => {
+      const within = estimate != null && estimate <= chosen.budget;
+      line.className = `budget-line ${within ? "is-ok" : "is-warn"}`;
+      line.textContent = estimate == null ? "Without an estimate, the session stops and asks when it reaches its budget."
+        : within ? `Estimate ${priced(chosen, estimate)}: within the budget. If it runs over, the session stops and asks.`
+        : `The estimate (${priced(chosen, estimate)}) is over this budget: the session will stop and ask before it goes past it.`;
+    };
+    field.oninput = () => {
+      const value = parseFloat(field.value);
+      chosen.budget = Number.isFinite(value) ? (chosen.unit === "pts" ? value / 1000 : value) : 0;
+      store.set("chimera.budget", String(chosen.budget));
+      sayBudget();
+    };
+    budget.append(make("span", "", "Budget for this session"), field);
+    sayBudget();
+    stamina.append(budget, make("div", "row-note", "Each student spends her own stamina; when one runs out for the day, " +
+                                                   "the session stops and asks before she spends more."), line);
+    aside.append(stamina);
+    const picks = measuredPicks();
+    const pickRow = make("div", "aside-block");
+    pickRow.append(make("div", "eyebrow", "Measured picks"));
+    for (const [label, choice] of [["Cheapest", picks.cheapest], ["Most solved", picks.most]]) {
+      if (!choice) continue;
+      const button = make("button", "measured-pick");
+      button.type = "button";
+      const names = Object.entries(choice.seats).map(([seatName, persona]) => `${called(persona)} ${SEATS[seatName]?.verb || seatName}`);
+      button.append(make("strong", "", `${label}: `), document.createTextNode(names.join(", ")));
+      button.onclick = () => useTeam(choice);
+      pickRow.append(button);
+    }
+    if (pickRow.children.length > 1) aside.append(pickRow);
+    const priceRow = make("div", "price-row");
+    priceRow.append(make("span", "row-note", chosen.peak ? "At DeepSeek's peak prices DeepSeek costs about twice as much; the others don't change."
+                                                         : "Off-peak prices. At peak hours DeepSeek costs about twice as much."),
+                    segmented("DeepSeek prices", [["off", "Off-peak"], ["peak", "Peak"]], chosen.peak ? "peak" : "off",
+                              (value) => { chosen.peak = value === "peak"; renderTeamPage(); }, true));
+    aside.append(priceRow);
+    const startButton = make("button", "start-button", "Start the session");
+    startButton.type = "button";
+    startButton.disabled = !chosen.text.trim();
+    startButton.onclick = () => startSession(chosen);
+    aside.append(startButton);
+
+    const columns = make("div", "team-columns");
+    columns.append(main, aside);
+    page.replaceChildren(back, work, columns);
+  }
+
+  function startSession(chosen) {
+    const text = chosen.text.trim();
+    const project = selectedProject();
+    if (!text) { toast("Describe the work first."); return; }
+    if (!project) { openDialog("projects"); toast("Add a project first."); return; }
+    const list = seatList(chosen);
+    const seats = {}, tiers = {};
+    for (const seatName of list) {
+      const role = SEATS[seatName].role;
+      seats[role] = chosen.seats[seatName];
+      if (hasStrong(chosen.seats[seatName])) tiers[role] = tierOf(chosen, seatName);
+    }
+    const id = uid();
+    state.sent.set(id, { text });
+    send({ type: "start", id, project: project.name, text,
+           team: { formation: chosen.formation, seats, tiers, tester: chosen.tester, budget: chosen.budget } });
+    chosen.text = "";
+  }
+
+  // ---- after a session: what the team says, what it took, your call --------------------------------------------
+  function showReport(taskId, remember = true) {
+    state.current = taskId;
+    showPage("report");
+    if (remember) store.set("chimera.task", taskId);
+    history.replaceState(null, "", `#${taskId}`);
+    state.unread.delete(taskId);
+    if (!state.loaded.has(taskId)) send({ type: "load", task: taskId });
+    renderReport();
+    renderPlaces();
+  }
+  function lastWords(task, persona) {  // the last thing she said in the session (the club's messages, not the steps)
+    const said = [...messagesOf(task.id).values()].filter((item) => item.kind === "text" && item.speaker && item.text &&
+      (item.speaker === persona || seatOf(item.speaker)?.persona === persona));
+    return said.length ? said[said.length - 1].text : "";
+  }
+  function reportSignals(task) {
+    const data = task.data || {};
+    const validation = data.validation || {};
+    const settings = state.settings || {};
+    const found = [];
+    if (validation.ran) found.push([validation.passed === true, "The project's own tests", validation.summary || "ran"]);
+    else found.push([null, "The project's own tests", "none ran"]);
+    const verification = data.verification || {};
+    const findings = (verification.findings || []).length;
+    if (verification.rounds) found.push([!findings, "The tester", findings ? `${findings} problem${findings === 1 ? "" : "s"} still seen after ${verification.probes || 0} probes`
+                                                                        : `${verification.probes || 0} probes, nothing she could break`]);
+    else if (verification.note) found.push([null, "The tester", verification.note]);
+    found.push([!data.failure, "Not stuck", data.failure ? data.failure : "no step limit hit, no repeated tool errors"]);
+    const confined = settings.command_filesystem === "worktree" && settings.command_network === false;
+    found.push([confined ? true : null, "Confined", confined ? "commands ran with only the task's own folder in reach, and no network"
+      : `commands could reach ${settings.command_filesystem === "worktree" ? "only the worktree" : "the whole system"}` +
+        `${settings.command_network === false ? ", no network" : " and the network"} (config.yml: command_filesystem, command_network)`]);
+    return found;
+  }
+  function renderReport() {
+    if (state.view !== "report") return;
+    const task = currentTask();
+    const page = $("#report-page");
+    if (!task) { showList(); return; }
+    const data = task.data || {};
+    const back = make("a", "back-link", "‹ Classroom");
+    back.href = "#";
+    back.onclick = (event) => { event.preventDefault(); showList(); };
+    const lineup = (task.lineup || []).length ? task.lineup : (task.people || []).map((persona) => ({ persona, role: "" }));
+    const top = make("div", "report-top");
+    top.append(make("span", `pill pill-${PILLS[task.status] || "done"}`, pillText(task)),
+               make("span", "report-team", lineup.map(({ persona, role }) => {
+                 const seat = state.seats.get(persona);
+                 const model = (task.spend?.[persona]?.models || [])[0];
+                 return `${called(persona)}${seat && seat.alias ? ` (${seat.name}${model ? `, on ${nick(model)}` : ""})` : model ? ` (on ${nick(model)})` : ""}` +
+                        (role ? ` ${verbOf(role, task.workflow)}` : "");
+               }).join(", ")));
+    const left = make("div", "report-left");
+    const voices = make("section", "voices");
+    voices.setAttribute("aria-label", "What the team says");
+    const shown = new Set();
+    for (const { persona, role } of lineup) {
+      if (shown.has(persona)) continue;
+      shown.add(persona);
+      const words = lastWords(task, persona);
+      const row = make("div", "voice");
+      const card = make("div", "voice-card");
+      const source = picture(persona);
+      if (source) { const image = make("img"); image.src = source; image.alt = called(persona); card.append(image); }
+      card.append(make("div", "voice-name", `${called(persona)}${role ? ` · ${roleTitle(role, task.workflow)}` : ""}`));
+      const bubble = make("div", "voice-bubble");
+      bubble.append(words ? markdown(words) : make("span", "muted", "(nothing said to you this time)"));
+      row.append(card, bubble);
+      voices.append(row);
+    }
+    const checks = make("section", "panel");
+    checks.append(make("h2", "", "Signals that need no answer key"));
+    const listNode = make("ul", "signals");
+    for (const [ok, title, text] of reportSignals(task)) {
+      const item = make("li", ok === true ? "is-ok" : ok === false ? "is-bad" : "is-plain");
+      item.append(make("span", "signal-mark", ok === true ? "✓" : ok === false ? "!" : "·"), make("span", "", ""));
+      item.lastChild.append(make("strong", "", `${title}: `), document.createTextNode(text));
+      listNode.append(item);
+    }
+    checks.append(listNode);
+    const change = make("section", "panel");
+    const changeHead = make("div", "panel-head");
+    changeHead.append(make("h2", "", "The change"));
+    const files = data.change?.files || [];
+    if (files.length || data.worktree) {
+      const look = make("button", "link-button", "View the diff");
+      look.type = "button";
+      look.onclick = () => { state.detail = task.id; open(task.id); showChanges(); };
+      changeHead.append(look);
+    }
+    change.append(changeHead);
+    change.append(files.length ? make("div", "file-box", files.map((file) => file.path || file).join("\n"))
+                               : make("p", "row-note", data.answer ? "An answer, no change." : "No change."));
+    const told = String(data.summary || data.answer || "");
+    const voiced = told && [...shown].some((persona) => lastWords(task, persona).trim() === told.trim());
+    if (told && !voiced) change.append(markdown(told));  // (unless one of them said just that, above)
+    left.append(voices, checks, change);
+
+    const aside = make("aside", "report-aside");
+    const took = make("section", "panel");
+    took.append(make("h2", "", "What it took"));
+    const totals = data.totals || {};
+    const grid = make("div", "took-grid");
+    const peak = Object.entries(task.spend || {}).reduce((sum, [, entry]) => sum + (entry.cost || 0) *
+      ((entry.models || []).some((model) => /deepseek/.test(model)) ? 2 : 1), 0);
+    for (const [label, value, note] of [["Time", span(Math.max(0, task.updated - task.created)), ""],
+                                        ["Stamina spent", totals.cost != null ? money(totals.cost) : "—",
+                                         totals.cost != null && peak > totals.cost ? `${money(peak)} at peak` : ""]]) {
+      const cell = make("div", "took");
+      cell.append(make("div", "took-label", label), make("div", "took-value", value));
+      if (note) cell.append(make("div", "took-note", note));
+      grid.append(cell);
+    }
+    took.append(grid);
+    const budget = data.team?.budget;
+    if (budget) {
+      const over = totals.cost != null && totals.cost > budget;
+      took.append(make("div", `budget-line ${over ? "is-warn" : "is-ok"}`, `Budget ${money(budget)} · ${over ? "over budget" : "within budget"}`));
+    }
+    const rows = Object.entries(task.spend || {});
+    if (rows.length) {
+      const table = make("table", "took-table");
+      const head = make("tr");
+      for (const label of ["Who", "Calls", "Tokens in / out", "Cost"]) { const cell = make("th", "", label); cell.scope = "col"; head.append(cell); }
+      const thead = make("thead");
+      thead.append(head);
+      const tbody = make("tbody");
+      let input = 0, cached = 0;
+      for (const [persona, entry] of rows) {
+        input += entry.input_tokens;
+        cached += entry.cached_input_tokens;
+        const line = make("tr");
+        const who = make("th", "", `${called(persona)}${entry.models?.length ? ` (${entry.models.map(nick).join(", ")})` : ""}`);
+        who.scope = "row";
+        line.append(who, make("td", "", String(entry.calls)),
+                    make("td", "", `${entry.input_tokens.toLocaleString()} / ${entry.output_tokens.toLocaleString()}`),
+                    make("td", "", entry.cost != null ? money(entry.cost) : "—"));
+        tbody.append(line);
+      }
+      table.append(thead, tbody);
+      took.append(table);
+      if (input) took.append(make("p", "row-note", `${Math.round(100 * cached / input)}% of the input came from the cache.`));
+    }
+    const call = make("section", "panel your-call");
+    call.append(make("h2", "", "Your call"));
+    if (task.status === "landed") {
+      call.append(make("p", "row-note", `Landed${data.landed?.commit ? ` as ${String(data.landed.commit).slice(0, 8)} on ${data.landed.branch || "your branch"}` : ""}. ` +
+                                        "It counts toward the next level of everyone who worked on it."));
+    } else if (task.status === "discarded") {
+      call.append(make("p", "row-note", "Discarded: nothing reached your code, and nobody levels up from it."));
+    } else {
+      call.append(make("p", "row-note", "Your choice is the result that counts: it goes into the logbook as this team's record with you."));
+      const workers = [...new Set(lineup.map(({ persona }) => persona))];
+      if (workers.length) {
+        call.append(make("div", "level-note", `Landing it counts toward ${workers.map(called).join(" and ")}'s next level and art stage.` +
+          rows.filter(([, entry]) => entry.cost != null).map(([persona, entry]) => ` ${called(persona)} spent ${money(entry.cost)} of her stamina.`).join("")));
+      }
+      const pending = task.approval && [...messagesOf(task.id).values()].find((item) => item.kind === "notice" &&
+        item.code === "approval_request" && item.data?.approval_id === task.approval.id);
+      if (pending) {
+        call.append(approvalCard(pending, task).firstChild);  // the second check (every box) or the final approval
+      } else if (task.status === "review" || task.status === "approved") {
+        call.append(make("p", "row-note", "The check is on its way…"));
+      }
+      const more = make("div", "call-buttons");
+      if ((task.actions || []).includes("send")) {
+        const sendBack = make("button", "secondary-button", "Send back with a note");
+        sendBack.type = "button";
+        sendBack.onclick = () => {
+          const note = prompt("What should they change?");
+          if (note && note.trim()) send({ type: "send", task: task.id, text: note.trim(), id: uid() });
+        };
+        more.append(sendBack);
+      }
+      if ((task.actions || []).includes("discard")) {
+        const discard = make("button", "secondary-button is-danger", "Discard");
+        discard.type = "button";
+        discard.onclick = () => { if (confirm("Throw this change set away? Its worktree and branch are removed.")) sendText(`$discard ${task.id}`, "Discard"); };
+        more.append(discard);
+      }
+      if (more.children.length) call.append(more);
+    }
+    const whole = make("button", "link-button", "See the whole session");
+    whole.type = "button";
+    whole.onclick = () => { state.detail = task.id; open(task.id); };
+    call.append(whole);
+    aside.append(took, call);
+    const columns = make("div", "report-columns");
+    columns.append(left, aside);
+    page.replaceChildren(back, top, make("h1", "report-title", task.title), columns);
+  }
+  function markdown(text) {
+    const body = make("div", "markdown");
+    if (window.Markdown) window.Markdown.into(body, text, []);
+    else body.textContent = text;
+    return body;
   }
 
   // ---- the task list ------------------------------------------------------------------------------
@@ -406,10 +1020,13 @@
 
   // ---- opening a task -----------------------------------------------------------------------------
   async function open(taskId, remember = true) {
+    const asked = taskId ? state.tasks.get(taskId) : null;
+    if (asked && REPORTED.has(asked.status) && state.detail !== taskId) {  // waiting for you, or done: its report
+      showReport(taskId, remember);
+      return;
+    }
     state.current = taskId || null;
-    state.view = "task";
-    document.body.classList.remove("view-list");
-    $("#sessions").hidden = true;
+    showPage("task");
     if (remember) store.set("chimera.task", state.current || "");
     history.replaceState(null, "", state.current ? `#${state.current}` : "#new");
     if (taskId) state.unread.delete(taskId);
@@ -1620,7 +2237,7 @@
     store.set("chimera.project", state.project);
     render();
   };
-  $("#new-task").onclick = () => { open(null); closeNarrow(); };
+  $("#new-task").onclick = () => { showTeamPage(); closeNarrow(); };
   $("#filter").addEventListener("input", renderSidebar);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {

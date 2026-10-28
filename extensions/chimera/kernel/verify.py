@@ -95,6 +95,9 @@ def tester_avoid(round, outcome):
 def wanted(ctx, round, outcome) -> bool:
     if outcome.kind != "change" or not outcome.ok or not outcome.change.get("files"):
         return False
+    tester = ctx.picked().get("tester")
+    if isinstance(tester, bool):  # the tester seat, switched on or off for this session on the page
+        return tester
     probe = settings(ctx)["probe"]
     if probe in (False, "false", "off", "no"):
         return False

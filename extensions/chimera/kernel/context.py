@@ -214,6 +214,24 @@ class Context:
         return [self.team.seats[name] for name in dict.fromkeys(chosen) if name in self.team.seats
                 and name in self.present and name != invited.get("lead")]
 
+    def picked(self) -> dict:
+        """The team you picked for this session on the page (`team`: seats by role, tiers by role, the tester on or
+        off); empty when the club staffs it."""
+        data = (self.task() or {}).get("data") or {} if self.task_id else {}
+        team = data.get("team")
+        return team if isinstance(team, dict) else {}
+
+    def pinned(self, role: str) -> Seat | None:
+        """The classmate you seated in `role` for this session, when she is here."""
+        name = (self.picked().get("seats") or {}).get(role)
+        seat = self.team.seats.get(name) if isinstance(name, str) else None
+        return seat if seat is not None and seat.persona in self.present else None
+
+    def pinned_tier(self, role: str) -> str | None:
+        """The model you picked for `role` (her own, `cheap`, or her `strong` one)."""
+        tier = (self.picked().get("tiers") or {}).get(role)
+        return tier if tier in ("cheap", "strong") else None
+
     def candidates(self, role: str) -> list[Seat]:
         """The seats for `role` in order, the crew who came along first."""
         return self.team.candidates(role, self.present, prefer={seat.persona for seat in self.crew()})

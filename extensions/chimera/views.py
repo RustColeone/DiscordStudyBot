@@ -139,7 +139,7 @@ def task_view(board, task: dict, own_prefix: str, state: Callable[[str], str | N
     keep = ("request", "route", "change", "validation", "review", "summary", "totals", "plan", "branch", "base",
             "worktree", "landed", "failure", "ticks", "reviewed", "baseline", "baseline_failed", "rounds", "by",
             "origin", "answer", "queued", "finished_by", "warning", "invited", "origin_address", "reported", "crew",
-            "requirements", "verification", "reporting")
+            "requirements", "verification", "reporting", "team")
     view = {key: task[key] for key in ("id", "project", "address", "title", "status", "phase", "workflow",
                                        "created", "updated")}
     view["data"] = {key: data.get(key) for key in keep if data.get(key) is not None}
@@ -147,8 +147,44 @@ def task_view(board, task: dict, own_prefix: str, state: Callable[[str], str | N
     view["own"] = task["address"].startswith(own_prefix)
     view["approval"] = approval(board, task, state)
     view["actions"] = actions(task, view["approval"])
+    view["lineup"] = lineup(board, task)
+    view["spend"] = spend(board, task["id"])
     invited = data.get("invited") or {}
     view["people"] = list(dict.fromkeys(person for person in (
         invited.get("lead") or "", *(data.get("crew", invited.get("crew")) or ()),
         *(step["seat"] for step in board.steps(task["id"]))) if isinstance(person, str) and person))
     return view
+
+
+def lineup(board, task: dict) -> list[dict]:
+    """Who held which seat, in order: the team you picked for the session, else the roles played in it (the router
+    aside), each pair once, as they first came."""
+    picked = ((task.get("data") or {}).get("team") or {}).get("seats") or {}
+    if picked:
+        return [{"persona": persona, "role": role} for role, persona in picked.items()]
+    seen = dict.fromkeys((step["seat"], step["role"]) for step in board.steps(task["id"])
+                         if step["seat"] and step["role"] and step["role"] != "router")
+    return [{"persona": persona, "role": role} for persona, role in seen]
+
+
+def spend(board, task_id: str) -> dict[str, dict]:
+    """What each classmate's model calls in the session took: calls, tokens in (and from the cache) and out, dollars
+    (None while any call has no price), her models."""
+    found: dict[str, dict] = {}
+    for step in board.steps(task_id):
+        for call in step["data"].get("calls", ()):
+            seat = call.get("seat") or step["seat"] or "?"
+            entry = found.setdefault(seat, {"calls": 0, "input_tokens": 0, "cached_input_tokens": 0,
+                                            "output_tokens": 0, "cost": 0.0, "priced": True, "models": []})
+            entry["calls"] += 1
+            for key in ("input_tokens", "cached_input_tokens", "output_tokens"):
+                entry[key] += int(call.get(key) or 0)
+            if call.get("cost") is None:
+                entry["priced"] = False
+            else:
+                entry["cost"] += float(call["cost"])
+            if call.get("model") and call["model"] not in entry["models"]:
+                entry["models"].append(call["model"])
+    for entry in found.values():
+        entry["cost"] = round(entry["cost"], 6) if entry.pop("priced") else None
+    return found

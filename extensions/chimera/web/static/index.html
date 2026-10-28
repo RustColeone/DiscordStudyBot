@@ -18,14 +18,16 @@
       <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
       <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
     </header>
-    <!-- The Classroom: every session a strip, as when choosing a stage; who took part, faintly, on its right. -->
+    <!-- The Classroom: every session a card with its team on bookmarks; a new session picks its team first. -->
     <section class="sessions" id="sessions" aria-labelledby="sessions-title" hidden>
       <header class="sessions-head">
         <div class="sessions-heading">
           <h1 id="sessions-title">Classroom</h1>
-          <p>Every session is its own strip. A student can sit in as many as you like, all at once.</p>
+          <p>Every session has its own card. A student can sit in as many sessions as you like, all at once.</p>
         </div>
-        <button class="add-session" id="add-session" type="button"><span aria-hidden="true">＋</span> New session</button>
+        <button class="add-session" id="add-session" type="button"><svg aria-hidden="true" width="22" height="22"
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"><path
+          d="M12 5v14M5 12h14"/></svg> New session</button>
       </header>
       <div class="sessions-tools">
         <div class="session-tabs" id="session-tabs" role="group" aria-label="Show"></div>
@@ -35,6 +37,10 @@
       <ol class="strips" id="strips"></ol>
       <button class="add-fab" id="add-fab" type="button" aria-label="New session" title="New session">＋</button>
     </section>
+    <!-- A new session: the work, then the team (formation, who takes each seat, on which model), then start. -->
+    <section class="team-page" id="team-page" aria-label="New session" hidden></section>
+    <!-- After a session (or while it waits for you): what the team says, what it took, and your call. -->
+    <section class="report-page" id="report-page" aria-label="Session report" hidden></section>
     <div class="scrim" id="scrim" hidden></div>
 
     <aside class="sidebar" id="sidebar" aria-label="Tasks">

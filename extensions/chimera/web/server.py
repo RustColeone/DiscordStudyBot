@@ -32,6 +32,8 @@ from contracts import Address, Delivery, Display, Interface, Reply, Request, Sen
 
 from .. import places, views
 from ..kernel.flow import new_id
+from ..record import benchmark_rows, benchmarks, level_of, records
+from ..team import FORMATIONS
 from ..workflows import catalog
 from ..workspace.tools import ToolError, inside
 
@@ -424,14 +426,18 @@ class ClassroomUI(Interface):
         project = str(event.get("project") or "")
         workflow = str(event.get("workflow") or "auto")
         client_id = str(event.get("id") or uuid.uuid4().hex)
-        if not text or project not in self.registry.all() or workflow not in self._workflows():
+        team = self._picked(event.get("team")) if "team" in event else None
+        if team is not None:  # the team picker: its formation is the workflow, its seats come along
+            workflow = FORMATIONS[team["formation"]][0]
+        if not text or project not in self.registry.all() or workflow not in self._workflows() or team is False:
             self._tell(socket_, {"type": "ack", "id": client_id, "ok": False, "reason": "invalid"})
             return
         task_id = new_id()
         title = text.splitlines()[0][:80]
-        crew = self._crew(event.get("crew"))
+        crew = list(dict.fromkeys(team["seats"].values())) if team else self._crew(event.get("crew"))
         self.board.create_task(task_id, str(Address(self.name, task_id)), project, title, request=text,
-                               by=self.user_name, origin=self.name, **({"crew": crew} if crew else {}))
+                               by=self.user_name, origin=self.name, **({"crew": crew} if crew else {}),
+                               **({"team": team} if team else {}))
         extra = {"task": task_id, "project": project}
         if workflow != "auto":
             extra["workflow"] = workflow
@@ -462,6 +468,25 @@ class ClassroomUI(Interface):
     @staticmethod
     def _workflows() -> set[str]:
         return {item["name"] for item in catalog()}
+
+    def _picked(self, given) -> dict | bool:
+        """A team from the team picker: `{formation, seats: {role: persona}, tiers: {role: cheap|strong}, tester,
+        budget}`, checked against the formation's roles and the club's seats; False when it does not hold."""
+        if not isinstance(given, dict) or given.get("formation") not in FORMATIONS:
+            return False
+        roles = FORMATIONS[given["formation"]][1] + (("tester",) if given.get("tester") else ())
+        seats = given.get("seats") if isinstance(given.get("seats"), dict) else {}
+        picked = {role: str(seats.get(role)) for role in roles if str(seats.get(role)) in self.team.seats}
+        if set(picked) != set(roles):
+            return False
+        tiers = given.get("tiers") if isinstance(given.get("tiers"), dict) else {}
+        try:
+            budget = round(max(0.0, min(100.0, float(given.get("budget") or 0))), 4)
+        except (TypeError, ValueError):
+            budget = 0.0
+        return {"formation": given["formation"], "seats": picked, "tester": bool(given.get("tester")),
+                "tiers": {role: tiers[role] for role in roles if tiers.get(role) in ("cheap", "strong")},
+                **({"budget": budget} if budget else {})}
 
     def _crew(self, names) -> list[str]:
         """Seats picked to come along (known ones, at most six)."""
@@ -611,9 +636,25 @@ class ClassroomUI(Interface):
         return [project.to_dict() for project in self.registry.all().values()]
 
     def _team(self) -> list[dict]:
-        return [{"persona": seat.persona, "name": seat.name, "family": seat.family, "voice": seat.voice,
-                 "avatar": seat.avatar or seat.persona, "cheap": seat.label("cheap"), "strong": seat.label("strong"),
-                 "ready": self._ready(seat)} for seat in self.team.seats.values()]
+        """The seats as the page shows them: who, her two models (`strong` only when she has one of her own), whether
+        she has a key, her level (record.py), your name for her (any module's `alias` fact) and her run alone."""
+        found = records(self.board)
+        summaries = benchmarks()
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        team = []
+        for seat in self.team.seats.values():
+            values = facts(seat.persona, self.user_id) if callable(facts) else {}
+            alias = next((value for key, value in values.items() if key.rsplit(".", 1)[-1] == "alias"), None)
+            alone = next((row for row in benchmark_rows(seat.persona, summaries)
+                          if row["formation"] == "alone" and row["seats"] == ["builder"]), None)  # (the design's word)
+            team.append({"persona": seat.persona, "name": seat.name, "family": seat.family, "voice": seat.voice,
+                         "avatar": seat.avatar or seat.persona, "cheap": seat.label("cheap"),
+                         # (a seat without strong models of her own falls back to her cheap ones: then she has none)
+                         "strong": seat.label("strong") if seat.label("strong") != seat.label("cheap") else "",
+                         "ready": self._ready(seat),
+                         "alias": alias if isinstance(alias, str) else None,
+                         "level": (found.get(seat.persona) or level_of(0))["level"], "alone": alone})
+        return team
 
     def _ready(self, seat) -> bool | None:
         """Whether she has a key: the core can tell (contracts 1.7), else what the latest run saw."""
@@ -634,8 +675,11 @@ class ClassroomUI(Interface):
                 "tasks": [self._task_view(task) for task in self.board.tasks()],
                 "progress": {task: list(runs.values()) for task, runs in self.progress.items()},
                 "settings": {"second_approval": bool(self.config.get("second_approval", True)),
-                             "commands": str(self.config.get("commands", "allowlist"))},
+                             "commands": str(self.config.get("commands", "allowlist")),
+                             "command_network": self.config.get("command_network", True) is not False,
+                             "command_filesystem": str(self.config.get("command_filesystem") or "all")},
                 "prices": self.prices.status(self.team) if self.prices else None, "workflows": catalog(),
+                "benchmarks": benchmarks(), "formations": {name: list(roles) for name, (_, roles) in FORMATIONS.items()},
                 "places": self.places(), "links": self.links(), "page": self.page}
 
 

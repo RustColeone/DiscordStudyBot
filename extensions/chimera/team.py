@@ -34,6 +34,9 @@ DEFAULT_ROLES = {
 TIERS = {"router": "cheap", "drafter": "cheap", "judge": "cheap", "strong": "strong", "critic": "strong",
          "planner": "strong"}
 EFFORTS = ("low", "medium", "high", "max")
+# The team picker's formations: its workflow and the roles you seat (the tester seat is a switch on top of any).
+FORMATIONS = {"alone": ("single", ("drafter",)), "plan": ("plan", ("planner", "drafter")),
+              "cascade": ("cascade", ("drafter", "judge", "strong"))}
 
 
 @dataclass(frozen=True)
