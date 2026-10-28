@@ -57,9 +57,23 @@ class StaminaTests(unittest.IsolatedAsyncioTestCase):
         await settle(self.core)
         self.assertEqual(self.run_of("spend 3").status, "done")
         self.assertIn("spent", self.chat.texts())
-        self.assertEqual(port.stamina("p")["today"]["allowance"], 0.05)  # her $0.02 and the $0.03 you added
+        self.assertEqual(port.stamina("p")["today"]["allowance"], 0.06)  # the $0.03 she had spent, and $0.03 more
         self.assertAlmostEqual(port.stamina("p")["today"]["spent"], 0.045)
         self.assertIsNone(port.stamina("nobody"))
+
+    async def test_letting_her_spend_more_counts_from_what_she_has_spent(self):
+        await self.start({"allowance": 0.001, "step": 0.001})  # one answer ($0.015) goes far past her day
+        await self.chat.say("spend 2", sender="boss", name="Boss")
+        await settle(self.core)
+        await self.chat.say(f"$approve {self.card().data['approval_id']}", sender="boss", name="Boss")
+        await settle(self.core)
+        self.assertEqual(self.run_of("spend 2").status, "done")  # $0.001 more from the $0.015 spent, not from $0.001
+        self.assertIn("Pat has spent her $0.001 for today", self.card().text)
+        await self.chat.say("spend 1", sender="boss", name="Boss")  # a later stop the same day gets its own card
+        await settle(self.core)
+        await self.chat.say(f"$approve {self.card().data['approval_id']}", sender="boss", name="Boss")
+        await settle(self.core)
+        self.assertEqual(self.run_of("spend 1").status, "done")
 
     async def test_saying_no_stops_the_run_at_her_limit(self):
         await self.start({"allowance": 0.01})

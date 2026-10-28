@@ -100,16 +100,22 @@ class Stamina:
                         "amount": round(float(budget), 4), "run": record.id}
         return None
 
-    def extend(self, arguments: Mapping[str, Any]) -> str:
-        """Grow the limit a run stopped at (approved by the owner): her allowance for that day, or the run's budget."""
+    def extend(self, arguments: Mapping[str, Any], spent_now: float | None = None) -> str:
+        """Grow the limit a run stopped at (approved by the owner), so that `amount` more may be spent from what is
+        spent now (one answer may have gone past the limit by more than a step): her allowance for that day, or the
+        run's budget. `spent_now`: the run's spend, for a session."""
         amount = max(0.0, float(arguments.get("amount") or 0))
         if arguments.get("kind") == "session":
             key = f"run:{arguments.get('run')}"
-            self.store.set(key, round(float(self.store.get(key) or 0.0) + amount, 6))
+            budget = float(arguments.get("limit") or 0) - float(self.store.get(key) or 0.0)  # the budget it was given
+            spent = float(spent_now if spent_now is not None else arguments.get("spent") or 0)
+            self.store.set(key, round(max(float(self.store.get(key) or 0.0) + amount, spent + amount - budget), 6))
             return f"The session may spend {money(amount)} more."
         persona, day = str(arguments.get("persona") or ""), str(arguments.get("day") or self.day())
         key = f"more:{day}:{persona}"
-        self.store.set(key, round(float(self.store.get(key) or 0.0) + amount, 6))
+        spent = float(self.store.get(f"day:{day}:{persona}") or 0.0)
+        added = max(float(self.store.get(key) or 0.0) + amount, spent + amount - self.allowance(persona))
+        self.store.set(key, round(added, 6))
         return f"{self.name(persona)} may spend {money(amount)} more today."
 
     # ---- the ledger --------------------------------------------------------------------------------------------
@@ -227,4 +233,4 @@ class Stamina:
 
 
 def money(dollars: float) -> str:
-    return f"${dollars:.2f}" if dollars >= 0.1 else f"${dollars:.3f}"
+    return f"${dollars:.2f}" if dollars >= 0.1 else f"${dollars:.3f}" if dollars >= 0.001 or not dollars else f"${dollars:.4f}"

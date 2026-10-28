@@ -136,7 +136,8 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
         return await manager.model_choices.command(context.address, str(arguments.get("text") or ""))
 
     async def stamina(arguments, context) -> ToolResult:
-        return ToolResult.ok(manager.stamina.extend(arguments))
+        record = manager.tank.run(context.run_id) if context.run_id else None
+        return ToolResult.ok(manager.stamina.extend(arguments, float(record.usage.get("cost", 0)) if record else None))
 
     def stamina_card(arguments) -> str:
         """The question on the card a run waits with at a spending limit (core/manager/stamina.py)."""

@@ -676,9 +676,10 @@
     const data = item.data || {};
     const card = make("div", "approval");
     const confirm = data.kind === "confirm";
+    const stamina = data.capability === "core.stamina";  // a run at a spending limit: more, or stop here
     const head = make("div", "approval-head");
-    head.append(make("span", "approval-icon", confirm ? "🙋" : "🔐"),
-      make("span", "approval-title", confirm ? "Please confirm" : "May we do this?"));
+    head.append(make("span", "approval-icon", stamina ? "⚡" : confirm ? "🙋" : "🔐"),
+      make("span", "approval-title", stamina ? "Stamina" : confirm ? "Please confirm" : "May we do this?"));
     if (data.tier) head.append(make("span", `tier tier-${data.tier}`, data.tier));
     card.append(head, make("div", "approval-summary", data.summary || data.capability || item.text));
     for (const warning of String(data.warnings || "").split(" | ").filter(Boolean)) {

@@ -1184,8 +1184,10 @@ class Manager:
         if stop is None:
             return
         capability = self.capabilities.get(STAMINA)
-        key = (f"stamina:daily:{stop['persona']}:{stop['day']}" if stop["kind"] == "daily"
-               else f"stamina:session:{record.id}:{stop['limit']}")
+        # One card per stop: the same stop asked again (nothing spent since) finds its card; a later one, after more
+        # was spent, gets its own (a keyed action runs once).
+        key = (f"stamina:daily:{stop['persona']}:{stop['day']}:{stop['spent']}" if stop["kind"] == "daily"
+               else f"stamina:session:{record.id}:{stop['limit']}:{stop['spent']}")
         result = await self._request_approval(record, capability, stop, key) if capability else None
         if result is None or result.status != "needs_approval":
             raise ModelError("budget_exceeded", "This run reached a spending limit and nobody can approve more"
