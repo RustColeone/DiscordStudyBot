@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>Students · {{title}}</title>
+  <script src="static/prefs.js"></script>
   <link rel="stylesheet" href="static/style.css">
   <link rel="stylesheet" href="static/students.css">
   <link rel="icon" type="image/png" href="favicon.ico">
@@ -18,7 +19,10 @@
   <header class="site-header">
     <span class="site-brand"><span class="site-name">ChimeraArchive</span><span class="site-page"></span></span>
     <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
-    <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
+    <div class="site-end">
+      <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
+      <a class="user-tab" id="user-tab" hidden></a>
+    </div>
   </header>
   <main class="students" id="students-main"></main>
   <div class="students-toast" id="toast" role="status" aria-live="polite" hidden></div>

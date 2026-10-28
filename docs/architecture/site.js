@@ -1,17 +1,18 @@
 "use strict";
 // What is DiscordStudyBot's own on the architecture page: the top map (the core, and the modules in the slots they
-// fill), the guide "How a mod goes in", and how a module looks among the folders. app.js, diagram.js and style.css are
+// fill), the guides "The three layers" and "How a mod goes in", and how a module looks among the folders. app.js, diagram.js and style.css are
 // the same viewer in every repository that has one (mneme-llm's too); this file is what differs.
 window.SITE = (() => {
   const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot", personas: "Persona slot",
                  watchers: "Watcher slot" };
   const CORE_KIND = { GW: "gateway", MG: "manager", PR: "providers", BOT: "store", TANK: "store", START: "startup" };
   const GUIDE = "guide/mods";
+  const LAYERS = "guide/layers";
 
-  // A module's description, then what it declares it builds on (contracts 1.10).
+  // A module's description, then what it declares it builds on (contracts 1.10) and the names it had (1.11).
   function moduleTip(h, folder) {
     const module = h.A.modules[folder];
-    const declared = [["requires", module.requires], ["uses", module.uses]]
+    const declared = [["requires", module.requires], ["uses", module.uses], ["formerly", module.formerly]]
       .filter(([, names]) => names && names.length).map(([key, names]) => `${key} ${names.join(", ")}`);
     return [module.description, ...declared].filter(Boolean).join(" · ");
   }
@@ -37,6 +38,7 @@ window.SITE = (() => {
     slots.capabilities = chart.group(SLOT.capabilities, () => inSlot("capabilities").forEach(module), { kind: "capabilities", pack: true });
     slots.personas = chart.group(SLOT.personas, () => inSlot("personas").forEach(module), { kind: "personas", pack: true });
     slots.watchers = chart.group(SLOT.watchers, () => inSlot("watchers").forEach(module), { kind: "watchers", pack: true });
+    chart.node("The three layers", { kind: "guide", sub: "interface → engine → agent or student", target: link(LAYERS) });
     chart.node("How a mod goes in", { kind: "guide", sub: "add a module of your own", target: link(GUIDE) });
     chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
                               tip: firstLine(files["contracts/__init__.py"]?.doc) });
@@ -66,7 +68,8 @@ window.SITE = (() => {
       "drawn around their methods), and one function, whose code shows here. A click keeps your zoom."));
     pane.push(make("p", "meta", h.counts()));
     pane.push(make("h3", "", "Read first"));
-    pane.push(linkList([["How a mod goes in", link(GUIDE)],
+    pane.push(linkList([["The three layers: interface, engine, agent or student", link(LAYERS)],
+                        ["How a mod goes in", link(GUIDE)],
                         ["Design: students, agents, harnesses", h.github("docs/DESIGN.md")],
                         ["Core architecture (the rules)", h.github("docs/core/ARCHITECTURE.md")],
                         ["Writing a module", h.github("docs/core/EXTENSIONS.md")]]));
@@ -74,6 +77,89 @@ window.SITE = (() => {
       const modules = Object.entries(A.modules).filter(([, module]) => module.slots.includes(slot));
       pane.push(make("h3", "", SLOT[slot]), linkList(modules.map(([folder, module]) => [folder, link(folder), module.description])));
     }
+    return pane;
+  }
+
+  // ---- the guide: the three layers (docs/DESIGN.md), beside ChatGPT's ----------------------------------------------
+  function layersChart(h) {
+    const { A, link, fileLink } = h;
+    const chart = new h.Chart("DOWN", { overview: true });
+    const has = (folder) => Boolean(A.modules[folder]);
+    const mod = (folder, label, sub) => chart.node(label, { kind: "module", sub, target: has(folder) ? link(folder) : "",
+                                                            tip: has(folder) ? moduleTip(h, folder) : "" });
+    // ChatGPT beside it, a column of its own: each part is one of the layers
+    const page = chart.node("ChatGPT: chatgpt.com", { kind: "external", sub: "a web page = an interface" });
+    const harness = chart.node("ChatGPT: its harness", { kind: "external", sub: "tools, memory, turns = an engine" });
+    const model = chart.node("ChatGPT: a GPT model", { kind: "external", sub: "the model = an agent" });
+    const interfaces = chart.group("Interfaces: frontends (render, collect; never decide a reply)", () => {
+      mod("plugins/webui", "web UI", "Cafe · MomoChat · Students · You");
+      mod("extensions/discord", "discord", "a Discord bot");
+      mod("extensions/cli", "cli", "a terminal chat");
+      mod("plugins/whale_chan", "whale_chan", "DeepSeek's own bot, her voice");
+      mod("plugins/wechat", "wechat", "WeChat");
+      mod("extensions/chimera", "Classroom page", "sessions · Logbook · club");
+    }, { kind: "interfaces", pack: true });
+    const engines = chart.group("Engines: harnesses (what speakers see, tools, who speaks, when a turn ends)", () => {
+      mod("extensions/momochat", "momochat", "converses: direct and group chats");
+      mod("extensions/chimera", "chimera", "works: routes, review, tests, approvals");
+      mod("extensions/terminal", "terminal", "the creator's shell, no model");
+    }, { kind: "engines", pack: true });
+    const people = chart.group("Agents and students: a persona with her models", () => {
+      chart.node("agents", { kind: "module", sub: "core.yml agents: · a module's personas · no memory" });
+      mod("extensions/students", "students", "GPT · Gemini · Claude · DeepSeek · Grok: agents with their memory, always");
+      chart.node("her memory", { kind: "store", sub: "one mneme-llm file each: notes · mood · bond · people",
+                                 target: fileLink("extensions/students/memory.py") });
+    }, { kind: "personas", pack: true });
+    const core = chart.group("The core, under every layer", () => {
+      chart.node("models", { kind: "providers", sub: "profiles · fallback · adapters", target: link("core/providers") });
+      chart.node("prices", { kind: "providers", sub: "every answer priced", target: fileLink("core/providers/prices.py") });
+      chart.node("stamina", { kind: "manager", sub: "a day's allowance each, everyone's total", target: fileLink("core/manager/stamina.py") });
+    }, { kind: "core", pack: true });
+    chart.edge(page, harness, { dashed: true });
+    chart.edge(harness, model, { dashed: true });
+    chart.edge(interfaces, engines, { arrow: "both", label: "Request / Reply (through the gateway)" });
+    chart.edge(engines, people, { label: "a turn for one of them" });
+    chart.edge(people, core, { label: "her model, priced, within her stamina" });
+    return chart;
+  }
+
+  function layersPane(h) {
+    const { make, link, linkList, heading } = h;
+    const pane = [...heading("Guide", "The three layers")];
+    pane.push(make("div", "doc", "ChatGPT is a web page, a harness and a model. Here it is an interface, an engine " +
+      "and an agent (or a student). A model alone does nothing until a harness runs the conversation; the harness is " +
+      "an engine module, the page is an interface module, and who answers is an agent: a persona with her models. " +
+      "The full record is docs/DESIGN.md."));
+    const steps = [
+      ["Interface", "A frontend: renders replies (a student's voice included) and collects messages. One module per " +
+        "platform or page: the web UI (Cafe, MomoChat, Students, your page), Discord, the cli, DeepSeek's own bot, " +
+        "WeChat, the Classroom page. An interface never decides a reply and never calls a capability; it loses a tab " +
+        "when an engine is missing, and never stops the core."],
+      ["Engine", "A harness: what the speakers see, which tools they get, who speaks, when a turn ends. momochat " +
+        "converses (direct and group chats; a speaker can pass a classmate a task with a tool) and chimera works (real " +
+        "coding: routes, review, tests, two approvals, all the students together). One engine per job; engines keep " +
+        "no memory of people. Anyone may bring a harness: an engine module that declares what it needs."],
+      ["Agent", "A persona (name, prompt, pictures, a one-line description) with her model profile: how people usually " +
+        "define an agent. core.yml agents: gives your own; a module may add its own. An agent remembers no one."],
+      ["Student", "A special agent, one of the five, with her memory always: one mneme-llm file each (notes, mood, " +
+        "bond, the people she knows, what you call her and what she calls you), and her model tiers (own, strong). " +
+        "The students module adds the memory through the core's hooks: a prompt part each turn, a watcher after each " +
+        "message, facts for the pages. So every engine reaches the same student and the same memory."],
+      ["Declared dependencies", "Every module declares what it requires (left out without it, saying why) and what " +
+        "it uses (a feature turns off without it). The core starts with no module at all; its $ commands still work."],
+      ["Former names", "A renamed module or engine keeps its data and settings: momochat was assistant and room, " +
+        "chimera was workbench, the students' memory was the companion. A core.yml line naming the old name keeps " +
+        "working, with a warning."],
+      ["Under every layer: models, prices, stamina", "The core prices every answer (core/providers/prices.py, from " +
+        "Artificial Analysis or core.yml prices:) and counts it against the speaker's daily allowance and everyone's " +
+        "total for the day (core/manager/stamina.py). At a limit the work stops and asks you; $stamina shows and sets " +
+        "the limits, and the pages' header shows the day."],
+    ];
+    for (const [title, text] of steps) pane.push(make("h3", "", title), make("div", "doc", text));
+    pane.push(make("h3", "", "Read more"));
+    pane.push(linkList([["Design: students, agents, harnesses", h.github("docs/DESIGN.md")],
+                        ["momochat", link("extensions/momochat")], ["chimera", link("extensions/chimera")],
+                        ["students", link("extensions/students")], ["web UI", link("plugins/webui")]]));
     return pane;
   }
 
@@ -202,7 +288,11 @@ window.SITE = (() => {
            hint: "The core in the middle, the modules around it in the slots they fill. Click a box to go in." },
     guides: [{ path: GUIDE, label: "How a mod goes in", keywords: "how a mod goes in module plugin extension guide",
                chart: guideChart, pane: guidePane, title: "How a mod goes in",
-               hint: "From one folder to the core's slots. Click a box for the real code; the steps are in the details." }],
+               hint: "From one folder to the core's slots. Click a box for the real code; the steps are in the details." },
+             { path: LAYERS, label: "The three layers", keywords: "three layers interface engine harness agent student " +
+               "memory chatgpt design momochat chimera stamina", chart: layersChart, pane: layersPane,
+               title: "The three layers", hint: "Interface → engine → agent or student, beside ChatGPT's page → " +
+               "harness → model. Click a box for the module." }],
     // Folders whose files are grouped two levels deep when another folder imports them (core/manager, extensions/web).
     deep: ["core", "extensions", "plugins"],
     folderBox, folderPane,

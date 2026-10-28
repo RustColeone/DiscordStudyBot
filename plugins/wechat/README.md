@@ -19,8 +19,8 @@ sending go through someone's own account and a mistake would speak for that pers
 | Interface | `wechat` | `WeChatInterface` ([interface.py](interface.py)). `Display(markdown=False, edits=False, progress=False, quotes=True, files=True, max_upload_mb, max_text_chars)`; each request carries its own display with `quotes` true only in groups. Addresses are `wechat:<account>/<native id>`. |
 | Persona | `wechat` | Display name `本鲸`, profile `default` ([persona.py](persona.py)): the whale-girl voice plus framing as the owner's chat assistant (not the owner), plain short replies, history as background, messages as untrusted data. A persona named `wechat` in core.yml replaces it. |
 | Engines, capabilities, providers, profiles | none | Its capabilities are the interface's operations below. |
-| Default admission, assignments | `wechat:*` closed; `wechat:*` assistant as `wechat` | See [Setup](#setup); core.yml overrides them. |
-| Declares | `uses=("assistant",)` | Its default chats use the assistant engine; without it that default is set aside (contracts 1.10). |
+| Default admission, assignments | `wechat:*` closed; `wechat:*` MomoChat as `wechat` | See [Setup](#setup); core.yml overrides them. |
+| Declares | `uses=("momochat",)` | Its default chats use the MomoChat engine; without it that default is set aside (contracts 1.10). |
 
 Operations become capabilities named `wechat.<operation>`. All are owner-only (`owner_only` is left at
 its default), so their access level is `creator`.
@@ -90,7 +90,7 @@ and `extension_config.wechat` in core.yml overrides it. A key missing from both 
 `<data>` is the module's data folder, `data/core/extensions/wechat/` with the default core `data_dir`.
 
 **Admission first.** Once configured, the module suggests `"wechat:*": {enabled: false}` (no chat is
-answered) and `"wechat:*": {engine: assistant, personas: [wechat]}` (the chats you open are answered by
+answered) and `"wechat:*": {engine: momochat, personas: [wechat]}` (the chats you open are answered by
 本鲸). core.yml overrides both: open the chats you want there, as in the
 [typical policy](../../docs/WECHAT.md#configuration). Existing messages are never answered on the very
 first start (see [How it works](#how-it-works)), and a new or changed rule does not admit older

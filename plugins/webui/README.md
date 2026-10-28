@@ -1,8 +1,8 @@
-# `webui`: MomoChat's page on your local network
+# `webui`: the web UI on your local network
 
-An external module (in `plugins/`, tracked in git, loaded like any other module) that serves a chat page
-from the bot itself: MomoChat's page. Open `http://<this computer>:4156` from a laptop or phone at home and talk to
-the students without Discord: each chat is a MomoChat conversation, a group chat with GPT, Gemini, Claude, DeepSeek
+An external module (in `plugins/`, tracked in git, loaded like any other module) that serves the web UI from the bot
+itself: the Cafe, MomoChat, the Students page and your page (`/me`). Open `http://<this computer>:4156` from a laptop
+or phone at home and talk to the students without Discord: each chat is a MomoChat conversation, a group chat with GPT, Gemini, Claude, DeepSeek
 and Grok by default, with Markdown and LaTeX, files both ways, live "typing" lines, approval cards with
 buttons, and a per-chat model menu. Whoever opens the page acts as the bot's creator.
 
@@ -25,7 +25,8 @@ It contributes no engines, capabilities, personas, profiles or permissions. The 
 [`extensions/students`](../../extensions/students), and the `momochat` engine from [`extensions/momochat`](../../extensions/momochat).
 It reads them from the core (contracts 1.9): their display names and pictures from `port.personas()`, and where each
 stands with you from `port.facts()` (the `alias`, `bond` and `mood` any module publishes; the students' memory does),
-polled every `places_poll_s` seconds while a page is open and sent as a `roster` event when it changes. A persona
+polled every `places_poll_s` seconds while a page is open and sent as a `roster` event when it changes. Your page
+reads the students' `called` and `accounts` facts too, and every page the day's stamina from `port.stamina()`. A persona
 named by a former name of hers (`formerly`) is read as her, and at start her old chats and bubbles are renamed to
 her (`persona_renamed` in the audit log).
 
@@ -92,6 +93,16 @@ palette, work notes, files and approval cards. The look follows the design canva
 (2026-10-26), with the Nunito font served from `static/` (SIL OFL, credited in `static/CREDITS.md`). Messages you send are always direct and addressed to the bot
 (`is_direct=True`, `mentions_me=True`), so every chat behaves like a private conversation with its students.
 
+**Your page (`/me`).** Your tab at the right of every page's header (the Classroom's too: the web UI publishes it
+with its place, under the name the students call you) opens it: what the students call you (for all of them, or one
+of them: `$callme`, sent quietly through `api/callme`), with why each one does (what you asked of her, of everyone,
+or her `call_owner` setting); your accounts, and a code to link another one (`$link`, through `api/link`); the theme
+(system, light or dark); the pages' language; reading replies aloud (the browser's own voices, a pitch for each
+student, your speed; nothing leaves the device); and the day's stamina total for everyone, which you can change
+(`$stamina total`, through `api/stamina`). The theme, language and voice settings are this browser's: kept in the
+cookie `ui_prefs`, which every port of this host shares, so the Classroom next door reads the same ones
+([`static/prefs.js`](static/prefs.js); a copy in `localStorage` for a browser that refuses cookies).
+
 **Who is in a chat.** `New chat` opens a picker with the classmates (all ticked). Untick some to start
 a smaller chat; leave one for a direct message with her. The 💬 button on a classmate's card in the class
 list also opens your direct message with her (the existing one if there is one). Direct messages are
@@ -121,7 +132,12 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | [`static/style.css`](static/style.css) | Layout and theme (light and dark). |
 | [`avatars/`](avatars/README.md) | Pictures of your own for the classmates (over the students' own), served at `/avatars/<key>`. |
 | [`static/cafe.html`](static/cafe.html), [`static/cafe.js`](static/cafe.js), [`static/cafe.css`](static/cafe.css) | The cafe: every student walking around a room (drawn, or a picture from `rooms/`); a tap opens her direct chat (`/#dm=<persona>`). The page comes with its data (`{{data}}`, JSON that never ends its script tag). |
-| [`static/places.js`](static/places.js) | The places bar on both pages: every place's `views` from the core's directory, sorted by `order` (Chimera's page keeps a copy). |
+| [`static/places.js`](static/places.js) | The places bar on every page: every place's `views` from the core's directory, sorted by `order`; the header's stamina (`renderStaminaTotal`) and your tab (`renderYou`) (Chimera's page keeps a copy). |
+| [`static/students.html`](static/students.html), [`static/students.js`](static/students.js), [`static/students.css`](static/students.css) | The Students page: every student's card (portrait, level, bond, models, her measured run alone), and one in full at `#<name>` (her art stages and moods, level, bond, models, the benchmark rows she is in, your record together, her folder). Levels come from the Classroom's facts, bond and mood from her memory, both through the core. |
+| [`static/me.html`](static/me.html), [`static/me.js`](static/me.js), [`static/me.css`](static/me.css) | Your page (`/me`): what the students call you (`api/callme`), your accounts (a code through `api/link`), this browser's settings and the day's stamina total. Its data is `you()` in interface.py. |
+| [`static/prefs.js`](static/prefs.js) | Your settings for this browser: `theme` (system, light, dark), `lang` (auto, en, zh), `voice` and its `rate`, kept in the `ui_prefs` cookie the Classroom reads too. Loaded first and not deferred, so the theme is set before the page is drawn (the Classroom serves the same file). |
+| [`static/voice.js`](static/voice.js) | Replies read aloud with the device's own voices (the browser's Web Speech API), each student with a pitch of her own; off until you switch it on on your page. MomoChat calls `studentVoice.speak(name, text)` for each new reply in the open chat. |
+| [`static/i18n.js`](static/i18n.js), [`static/i18n-zh.js`](static/i18n-zh.js) | The pages in another language: the interface's own words (never messages, names or what you type), translated as they are drawn, in the language picked on your page or else the browser's; `t(text, values)` for words a page builds itself. `i18n-zh.js` is the Chinese dictionary, made by `tools/translate_ui.py` (the Classroom serves the same files). |
 | [`rooms/`](rooms/README.md) | The cafe's preset room pictures, served at `/rooms/<file>`. |
 
 ### HTTP routes
@@ -130,13 +146,18 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | --- | --- |
 | `GET /` | The chat page (`no-cache`). |
 | `GET /login`, `POST /login` | Sign-in page and form, only meaningful with a passphrase. |
-| `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
+| `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css|woff2)` in `static/` (the font is cached for a week). |
 | `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif), else the student's own `avatar` picture whose name or display name has that key. |
 | `GET /cafe` | The cafe page, with its data inside (`no-cache`); signed out, it goes to the sign-in page. |
 | `GET /students` | The Students page: every student's card, and one in full at `#<student>` (her art stages and moods, level, bond, models, her benchmark rows, your record together, her folder's files). Its data is inside, as the cafe's. |
 | `GET /api/students` | The Students page's data again: `{title, students: [{... the cafe's fields, own, strong, record, benchmark, pictures, folder}], avatars, here, places}`. `record` and `benchmark` are the facts any module publishes under those names (Chimera's `chimera.record` and `chimera.benchmark`), None when nobody does; `pictures` the kinds of her pictures that exist; `folder` the files in her folder, by name. |
 | `GET /pictures/{student}/{kind}` | One of her pictures (`Persona.pictures`: avatar, card, stage-2, mood-happy, ...), an image file inside her folder; anything else is 404. |
 | `POST /api/alias` | `{persona, name}`: your name for a student, from her card. Sent quietly as you, as `$alias <student> <name>` (`reset` takes it back); answers `{ok, text}`. |
+| `POST /api/stamina` | `{total}` (the day's total for everyone), `{persona, allowance}` (a student's) or `{account, budget}` (an account's), changed from the pages: sent quietly as you, as `$stamina ...`; answers `{ok, text, total}`. |
+| `GET /me` | Your page, with its data inside (`no-cache`), as the cafe's. |
+| `GET /api/me` | Your page's data again (`you()`): `{title, user_name, everyone, account, accounts, students: [{name, display, avatar, called, asked, setting, role}], avatars, here, places, stamina}`. `everyone` is the name you asked of every student; `called`, `asked` and `setting` are her `students.called` fact. |
+| `POST /api/callme` | `{persona, name}` (no `persona`: every student): what the students call you, sent quietly as you, as `$callme [<student>] <name>` (`reset` takes it back; 40 characters at most); answers `{ok, text, you}`. |
+| `POST /api/link` | A code to join another account of yours: `$link`, sent quietly as you; answers `{ok, text, code}`. |
 | `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, alias, bond, mood, avatar, ready, own_ready, description, chats}], avatars, rooms, here, places}`. `ready` is the core's (`port.personas()`), else `models_ready` for the profile named after her; `own_ready` whether her own tier can be called (else she answers on a classmate's model); `chats` how many web chats she is in. Over her head the cafe shows her mood (♪, ~, ?, …) or, from 01:00 to 07:00, zzz. |
 | `GET /rooms/{name}` | Only a picture `rooms/` lists (nothing else, and never outside it). |
 | `GET /favicon.ico` | `static/favicon.png`. |
@@ -264,7 +285,7 @@ Server to page (`_broadcast` sends to every open page, so several devices stay i
 
 | `type` | Fields | Meaning |
 | --- | --- | --- |
-| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display, alias, bond, mood}]`; the last three None until a module publishes them), `people` (`[{name, description, own, strong, own_ready}]`: her one line, her own and strong models as `provider/model`, and whether a model of her own tier can be called), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class; and `last`: `{kind, speaker, text, at}`, the newest thing said, or null), `progress`, `default`, `max_upload_mb` | Sent on connect. |
+| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display, alias, bond, mood, stamina}]`; alias, bond and mood None until a module publishes them; `stamina` her day and account from `port.stamina`), `people` (`[{name, description, own, strong, own_ready}]`: her one line, her own and strong models as `provider/model`, and whether a model of her own tier can be called), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class; and `last`: `{kind, speaker, text, at}`, the newest thing said, or null), `progress`, `default`, `max_upload_mb`, `stamina` (everyone's day against the total) | Sent on connect. |
 | `message` | `item` | A new stored message (yours or the bot's). |
 | `update` | `item` | A stored message changed (an approval card decided). |
 | `conversations` | `items` | The chat list changed. |
@@ -272,6 +293,7 @@ Server to page (`_broadcast` sends to every open page, so several devices stay i
 | `progress` | `conversation`, `run_id`, `text`, `actions`, `at` | A run's typing line. |
 | `progress_clear` | `conversation`, `run_id` | Remove that line. |
 | `roster` | `roster` | Where a student stands with you changed (a new alias, a bond grown, a mood). |
+| `stamina` | `total` | Everyone's day against the total changed (the header's pill). |
 | `models` | `conversation`, `purpose`, `ok`, `code`, `text`, `result` | Answer to a quiet `$model`. |
 | `ack` | `id`, `ok`, `reason` | Only to the sender: the `SubmitResult` reason (`accepted`, `command`, `duplicate`, `disabled`, ...). |
 | `error` | `text` | Only to the sender: a chat could not be started (unknown classmates, or the core refused its assignment). |
@@ -336,7 +358,7 @@ Under its data directory (`<data_dir>/extensions/webui/`, by default `data/core/
 Progress lines and quiet requests live only in memory. The core keeps the real conversation history
 separately, as for any interface, and each smaller chat's runtime assignment until the chat is deleted.
 The classmates' diaries about you are the core's, filed per chat and read across the `webui` scope. The browser keeps the current chat, panel widths and open panels in
-`localStorage`.
+`localStorage`, and your page's settings in the `ui_prefs` cookie.
 
 ## Tests
 

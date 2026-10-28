@@ -49,9 +49,9 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | | |
 |---|---|
 | Chat | **MomoChat**: one student or agent in a direct chat, or a group chat with GPT, Gemini, Claude, DeepSeek and Grok (those you call on answer, everyone for "you all", whose turn it is otherwise), handing each other parts of the work ("draw this", "search this") |
-| Students and agents | The five students are agents with their memory: each keeps what she knows of you, her mood and her bond with you (mneme-llm), wherever she speaks; `$alias` names one your way, `$bond` shows where each stands. An agent of your own is a prompt and its models in core.yml (`agents:`), with no memory |
+| Students and agents | The five students are agents with their memory: each keeps what she knows of you, her mood and her bond with you (mneme-llm), wherever she speaks; `$alias` names one your way, `$callme` says what they call you, `$link` joins another account of yours, `$bond` shows where each stands. An agent of your own is a prompt and its models in core.yml (`agents:`), with no memory |
 | Stamina | Every answer is priced (Artificial Analysis's list); each student has a daily allowance and everyone together a daily total, and a run that reaches one stops and asks before spending more. Accounts show a balance the provider reports (DeepSeek, OpenRouter) or a budget you enter. `$stamina` shows and changes it all; so do the pages' header and the Students page |
-| Pages | The web UI's MomoChat, Cafe and Students pages and the Classroom share one header (the places, the day's stamina) and speak English or Chinese (the switch by the name; the translations in `i18n-zh.js`, made by `tools/translate_ui.py` with DeepSeek). The Students page shows each student's level, bond, art stages, bond pictures and her models; the art is drawn by `tools/draw_students.py` from [extensions/students/art.yml](extensions/students/art.yml) |
+| Pages | The web UI's Cafe, MomoChat and Students pages, your page (`/me`) and the Classroom share one header (the places, the day's stamina, your tab) and speak English or Chinese (picked on your page, else the browser's; the translations in `i18n-zh.js`, made by `tools/translate_ui.py` with DeepSeek). Your page holds what the students call you, your linked accounts, the theme, the language, replies read aloud and the day's total. The Students page shows each student's level, bond, art stages, bond pictures and her models; the art is drawn by `tools/draw_students.py` from [extensions/students/art.yml](extensions/students/art.yml) |
 | Images | Attached and recent images are shown to the models; `$draw <prompt>` (Gemini or OpenAI) |
 | Web | `$search`, `$read <url>`, image search, Google Maps, `$wolfram` |
 | Video | `$video <url>` fitted to the upload limit; `$clip -u <url> -s 1:05 -e 1:20` then `$clip --confirm` |
@@ -62,7 +62,7 @@ Ask in plain language; the bot uses its tools when they help. Most tools are als
 | Host | `$status`; creator only: `$screenshot`, `$getfile <path>`, `$savefile` (attach a file), `$clipboard`, `$copy <text>`, `$open <url or file>`, `$processes`, or just ask (looking works in your private chats without asking; saving, opening and copying wait for your approval) |
 | Terminal | Creator only: `$t <line>` types into a shell on the bot's machine (Windows or Linux), a whole channel can be a terminal, or just ask the bot to do something on the computer (each command waits for your approval) |
 | Owner | `$approve <id> [always]`/`$deny`, `$permissions` (what runs here without asking, saved grants), `$runs`, `$cancel`, `$tools`, `$call <capability> <json>`, routes and policy through `core.*` capabilities |
-| Web UI | MomoChat's page on your local network (`:4156`), no Discord needed: the five students in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
+| Web UI | The web UI on your local network (`:4156`): the Cafe, MomoChat, the Students page and your page, no Discord needed: the five students in their own bubbles with their own pictures, `@` to ask one of them, a class list, Markdown and LaTeX, files both ways, approval cards, live typing, a `$` command palette, chats you can pin, reorder and delete; optional passphrase |
 | WeChat | Optional: one WeChat account as a second interface; see [docs/WECHAT.md](docs/WECHAT.md) |
 | Chimera | Creator only: the students work on your code together, HydraFusion-style. Each task is routed to one model, a cheap draft with a quality gate, or a draft reviewed by another model family; it is worked in its own git worktree and tested, and lands as one commit only after your second check and final approval. Before anything comes to you, a tester tries to break it against the request's acceptance criteria (the old code against the new). The Classroom page at `:4157`, `club` in any project folder, or remotely from a Discord channel. `venv/bin/python -m extensions.chimera` runs the core with just the Classroom (see [extensions/chimera](extensions/chimera/README.md)) |
 
@@ -88,6 +88,9 @@ bot as a web page on your local network.
   manager, engines, capabilities, storage) and its rules.
 * [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy, and which
   module to read for what.
+* [The architecture page](https://rustcoleone.github.io/DiscordStudyBot/architecture/): every module in the slots
+  it fills, every file, class and function, read from the code (served from master's `docs/`; rebuild
+  [`docs/architecture/data.js`](docs/architecture) with `venv/bin/python tools/architecture.py`).
 * Each module's own `README.md` (for example [extensions/momochat](extensions/momochat/README.md)): what it adds,
   setup, how it is built, its tests and what to copy from it.
 * [plugins/README.md](plugins/README.md): external modules, settings and secrets.

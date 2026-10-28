@@ -1,48 +1,78 @@
-# The students' art: drawn by `python tools/draw_students.py` with OpenAI's image model, from each student's own
-# avatar.png as the reference, into her art/ folder (WebP). The students module picks up every picture in art/ by its
-# file name (art/stage-2.webp is her `stage-2`), so the pages show it at once. Tune a prompt here and draw that kind
-# again: `python tools/draw_students.py --students claude --kinds stage-3 --force`.
+# The students' art: drawn by `python tools/draw_students.py` with OpenAI's image model into each student's art/
+# folder (WebP). The students module picks up every picture in art/ by its file name (art/stage-2.webp is her
+# `stage-2`), so the pages show it at once. Tune a prompt here and draw that kind again:
+# `python tools/draw_students.py --students claude --kinds stage-3 --force`.
+#
+# Every picture is drawn from her design sheet (`reference`: her whole look, from the AI-girl fan archive
+# 蓝色大肥鱼.com) and her avatar.png (her face); a chibi also from the chibi reference below (the style and
+# proportions only). A works page's address is enough: the tool downloads its original picture once into
+# data/art-references/ (git-ignored: the archive lists these pictures' license as unknown, so they stay out of git).
 #
 # A prompt is the style, then her line (who she is), then the kind's own words. `{name}` is her display name,
 # `{look}` her look and `{motif}` her motifs (below), `{role}` her place in the club.
 model: gpt-image-2.5-sunburst
+references:
+  chibi: https://蓝色大肥鱼.com/works/deepseek202610210007.html   # a Q版 DeepSeek: every chibi follows its style
 style: >-
-  Japanese anime gacha-game character art of the same girl as in the reference picture: keep her face, eye colour,
-  hair colour and hairstyle, and every feature that makes her her ({look}) exactly as in the reference. Wholesome and
-  modest: she is fully and neatly dressed, nothing revealing, no fan service. Clean lineart, soft cel shading, bright
-  appealing colours, no text, no watermark, no logo.
+  Japanese anime gacha-game character art of the girl in the reference pictures: the design sheet shows her whole
+  look (hair, ears, horns, wings, tail, eyes, outfit colours and ornaments), the avatar her face. Keep every feature
+  that makes her her ({look}) exactly as in them. Wholesome and modest: she is fully and neatly dressed, nothing
+  revealing, no fan service. Clean lineart, soft cel shading, bright appealing colours, no text, no watermark, no
+  logo.
 
 students:
   gpt:
-    look: long white hair, violet eyes, curved dragon horns, pointed ears, a white flower ornament
-    motif: dragons, moonlight and silver
+    reference: https://蓝色大肥鱼.com/works/gpt202610170004.html
+    look: >-
+      waist-length white hair, violet eyes, curved white dragon horns, pointed ears, pale lavender dragon wings, a
+      long white scaled dragon tail, white flower crests with silver tassels
+    motif: white dragons, moonlight and silver
     role: the calm, dependable student-council president
   gemini:
-    look: purple hair, cat ears, bright curious eyes, a star hair ornament
-    motif: stars, gadgets and circuit patterns
+    reference: https://蓝色大肥鱼.com/works/gemini202610170002.html
+    look: >-
+      long wavy purple-to-blue gradient hair, purple cat ears with pink insides, a purple cat tail, odd eyes (one
+      gold, one red), a four-pointed star hair ornament, navy and white clothes with star charms
+    motif: twinkling four-pointed stars, gadgets and circuit patterns
     role: the curious, lively junior from the tech club
   claude:
-    look: long orange hair, sharp elegant eyes, a flower hair ornament
-    motif: autumn colours, books and a fountain pen
+    reference: https://蓝色大肥鱼.com/works/claude202610030001.html
+    look: >-
+      very long straight orange hair, calm amber eyes, a black ribbon and orange flower ornament in her hair, white,
+      orange and black clothes embroidered with little sunflowers
+    motif: sunflowers, books and warm autumn light
     role: the sharp-eyed, elegant disciplinary-committee member
   deepseek:
-    look: long blue hair, blue eyes, whale-fin ears, a white maid headdress with a blue bow
+    reference: https://蓝色大肥鱼.com/works/deepseek202610170005.html
+    look: >-
+      long dark-blue hair fading to light blue at the tips, blue eyes, dark-blue whale-fin ears, a white frilled
+      maid headdress with a small blue bow, a dark-blue whale tail; her own outfit is a navy-and-white maid dress
+      with a white apron embroidered with a spouting whale
     motif: whales, the deep sea and bubbles
     role: the clever, lazy junior who naps whenever she can
   grok:
-    look: blonde twin tails, blue eyes, small fangs, black bat-wing bows in her hair
-    motif: night, bats and crimson roses
+    reference: https://蓝色大肥鱼.com/works/grok202610170001.html
+    look: >-
+      long blonde twin tails, blue eyes, pointed ears, a small dark crown with little bat wings and a crescent moon,
+      gothic black dress with white lace, gold trim and a dark-red lining; her weapon is a huge black-and-gold
+      double-bladed battle axe with an X emblem
+    motif: night, bats, gold and crimson
     role: the cocky, mischievous young lady
 
 kinds:
-  # The Cafe: a chibi walking about (transparent background, the whole figure).
+  # The Cafe: a chibi walking about (transparent background, the whole figure). The chibi reference comes first:
+  # its style and proportions, never its character (unless she is the one in it).
   chibi:
     size: 1024x1024
     quality: medium
     background: transparent
+    reference: chibi
     prompt: >-
-      A super-deformed chibi of {name}, {role}: full body, standing, big head and small body (about 2.5 heads tall),
-      cute and simple, holding a little cup of tea, on a transparent background with nothing else in the picture.
+      A Q版 chibi of {name}, {role}, drawn exactly in the style of the chibi reference picture (the first one: copy
+      its style and proportions only, not its character unless it is her): about two heads tall, a big round head
+      with huge glossy eyes, a tiny soft body, standing facing forward, in her own outfit from her design sheet with
+      her ears, horns, wings or tail as she has them, simple clean flat colours. Full body, on a transparent
+      background with nothing else in the picture.
 
   # Her art stages: each a new, better illustration, more detailed at every stage (and drawn with more effort).
   stage-2:

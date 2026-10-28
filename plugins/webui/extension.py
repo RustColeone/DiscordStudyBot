@@ -2,10 +2,11 @@
 
 Open http://<this computer>:4156 from any device at home. Whoever opens it is the bot's creator, so it
 answers only the local network, refuses other websites and DNS-rebinding names, and can ask for a
-passphrase once per browser (`passphrase`, or WEBUI_PASSPHRASE in .env). It is MomoChat's page: conversations
-default to a group chat with GPT, Gemini, Claude, DeepSeek and Grok, each in their own bubble with their own
-picture (from the students module, or `avatars/<name>.png`), and where each stands with you (her memory's alias,
-bond and mood). Markdown and LaTeX are shown as such; files go both ways.
+passphrase once per browser (`passphrase`, or WEBUI_PASSPHRASE in .env). Its pages are the Cafe, MomoChat, the
+Students page and your own page (/me: what the students call you, your accounts, theme, language, voice). In MomoChat
+conversations default to a group chat with GPT, Gemini, Claude, DeepSeek and Grok, each in their own bubble with
+their own picture (from the students module, or `avatars/<name>.png`), and where each stands with you (her memory's
+alias, bond and mood). Markdown and LaTeX are shown as such; files go both ways.
 
 It contributes the `webui` interface and defaults for its own conversations (`webui:*` uses the momochat engine
 with the five students); core.yml settings win over these. Without MomoChat (or the students) the page still
@@ -50,7 +51,8 @@ def setup(context) -> Contributions:
 
 
 EXTENSION = Extension("webui", setup, contracts="1", version="2", uses=("momochat", "students"),
-                      description="MomoChat's page on the local network: the five students, no Discord needed",
+                      description="The web UI on the local network: the Cafe, MomoChat, the Students page and your "
+                                  "page, no Discord needed",
                       settings=(
     Setting("port", "Port the page is served on", "number", 4156),
     Setting("user_name", "Your name in the chat", "text"),

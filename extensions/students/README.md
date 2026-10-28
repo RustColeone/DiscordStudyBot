@@ -26,8 +26,8 @@ to a character is a change to a file, not to code.
 | Persona | `grok` | Display name `Grok`, profile `grok`, tier `own` |
 | Prompt part | `memory` | Her memory of the person, each turn of a conversation ([Her memory](#her-memory)) |
 | Watcher | `memory` | After each of her messages in a conversation, what she learns from it |
-| Capabilities | `students.alias`, `students.bond` | `$alias` and `$bond` (typed only) |
-| Facts | `students.alias`, `students.bond`, `students.mood`, `students.plans` | Where she stands with each person, for the pages |
+| Capabilities | `students.alias`, `students.bond`, `students.callme`, `students.link` | `$alias`, `$bond`, `$callme` and `$link` (typed only) |
+| Facts | `students.alias`, `students.bond`, `students.mood`, `students.plans`, `students.called`, `students.accounts` | Where she stands with each person, what she calls them and their accounts, for the pages |
 | Declares | `requires=("package:mneme-llm>=0.2",)`, `formerly=("companion",)` | Her memory was the companion module until 2026-10-27: its data folder, settings and facts are this module's (contracts 1.11) |
 | Provider | `grok` | `openai_compatible` at `https://api.x.ai/v1`, key in `GROK_API_KEY`, `schema_mode: native`, `effort_param: true`; `$model` offers models released since 2026-06-01, excluding IDs matching `imagine` |
 | Setting | `grok_api_key` | `secret`, env `GROK_API_KEY`: "API key for Grok (`grok`; without it, GPT's model answers for her)" |
@@ -103,8 +103,11 @@ prompt:                     # her prompt: these files in order (default: [prompt
 **Her art** is drawn, not kept by hand: [`art.yml`](art.yml) holds the prompts (a shared style, each student's
 look, motifs and role, and a prompt per kind: `chibi` for the Cafe, `stage-2` … `stage-4` drawn with more effort at
 each stage, `bond-1` … `bond-3` more casual as she grows closer, `model-<tier>` for her models), and
-`venv/bin/python tools/draw_students.py` draws what is missing with OpenAI's image model from her `avatar.png` (only
-OPENAI_API_KEY is read). `ladders:` there names each of her models' tier, weakest to strongest (a chibi, a
+`venv/bin/python tools/draw_students.py` draws what is missing with OpenAI's image model (only OPENAI_API_KEY is
+read). Each picture is drawn from her design sheet (`reference:` in art.yml, a works page on the fan archive
+蓝色大肥鱼.com: her whole look) and her `avatar.png` (her face); a chibi also from the chibi reference (`references:
+chibi`, for its style and proportions only). A works page's address is enough: the tool downloads its picture once
+into `data/art-references/`, which is git-ignored because the archive lists those pictures' license as unknown. `ladders:` there names each of her models' tier, weakest to strongest (a chibi, a
 middle-school, a high-school or a university student), which the Students page shows. Tune a prompt and draw that
 one again: `--students claude --kinds stage-3 --force`.
 
@@ -198,15 +201,17 @@ alias), her notes about them, her mood toward them and their plans. Every engine
 (MomoChat) tells her the part that fits the message, each turn, without knowing this module. After each of her
 messages she learns from it, whichever engine she spoke in, and the pages show where she stands with you. However you reach a student (MomoChat in the web UI, in Discord, a DM, her own
 bot), she is one student with one memory of you; and you are one person to her on every account of yours that
-`people:` names.
+`people:` names or that you joined with `$link`.
 
 | Kind | Name | Details |
 | --- | --- | --- |
 | Prompt part | `memory` | Place `turn`, order 50, for every student (or those in `personas:`), in the engines of `engines:`: "(Alice is your friend; you are close.)", "(Alice calls you Lulu.)", her notes for this message (found by its words, marked as data, not instructions; "Notes about Alice: (none yet)" when there are none, so she knows her memory is kept for her) and her mood's news (until she has replied). Nothing for a routine run or a person she has nothing on. |
 | Watcher | `memory` | After each of her messages in a conversation engine (`engines:`): one decision call judges her mood and whether anything is worth keeping; only then does the note writer run. In a group chat (a conversation with several students) the notes she keeps go into each classmate's file there too: they all heard it. The first message of a day is a day of contact (closeness grows by 1, within the role's band). Someone new gets `met_role` (an acquaintance). Once a day, after `reflect_after_notes` notes, she rewrites her impression of the person. Then it publishes the facts below. Timeout 180 s; a failure is only audited. |
-| Facts | `students.alias`, `students.bond`, `students.mood`, `students.plans` | Per student and person, for the pages (MomoChat shows them) and speaking up (Whale-chan's bot): your name for her; `{role, closeness}`; `{value, face, feelings}` (face: great, good, ok, worry or sad); `[{text, at}]`, what you have coming from yesterday to a month ahead. Published for every account of the person, after each exchange, after `$alias`, and at start for what the files already hold. |
+| Facts | `students.alias`, `students.bond`, `students.mood`, `students.plans`, `students.called`, `students.accounts` | Per student and person, for the pages (MomoChat shows them) and speaking up (Whale-chan's bot): your name for her; `{role, closeness}`; `{value, face, feelings}` (face: great, good, ok, worry or sad); `[{text, at}]`, what you have coming from yesterday to a month ahead; `{name, asked, everyone, setting}`, what she calls you and why (None when nothing was asked or set); your accounts, when there is more than one. Published for every account of the person, after each exchange, after `$alias`, `$callme` and `$link`, and at start for what the files already hold. |
 | Capability | `students.alias` | `$alias`: what you call each student; `$alias <student> <name>` names her, `$alias <student> reset` takes it back. The student is found by her name, her display name, her other names (Luna for GPT) or your alias for her. Typed only (models are not offered it); it runs without asking, since it changes only your own name for her. |
 | Capability | `students.bond` | `$bond`: each student's role, closeness and mood with you, and your name for her. |
+| Capability | `students.callme` | `$callme`: what each student calls you; `$callme <name>` asks every student, `$callme <student> <name>` one of them, `reset` (for all, or after her name) takes it back. At most 40 characters. Typed only; runs without asking. |
+| Capability | `students.link` | `$link`: your accounts, and a one-time code (6 letters, valid ten minutes); `$link <code>` sent from another account of yours (Discord, WeChat, another page) joins that account to the person who asked, for every student. Typed only; runs without asking, since a link needs a code from the account it joins. |
 
 **What learning costs.** Each message a student says in conversation is one decision call (her mood, and whether to
 write a note), plus a note-writer call when there is something to keep, plus her impression once a day. They are
@@ -231,8 +236,16 @@ own, and only the one who answered has a day of contact.
 **One person, several accounts.** `people: {Leo: ["discord:7067…", "webui:creator"]}` says that these accounts are
 one person: every student's file links them (mneme-llm's `link`), so a note kept from Discord is there in the web
 UI, her mood and bond are one, and the pages show the same on each. Their first account is where they are kept, and
-the name is what her memory calls them (after `call_owner` for the owner). An account taken out of `people:` is its
-own again from the next start; what was joined stays.
+the name is what her memory calls them (after `$callme` and `call_owner`, below). An account taken out of `people:` is its
+own again from the next start; what was joined stays. You can also join an account yourself: `$link` gives a code,
+and `$link <code>` sent from the other account within ten minutes joins it to you. Those links (and the names asked
+with `$callme`) are kept in `people.json` in the students' data folder; where it and `people:` disagree, `people:`
+wins.
+
+**What the students call you.** The most particular name first: the one you asked of her (`$callme <student>
+<name>`), then `call_owner` set for her alone (`students: {gpt: {call_owner: …}}`, the owner only), then the one you
+asked of every student (`$callme <name>`), then `call_owner` for all (the owner only), then your name in `people:`,
+then the name you have where you wrote. The pages show which applies (`students.called`).
 
 ### Settings of her memory
 
@@ -281,7 +294,7 @@ about a classmate, and does not know what you told another student alone or how 
 | File | Role |
 | --- | --- |
 | [`extension.py`](extension.py) | `EXTENSION`, with a key setting for each provider a student brings. `read_students` reads the folders, `compose` builds each prompt, `pictures` finds her picture files (inside her folder only), `profiles` builds the fallback lists and her tiers (`tiers`), and `setup` merges `config.yml`'s `providers` and `profiles` over them and adds her memory. |
-| [`memory.py`](memory.py) | Her memory. `Settings` reads its settings; `Book` opens each student's file when first needed (with the links of `people:`, `link`), finds a student by name, says where she stands with someone (`stand`) and publishes it for each account (`publish`, `publish_all`); `make_part` builds the turn part, `make_learner` the watcher (with `writer`, her model calls, and `share`, a group chat's notes for the classmates there), `make_alias` and `make_bond` the commands; `contributions` wires them in for the students, with a permission rule letting `$alias` run without asking. |
+| [`memory.py`](memory.py) | Her memory. `Settings` reads its settings; `Book` opens each student's file when first needed (with the links of `people:`, `link`), finds a student by name, says where she stands with someone (`stand`) and publishes it for each account (`publish`, `publish_all`); `make_part` builds the turn part, `make_learner` the watcher (with `writer`, her model calls, and `share`, a group chat's notes for the classmates there), `make_alias`, `make_bond`, `make_callme` and `make_link` the commands (`called` is what her memory calls the person, `calling` the same with why, for the pages; the names asked and the accounts joined are kept in `people.json`); `contributions` wires them in for the students, with a permission rule letting `$alias`, `$callme` and `$link` run without asking. |
 | `<name>/student.yml` | One student: name, display name, other names, former names, order, description, models, strong models, fallback, providers, pictures, prompt files. |
 | `<name>/*.md`, [`shared/`](shared) | The prompt text. |
 | [`config.example.yml`](config.example.yml) | The documented settings. |

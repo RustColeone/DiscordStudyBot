@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
   <title>{{title}}</title>
+  <script src="static/prefs.js"></script>
   <link rel="stylesheet" href="static/style.css">
   <link rel="icon" type="image/png" href="favicon.ico">
   <link rel="apple-touch-icon" href="favicon.ico">
@@ -17,6 +18,7 @@
   <script defer src="static/i18n.js"></script>
   <script defer src="static/markdown.js"></script>
   <script defer src="static/places.js"></script>
+  <script defer src="static/voice.js"></script>
   <script defer src="static/app.js"></script>
 </head>
 <body>
@@ -24,7 +26,10 @@
     <header class="site-header">
       <span class="site-brand"><span class="site-name">ChimeraArchive</span><span class="site-page"></span></span>
       <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
-      <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
+      <div class="site-end">
+        <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
+        <a class="user-tab" id="user-tab" hidden></a>
+      </div>
     </header>
     <!-- Inside the app: the app is fixed (a stacking context of its own), so the scrim must stack among its
          panels (below them, above the chat), not over the whole app. -->

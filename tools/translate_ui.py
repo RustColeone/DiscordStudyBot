@@ -22,7 +22,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = [ROOT / "plugins/webui/static" / name for name in
-           ("app.js", "cafe.js", "students.js", "places.js", "index.html", "cafe.html", "students.html", "login.html")] + \
+           ("app.js", "cafe.js", "students.js", "places.js", "me.js", "index.html", "cafe.html", "students.html",
+            "login.html", "me.html")] + \
           [ROOT / "extensions/chimera/web/static" / name for name in ("app.js", "index.html")]
 TARGETS = [ROOT / "plugins/webui/static/i18n-zh.js", ROOT / "extensions/chimera/web/static/i18n-zh.js"]
 # Words the servers send that the pages show as they are (place names, the stamina card, the core's notices).
@@ -46,7 +47,9 @@ page; student card → 学生档案; classmate → 同学; club → 社团; clas
 session → 委托; new session → 新委托; team → 编队; seat → 席位; formation → 阵型; planner → 策划; builder → 制作;
 drafter → 起草; judge → 评审; tester → 测试员; takes over → 接手; land it → 采纳; send back → 退回; discard → 放弃;
 benchmark → 实测; budget → 预算; allowance → 额度; daily allowance → 每日体力上限; account → 账户; mood → 心情;
-middle-schooler → 初中生; high-schooler → 高中生; university student → 大学生"""
+middle-schooler → 初中生; high-schooler → 高中生; university student → 大学生; your page → 个人主页; what the students
+call you → 学生们对你的称呼; account → 账号 (a login: Discord, WeChat); link an account → 绑定账号; theme → 主题;
+voice → 语音; creator → 创造者"""
 
 
 ESCAPES = {"n": "\n", "t": "\t"}

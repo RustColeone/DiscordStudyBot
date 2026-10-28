@@ -1,8 +1,12 @@
-"""Draw the students' art with OpenAI's image model (extensions/students/art.yml), from each one's avatar.png.
+"""Draw the students' art with OpenAI's image model (extensions/students/art.yml), from her design sheet and avatar.
 
     python tools/draw_students.py                          # everything not drawn yet
     python tools/draw_students.py --students claude --kinds stage-3 --force   # draw one again after tuning it
     python tools/draw_students.py --dry-run                # what it would draw, and the prompts
+
+Each picture is drawn from her design sheet (`reference:` in art.yml, a works page of the fan archive or a picture's
+address) and her avatar.png; a kind with a `reference:` of its own (the chibi) gets that picture first. References are
+downloaded once into data/art-references/ (git-ignored), at most 1536 pixels on the long side.
 
 Each picture goes to extensions/students/<name>/art/<kind>.webp (portraits at most 768×1152, chibis 512×512, so the
 repository stays small); the students module serves every picture in art/ by its file name. Her model ladder
@@ -19,13 +23,17 @@ import io
 import json
 import os
 import sys
+import re
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 STUDENTS = ROOT / "extensions" / "students"
+REFERENCES = ROOT / "data" / "art-references"
 LIMITS = {"chibi": (512, 512)}  # kind → the largest size kept; anything else: a portrait
 PORTRAIT = (768, 1152)
 
@@ -38,6 +46,51 @@ def load_key(env_file: Path | None) -> str:
         if line.strip().startswith("OPENAI_API_KEY="):
             return line.split("=", 1)[1].strip().strip("\"'")
     return ""
+
+
+def ascii_url(url: str) -> str:
+    """An address urllib can open: the host in IDNA (蓝色大肥鱼.com), the path quoted."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname.encode("idna").decode() + (f":{parts.port}" if parts.port else "")
+    return urllib.parse.urlunsplit((parts.scheme, host, urllib.parse.quote(parts.path, safe="/%"), parts.query, ""))
+
+
+def fetch(url: str) -> bytes:
+    request = urllib.request.Request(ascii_url(url), headers={"User-Agent": "Mozilla/5.0 (draw_students)"})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return response.read()
+
+
+def reference(label: str, url: str) -> Path:
+    """The picture a reference names, kept in data/art-references/<label>.png: a works page gives its original."""
+    target = REFERENCES / f"{label}.png"
+    if target.is_file():
+        return target
+    if url.endswith(".html"):
+        page = fetch(url).decode("utf-8", "replace")
+        found = re.search(r"raw\.githubusercontent\.com/[^\"' )]+/originals/[^\"' )]+", page) \
+            or re.search(r"/submissions/large/[^\"' )]+", page)
+        if found is None:
+            raise SystemExit(f"{label}: no picture found on {url}")
+        url = ("https://" + found.group(0)) if found.group(0).startswith("raw.") else urllib.parse.urljoin(url, found.group(0))
+    from PIL import Image
+    image = Image.open(io.BytesIO(fetch(url)))
+    image.thumbnail((1536, 1536), Image.LANCZOS)
+    REFERENCES.mkdir(parents=True, exist_ok=True)
+    image.save(target, "PNG")
+    return target
+
+
+def pictures_for(plan: dict, name: str, kind: str) -> list[Path]:
+    """What she is drawn from: the kind's own reference (the chibi style) first, her design sheet, her avatar."""
+    found = []
+    own = plan["kinds"][kind].get("reference")
+    if own:
+        found.append(reference(own, plan["references"][own]))
+    sheet = (plan["students"].get(name) or {}).get("reference")
+    if sheet:
+        found.append(reference(name, sheet))
+    return found + [STUDENTS / name / "avatar.png"]
 
 
 def wanted(plan: dict, name: str) -> list[str]:
@@ -90,7 +143,10 @@ def main() -> int:
     if arguments.dry_run:
         for name, display, kind, target in jobs:
             options = plan["kinds"][kind]
-            print(f"{name}/{kind}: {options.get('size')} {options.get('quality')}\n  {prompt_for(plan, name, display, kind)}\n")
+            sheets = [options.get("reference"), "design sheet" if (plan["students"].get(name) or {}).get("reference") else None]
+            print(f"{name}/{kind}: {options.get('size')} {options.get('quality')} · from "
+                  f"{', '.join(item for item in sheets if item) or 'her avatar'} and her avatar\n"
+                  f"  {prompt_for(plan, name, display, kind)}\n")
         print(f"{len(jobs)} picture(s) to draw")
         return 0
     key = load_key(Path(arguments.env_file) if arguments.env_file else None)
@@ -102,12 +158,15 @@ def main() -> int:
     totals = {"pictures": 0, "input_tokens": 0, "output_tokens": 0}
     for index, (name, display, kind, target) in enumerate(jobs, 1):
         options = dict(plan["kinds"][kind])
-        reference = io.BytesIO((STUDENTS / name / "avatar.png").read_bytes())
-        reference.name = "reference.png"
+        images = []
+        for number, path in enumerate(pictures_for(plan, name, kind)):
+            picture = io.BytesIO(path.read_bytes())
+            picture.name = f"reference-{number}.png"
+            images.append(picture)
         extra = {"background": options["background"]} if options.get("background") else {}
         started = time.monotonic()
         try:
-            response = client.images.edit(model=plan["model"], image=[reference], prompt=prompt_for(plan, name, display, kind),
+            response = client.images.edit(model=plan["model"], image=images, prompt=prompt_for(plan, name, display, kind),
                                           size=options.get("size", "1024x1024"), quality=options.get("quality", "medium"),
                                           output_format="png", **extra)
         except Exception as error:  # say it and go on with the rest (an empty account stops everything after it too)

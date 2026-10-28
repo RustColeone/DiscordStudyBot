@@ -275,7 +275,9 @@ class WebUI(Interface):
             web.get("/api/cafe", self._cafe_state), web.get("/rooms/{name}", self._room),
             web.get("/students", self._students_page), web.get("/api/students", self._students_state),
             web.get("/pictures/{name}/{kind}", self._picture), web.post("/api/alias", self._alias),
-            web.post("/api/stamina", self._stamina),
+            web.post("/api/stamina", self._stamina), web.get("/me", self._me_page),
+            web.get("/api/me", self._me_state),
+            web.post("/api/callme", self._callme), web.post("/api/link", self._link),
             web.get("/files/{file_id}", self._file), web.get("/api/history", self._history),
             web.post("/api/upload", self._upload), web.get("/ws", self._socket)])
         self._runner = web.AppRunner(app, access_log=None)
@@ -312,7 +314,9 @@ class WebUI(Interface):
                             "avatar": avatar_key(item["name"])} for item in self.roster],
                 "views": [{"name": "Cafe", "icon": "☕", "path": "cafe", "order": 10},
                           {"name": "MomoChat", "icon": "💬", "path": "", "order": 20, **off},
-                          {"name": "Students", "icon": "👥", "path": "students", "order": 40}]}
+                          {"name": "Students", "icon": "👥", "path": "students", "order": 40}],
+                # your tab in every page's header (places.js renderYou): your page, and what the students call you
+                "you": {"path": "me", "name": self.you_name()}}
 
     def here(self) -> dict:
         return {"interface": self.name, "link": self.address_shown, **self.place()}
@@ -378,11 +382,12 @@ class WebUI(Interface):
         if origin is not None and origin != f"{scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
             return self._refuse(request, "origin", "Cross-site requests are refused.")
-        public = request.path in ("/login", "/static/style.css", "/static/i18n.js", "/static/i18n-zh.js",
+        public = request.path in ("/login", "/static/style.css", "/static/prefs.js", "/static/i18n.js",
+                                 "/static/i18n-zh.js",
                                  "/favicon.ico") or bool(
             re.fullmatch(r"/static/nunito[a-z-]*\.woff2", request.path))  # the sign-in page uses the font too
         if self.passphrase and not public and not self._signed_in(request):
-            if request.method == "GET" and request.path in ("/", "/cafe", "/students"):  # the pages: sign in first
+            if request.method == "GET" and request.path in ("/", "/cafe", "/students", "/me"):  # the pages: sign in first
                 raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path (/chat/login)
             return self._secured(web.Response(status=401, text="Sign in first."))
         return self._secured(await handler(request))
@@ -577,6 +582,68 @@ class WebUI(Interface):
                     for item in self.standing()]
         return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
                 "here": self.here(), "places": self._places(), "stamina": self.stamina_total()}
+
+    def _fact(self, values: dict, kind: str):
+        return next((value for key, value in values.items() if key.rsplit(".", 1)[-1] == kind), None)
+
+    def you_name(self) -> str:
+        """What the students call you, when you asked it of all of them (`$callme`), else your name here."""
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        for item in self.roster if callable(facts) else ():
+            called = self._fact(facts(item["name"], self.user_id), "called") or {}
+            if called.get("everyone"):
+                return str(called["everyone"])
+        return self.user_name
+
+    def you(self) -> dict:
+        """You, for your page: the name every student calls you, what each one calls you and why (the students
+        module's facts: what you asked of her, of everyone, or her `call_owner` setting), who you are to her, the
+        accounts the students know as you, and your account here."""
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        account = f"{self.name}:{self.user_id}"
+        students, everyone, accounts = [], None, None
+        for item in self.roster:
+            values = facts(item["name"], self.user_id) if callable(facts) else {}
+            called, bond = self._fact(values, "called") or {}, self._fact(values, "bond") or {}
+            everyone = everyone or called.get("everyone")
+            accounts = accounts or self._fact(values, "accounts")
+            students.append({"name": item["name"], "display": item["display"], "avatar": avatar_key(item["name"]),
+                             "called": called.get("name"), "asked": called.get("asked"),
+                             "setting": called.get("setting"), "role": bond.get("role")})
+        return {"title": self.title, "user_name": self.user_name, "everyone": everyone, "account": account,
+                "accounts": accounts or [account], "students": students, "avatars": self.avatars(),
+                "here": self.here(), "places": self._places(), "stamina": self.stamina_total()}
+
+    async def _me_page(self, request: web.Request) -> web.Response:
+        page = (self.folder / "static" / "me.html").read_text(encoding="utf-8")
+        return web.Response(text=self._fill(page, title=self._html(self.title), data=self._json(self.you())),
+                            content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    async def _me_state(self, request: web.Request) -> web.Response:
+        return web.json_response(self.you(), headers={"Cache-Control": "no-cache"})
+
+    async def _callme(self, request: web.Request) -> web.Response:
+        """What the students call you, from your page: `$callme [<student>] <name>` (or `reset`), sent quietly as
+        you."""
+        try:
+            body = await request.json()
+            persona, name = str(body.get("persona") or ""), " ".join(str(body.get("name") or "").split())
+        except (ValueError, AttributeError):
+            raise web.HTTPBadRequest() from None
+        if (persona and persona not in self.personas) or not name or len(name) > ALIAS_MAX:
+            raise web.HTTPBadRequest()
+        text = f"$callme {persona} {name}" if persona else f"$callme {name}"
+        answer = await self._quietly(DEFAULT_CONVERSATION, text, "callme")
+        if answer.get("ok") and self.map and callable(getattr(self.port, "publish", None)):
+            self.port.publish(link=self.address_shown, status=self.place())  # your tab, on every page
+        return web.json_response({"ok": bool(answer.get("ok")), "text": answer.get("text") or "", "you": self.you()})
+
+    async def _link(self, request: web.Request) -> web.Response:
+        """A code to join another account of yours (`$link`), sent quietly as you."""
+        answer = await self._quietly(DEFAULT_CONVERSATION, "$link", "link")
+        code = re.search(r"`\$link ([A-Z0-9]{6})`", answer.get("text") or "")
+        return web.json_response({"ok": bool(answer.get("ok") and code), "text": answer.get("text") or "",
+                                  "code": code.group(1) if code else None})
 
     def students(self) -> dict:
         """Every student for the Students page: who she is and where she stands with you (as the cafe has it), her

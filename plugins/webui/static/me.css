@@ -1,0 +1,57 @@
+/* Your page (/me): what the students call you, and this browser's settings (theme, language, voice). */
+.me-body { overflow: auto; background: var(--bg); }
+.me-body .site-header { position: sticky; top: 0; z-index: 30; }
+.me { max-width: 880px; margin: 0 auto; padding: 20px 24px 48px; display: grid; gap: 18px;
+      grid-template-columns: minmax(0, 1fr); }
+.me-hero { display: flex; align-items: center; gap: 18px; min-width: 0; }
+.me-hero > div { min-width: 0; }
+.me-face { display: grid; place-items: center; flex: none; width: 76px; height: 76px; border-radius: 50%;
+           background: var(--accent); color: var(--accent-ink); font-size: 36px; font-weight: 900; }
+.me-hero h1 { margin: 0; font-size: 30px; font-weight: 900; line-height: 1.1; overflow-wrap: anywhere; }
+.me-hero p { margin: 6px 0 0; color: var(--ink-2); font-size: 15px; }
+.me-card { min-width: 0; padding: 18px 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper);
+           box-shadow: var(--shadow); }
+.me-card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 900; }
+.me-card > p, .me-note { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.me-note { margin: 10px 0 0; }
+.me-card a { color: inherit; font-weight: 800; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.me-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.me-row input[type="text"], .me-row input[type="number"] { flex: 1 1 220px; min-width: 0; min-height: 44px; padding: 0 12px;
+           border: 1px solid var(--line-2, var(--line)); border-radius: 12px; background: var(--bg); font-size: 15px; }
+.me-row input[type="number"] { flex: 0 1 140px; }
+.me-button { min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: var(--accent);
+             color: var(--accent-ink); font-weight: 900; }
+.me-button.is-quiet { background: var(--panel); color: var(--ink); }
+.me-button:disabled { opacity: .5; cursor: default; }
+.me-choice { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 999px; background: var(--panel); width: fit-content; }
+.me-choice button { min-height: 40px; padding: 6px 16px; border: 0; border-radius: 999px; background: transparent;
+                    color: var(--ink-2); font-size: 15px; font-weight: 800; }
+.me-choice button[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 2px 8px rgba(110, 78, 45, .15); }
+.me-students { display: grid; gap: 8px; margin-top: 14px; }
+.me-student { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px;
+              padding: 8px 10px; border-radius: 14px; background: var(--bg); }
+.me-student img, .me-student .me-initial { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+.me-initial { display: grid; place-items: center; background: var(--panel); font-weight: 900; }
+.me-student-name { font-weight: 900; }
+.me-student-line { color: var(--ink-2); font-size: 14px; overflow-wrap: anywhere; }
+.me-why { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--panel);
+          color: var(--muted); font-size: 12px; font-weight: 800; }
+.me-student form { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.me-student form input { flex: 1 1 180px; min-width: 0; min-height: 40px; padding: 0 10px; border: 1px solid var(--line);
+                         border-radius: 10px; background: var(--paper); }
+.me-switch { display: flex; align-items: center; gap: 12px; font-weight: 800; cursor: pointer; }
+.me-switch input { width: 22px; height: 22px; accent-color: var(--accent); }
+.me-range { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: var(--ink-2); font-weight: 700; }
+.me-range input { flex: 1 1 200px; accent-color: var(--accent); }
+.me-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.me-chip { padding: 4px 10px; border-radius: 999px; background: var(--panel); font-family: var(--mono, monospace); font-size: 13px; }
+.me-code { display: inline-block; padding: 6px 14px; border-radius: 10px; background: var(--panel); font-family: var(--mono, monospace);
+           font-size: 22px; font-weight: 900; letter-spacing: .12em; }
+.me-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 60; max-width: min(560px, 92vw);
+            padding: 10px 16px; border-radius: 12px; background: #3d3129; color: #fffbf5; font-weight: 700; }
+.me-toast[hidden] { display: none; }
+@media (max-width: 760px) {
+  .me { padding: 16px 16px 96px; gap: 14px; }
+  .me-hero h1 { font-size: 24px; }
+  .me-face { width: 60px; height: 60px; font-size: 28px; }
+}

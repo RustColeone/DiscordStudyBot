@@ -220,15 +220,22 @@ Artificial Analysis's free list (core/providers/prices.py); a module reads them 
 each step's cost and each seat's price from them.
 
 The core also keeps **stamina** (core/manager/stamina.py): what each persona spends a day against her allowance
-(core.yml `stamina: allowance`, $0.50 by default; `personas:` per persona; 0 turns it off) and the account she spends
+(core.yml `stamina: allowance`, $0.50 by default; `personas:` per persona; 0 turns it off), what everyone spends
+together against the day's total (`stamina: total`, $2.00 by default; 0 turns it off), and the account she spends
 from (`accounts:` a balance her provider reports, DeepSeek's, or a budget you enter). Before each model call, a run
-whose persona has spent her allowance today, or that has spent its own budget (`Request.extra["budget_usd"]`, which
-the Classroom sets from the team picker), waits for the owner: a `core.stamina` card ("DeepSeek has spent her $0.50
-for today. Let her spend $0.50 more today?"). Approved, the limit grows and the run carries on where it was (an engine
-that saves its state per step goes on; one that starts over makes its calls again); denied, the run stops with the
-reason. The wait reaches the core as `Paused`, a BaseException, so an engine's own `except Exception` lets it pass. A
-watcher's calls are counted, never stopped. Pages read it with `port.stamina(persona)`: `{today: {spent, allowance,
-left, day}, account: {provider, kind, currency, total, left, as_of}}`.
+when everyone together has spent the day's total, whose persona has spent her allowance today, or that has spent its
+own budget (`Request.extra["budget_usd"]`, which the Classroom sets from the team picker), waits for the owner: a
+`core.stamina` card ("DeepSeek has spent her $0.50 for today. Let her spend $0.50 more today?"; at the total,
+"Everyone together has spent today's $2.00. …"). Approved, the limit grows by `step` and the run carries on where it
+was (an engine that saves its state per step goes on; one that starts over makes its calls again); denied, the run
+stops with the reason. The wait reaches the core as `Paused`, a BaseException, so an engine's own `except Exception`
+lets it pass. A watcher's calls are counted, never stopped. Pages read it with `port.stamina(persona)`: `{today:
+{spent, allowance, left, day}, account: {provider, kind, currency, total, left, as_of}}`; `port.stamina()` with no
+persona gives everyone's day against the total (`{today: {...}}`), and `port.spending(days)` what was spent each day
+(chats, sessions, memories), newest last: `[{day, total, personas: {name: dollars}}]`. The owner's `$stamina`
+(`core.stamina_settings`) shows the day and changes the total (`$stamina total 3`), an allowance (`$stamina deepseek
+0.8`, `reset` back to core.yml's) or an account's budget (`$stamina budget openai 20`, counted from today); what it
+sets is kept in the core's store, over core.yml.
 
 ### Prompt parts
 
@@ -328,8 +335,10 @@ them, so a fact is never a module's private state (that goes in its stores).
   with what is published about her and that person of this interface over it. It reads only its own people.
 * Pages look for the names they know, whichever module publishes them: `alias` (a string), `bond`
   (`{"role", "closeness"}`, 0 to 100), `mood` (`{"value", "face", "feelings"}`; `face` is great, good, ok, worry
-  or sad), `plans` (`[{"text", "at"}]`, what the person has coming; Whale-chan's speaking up asks about them).
-  Level and stamina are to follow the same way.
+  or sad), `plans` (`[{"text", "at"}]`, what the person has coming; Whale-chan's speaking up asks about them),
+  `called` (`{"name", "asked", "everyone", "setting"}`, what she calls the person and why) and `accounts` (the
+  person's accounts, when there is more than one). Chimera publishes `record` (with her `level`) and `benchmark`.
+  Stamina is not a fact: pages read it from the core with `port.stamina` ([Prices and stamina](#prices-and-stamina)).
 * Facts are kept in the tank (`core:facts`) and last across restarts. Publish again at start what your own data
   already holds, so a page shows it before anyone talks.
 
@@ -749,7 +758,7 @@ for members and every conversation's items for admins. Describe the admin behavi
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
 `run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
 `history` (contracts 1.6: the calling conversation's history to read, `recent`, `search` and `summary`, as engines see
-it; for capabilities that carry a conversation elsewhere or work from it, such as the workbench's invitation to the
+it; for capabilities that carry a conversation elsewhere or work from it, such as Chimera's `chimera.invite` to the
 Classroom; a capability cannot change it);
 `files` (files people attached to the run's requests; `own_files`: only those of the person who started the run, which is what anything writing them somewhere should use); `storage` (your extension's private store, shared by your capabilities, the same as `store()`; `store(conversation=, persona=, person=)` scopes it, see [Storing data](#storing-data); committed on
 `set`); `models` (model calls through the core, counted in the run's budget); `workspace` (a

@@ -5,15 +5,17 @@ Every engine that places prompt parts (MomoChat) tells her, each turn, who the p
 her notes for the message and her mood's news. After each of her messages a watcher lets her learn from it: how it
 left her feeling, what is worth remembering, and a day of contact for her closeness with the person. What was said in
 a group chat, every student there heard: the notes one keeps of it go into each classmate's file too; a direct chat
-stays between the two. A person with several accounts (`people:`) is one person to every student. Pages see where she
-stands with you as facts (bond, alias, mood, plans). `$alias` names a student your way, `$bond` shows where each
-stands with you. Agents (personas that are not students) keep nothing.
+stays between the two. A person with several accounts (`people:`, or linked with `$link`) is one person to every
+student. Pages see where she stands with you as facts (bond, alias, mood, plans, what she calls you, your accounts).
+`$alias` names a student your way, `$callme` says what the students call you, `$link` joins another account of yours,
+`$bond` shows where each stands with you. Agents (personas that are not students) keep nothing.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -23,6 +25,9 @@ import mneme_llm
 
 RESET = {"reset", "remove", "clear", "none"}
 DAY = 86400
+NAME_MAX = 40  # what the students call you
+CODE_S = 600  # a `$link` code lasts ten minutes
+CODE_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # (no 0/O, 1/I/L)
 # The engines whose messages are conversation (Chimera's are reports on work, which teach her nothing of you), and
 # MomoChat's names before (the room, the assistant, the chat engine of a student's own Discord bot), for settings
 # that still name them.
@@ -106,6 +111,19 @@ class Book:
             self.accounts[subjects[0]] = subjects
             self.person_names[subjects[0]] = str(name)
             self.person_of.update({item: subjects[0] for item in subjects})
+        # What people asked the students to call them (`$callme`: "*" for every student, or one student's name) and
+        # the accounts they joined themselves (`$link`), kept in people.json; `people:` wins where the two disagree.
+        self.own_file = self.folder / "people.json"
+        try:
+            own = dict(json.loads(self.own_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            own = {}
+        self.calls = {str(person): {str(who): str(name) for who, name in dict(names).items()}
+                      for person, names in dict(own.get("calls") or {}).items() if isinstance(names, dict)}
+        self.links: dict[str, str] = {}
+        for account, person in dict(own.get("links") or {}).items():
+            self.join(str(account), str(person))
+        self.codes: dict[str, tuple[str, float]] = {}  # a `$link` code → (the person who asked for it, until when)
         self.settings = settings or Settings({})
         self.opened: dict[str, object] = {}
         self.index = self.folder / "names.json"  # persona → her display name and other names, as engines showed her
@@ -134,6 +152,55 @@ class Book:
     def name_of(self, subject: str) -> str:
         """The person's name in `people:` ("" for someone not named there)."""
         return self.person_names.get(self.person_of.get(subject, ""), "")
+
+    def person(self, subject: str) -> str:
+        """The person's own subject: their first account in `people:`, the account they linked from, or itself."""
+        return self.person_of.get(subject, subject)
+
+    def call(self, subject: str, who: str = "*") -> str:
+        """What the person asked to be called by a student (`who`), or by every student ("*"); "" when they did not."""
+        return self.calls.get(self.person(subject), {}).get(who, "")
+
+    def set_call(self, subject: str, who: str, name: str | None) -> None:
+        names = self.calls.setdefault(self.person(subject), {})
+        if name:
+            names[who] = name
+        else:
+            names.pop(who, None)
+        self.save()
+
+    def join(self, account: str, person: str) -> bool:
+        """`account` is another account of `person` (to every student, from now on); False when `people:` already
+        says whose it is, or it is somebody's own first account."""
+        person = self.person(person)
+        if account == person or account in self.person_of or account in self.accounts:
+            return False
+        self.links[account] = person
+        self.accounts.setdefault(person, [person]).append(account)
+        self.person_of.setdefault(person, person)
+        self.person_of[account] = person
+        for memory in self.opened.values() if hasattr(self, "opened") else ():
+            self.link(memory)
+        return True
+
+    def save(self) -> None:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        calls = {person: names for person, names in self.calls.items() if names}
+        self.own_file.write_text(json.dumps({"calls": calls, "links": self.links}, ensure_ascii=False, indent=1),
+                                 encoding="utf-8")
+
+    def code_for(self, subject: str) -> str:
+        """A one-time code (ten minutes) that joins whichever account sends it back to this person."""
+        now = time.time()
+        self.codes = {code: value for code, value in self.codes.items() if value[1] > now}
+        code = "".join(secrets.choice(CODE_LETTERS) for _ in range(6))
+        self.codes[code] = (self.person(subject), now + CODE_S)
+        return code
+
+    def redeem(self, code: str) -> str | None:
+        """The person a code was given to (it is used up), or None for a wrong or late code."""
+        person, until = self.codes.pop(code.strip().upper(), ("", 0.0))
+        return person if until > time.time() else None
 
     def people(self, subject: str) -> list[tuple[str, str]]:
         """The (interface, sender id) pairs the person a subject stands for is reached by, on every account of theirs
@@ -205,8 +272,11 @@ class Book:
     def stand(self, persona: str, subject: str) -> dict:
         """Where she stands with a person, as facts for the pages: bond, alias, mood (None: nothing to show)."""
         memory = self.open(persona)
+        calling, accounts = self.calling(persona, subject), self.accounts.get(self.person(subject), [subject])
+        own = {"called": calling if any(calling.values()) else None,  # (None: nothing asked or set)
+               "accounts": list(accounts) if len(accounts) > 1 else None}
         if memory is None:
-            return {"bond": None, "alias": None, "mood": None, "plans": None}
+            return {"bond": None, "alias": None, "mood": None, "plans": None, **own}
         relationship = memory.relations.get(subject)
         state = memory.mood.state(subject)
         now = time.time()
@@ -220,7 +290,16 @@ class Book:
                          "feelings": [[name, round(value)] for name, value in state.strongest(2, above=20)]}
                 if state.updated_at is not None else None,
                 # what the person has coming (from yesterday to a month ahead): something to ask them about
-                "plans": [{"text": note.text[:160], "at": round(note.happened_at)} for note in plans] or None}
+                "plans": [{"text": note.text[:160], "at": round(note.happened_at)} for note in plans] or None, **own}
+
+    def calling(self, persona: str, subject: str) -> dict:
+        """What she calls the owner, and why (for the pages): `name` (None: their name where they write), `asked`
+        (what they asked of her), `everyone` (what they asked of every student), `setting` (call_owner)."""
+        asked, everyone = self.call(subject, persona), self.call(subject)
+        alone = str(self.settings.students.get(persona, {}).get("call_owner") or "")
+        setting = alone or self.settings.call_owner
+        name = asked or alone or everyone or self.settings.call_owner or self.name_of(subject)
+        return {"name": name or None, "asked": asked or None, "everyone": everyone or None, "setting": setting or None}
 
     def publish(self, facts, persona: str, subject: str) -> None:
         if facts is None:
@@ -260,10 +339,13 @@ def impulse(trigger) -> str:
     return str((getattr(trigger, "extra", None) or {}).get("speak_up") or "")
 
 
-def called(book: Book, own: Settings, subject: str, owner: bool, sender) -> str:
-    """What her memory calls the person: `call_owner` for the owner, else their name in `people:`, else the name
-    they have where they wrote."""
-    return own.call_owner if own.call_owner and owner else book.name_of(subject) or sender.name or sender.id
+def called(book: Book, persona: str, subject: str, owner: bool, sender) -> str:
+    """What her memory calls the person, the most particular first: what they asked of her (`$callme <student>
+    <name>`), `call_owner` set for her alone (the owner), what they asked of every student (`$callme <name>`),
+    `call_owner` for all (the owner), their name in `people:`, the name they have where they wrote."""
+    alone = str(book.settings.students.get(persona, {}).get("call_owner") or "")
+    return (book.call(subject, persona) or (alone if owner else "") or book.call(subject)
+            or (book.settings.call_owner if owner else "") or book.name_of(subject) or sender.name or sender.id)
 
 
 def share(book: Book, settings: Settings, exchange, subject: str, notes, facts) -> list[str]:
@@ -295,7 +377,7 @@ def make_part(book: Book, settings: Settings):
         book.met(persona)
         own = settings.of(persona.name)
         subject = book.subject(context.address.interface, trigger.sender.id)
-        person = called(book, own, subject, context.owner, trigger.sender)
+        person = called(book, persona.name, subject, context.owner, trigger.sender)
         memory = book.open(persona.name)
         if memory is None:  # (nothing kept of anyone yet)
             return no_notes(person, own.language) if own.learn and own.notes else ""
@@ -336,7 +418,7 @@ def make_learner(book: Book, settings: Settings):
         book.met(persona)
         memory = book.open(persona.name, create=True)
         subject = book.subject(exchange.address.interface, trigger.sender.id)
-        person = called(book, own, subject, exchange.owner, trigger.sender)
+        person = called(book, persona.name, subject, exchange.owner, trigger.sender)
         motive = impulse(trigger)
         if own.met_role and not motive and memory.relations.get(subject) is None:
             memory.relate(subject, own.met_role)  # someone new is an acquaintance; your settings say more
@@ -395,6 +477,68 @@ def make_alias(book: Book, facts=None):
     return alias
 
 
+def publish_person(book: Book, facts, subject: str) -> None:
+    """Every student's facts for this person, on each of their accounts (after a name or a link changed)."""
+    for persona in book.known():
+        book.publish(facts, persona, subject)
+
+
+def make_callme(book: Book, facts=None):
+    async def callme(arguments, context) -> ToolResult:
+        """`$callme` shows it, `$callme <name>` asks every student, `$callme <student> <name>` one of them, and
+        `reset` (for all or for her) takes the name back."""
+        subject = book.subject(context.address.interface, context.sender.id)
+        text = " ".join(str(arguments.get("text") or "").split())
+        if not text:
+            lines = [f"{book.shown(persona)}: {book.calling(persona, subject)['name'] or context.sender.name}"
+                     for persona in book.known()]
+            return ToolResult.ok("\n".join(["What the students call you:", *lines]) if lines else "No students yet.")
+        who, _, rest = text.partition(" ")
+        persona = book.find(who, subject) if rest else None
+        name = rest if persona else text
+        shown = book.shown(persona) if persona else "every student"
+        if name.casefold() in RESET:
+            book.set_call(subject, persona or "*", None)
+            publish_person(book, facts, subject)
+            return ToolResult.ok(f"Your name for {shown} is back to the usual." if persona
+                                 else "The students call you as before.")
+        if len(name) > NAME_MAX or not re.search(r"\w", name):
+            return ToolResult.fail(f"A name of 1 to {NAME_MAX} characters, please.", "invalid_name")
+        book.set_call(subject, persona or "*", name)
+        publish_person(book, facts, subject)
+        return ToolResult.ok(f"{shown[0].upper()}{shown[1:]} will call you {name}." if persona
+                             else f"The students will call you {name}.",
+                             data={"persona": persona, "name": name})
+    return callme
+
+
+def make_link(book: Book, facts=None):
+    async def link(arguments, context) -> ToolResult:
+        """`$link` gives a code (and lists your accounts); `$link <code>`, sent from another account of yours within
+        ten minutes, makes the two one person to every student."""
+        subject = book.subject(context.address.interface, context.sender.id)
+        text = str(arguments.get("text") or "").strip()
+        if not text:
+            code = book.code_for(subject)
+            accounts = book.accounts.get(book.person(subject), [subject])
+            return ToolResult.ok(f"Your accounts: {', '.join(accounts)}. To add one, send `$link {code}` from it "
+                                 f"(Discord, WeChat, another page) within ten minutes.", data={"code": code,
+                                                                                        "accounts": accounts})
+        person = book.redeem(text)
+        if person is None:
+            return ToolResult.fail("That code is wrong or too old: ask for a new one with `$link`.", "invalid_code")
+        if book.person(subject) == person:
+            return ToolResult.ok("This account is already yours there.")
+        if not book.join(subject, person):
+            return ToolResult.fail(f"{subject} belongs to someone already (`people:` in the students' settings says "
+                                   "so, or other accounts are linked to it).", "taken")
+        book.save()
+        publish_person(book, facts, subject)
+        return ToolResult.ok(f"Linked: {subject} and {person} are one person to every student now.",
+                             data={"person": person, "account": subject})
+    return link
+
+
 def make_bond(book: Book):
     async def bond(arguments, context) -> ToolResult:
         subject = book.subject(context.address.interface, context.sender.id)
@@ -434,7 +578,14 @@ def contributions(context, students: dict[str, dict]) -> dict:
                        risk=Risk.WRITE, internal=True, command="alias", command_argument="text"),
             Capability("students.bond", "Where each student stands with you.", make_bond(book), risk=Risk.READ,
                        internal=True, command="bond"),
+            Capability("students.callme", "Show or set what the students call you.", make_callme(book, facts),
+                       {"text": {"type": "string", "description": "<name>, <student> <name>, reset, or nothing"}},
+                       risk=Risk.WRITE, internal=True, command="callme", command_argument="text"),
+            Capability("students.link", "Join another account of yours, with a code.", make_link(book, facts),
+                       {"text": {"type": "string", "description": "a code from `$link`, or nothing for a new one"}},
+                       risk=Risk.WRITE, internal=True, command="link", command_argument="text"),
         ],
-        # Naming a student changes only your own name for her, and only you can type it (models are not offered it).
-        "permissions": {"*": {"rules": {"students.alias": "auto"}}},
+        # Each changes only what is yours (your name for her, her name for you, your own accounts: a link needs a
+        # code from the account it joins), and only you can type them (models are not offered them).
+        "permissions": {"*": {"rules": {"students.alias": "auto", "students.callme": "auto", "students.link": "auto"}}},
     }

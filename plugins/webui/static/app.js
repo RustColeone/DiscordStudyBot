@@ -799,6 +799,7 @@
     if (live && item.speaker && item.kind === "text" && !item.label) {
       const name = classmateIn(item.speaker);
       if (name) { state.spoke.set(name, Date.now()); renderMembers(); setTimeout(renderMembers, 4100); }
+      if (name && item.conversation === state.current && !document.hidden) window.studentVoice?.speak(name, item.text);
     }
     if (stick || item.kind === "user") scrollDown();
   }

@@ -2,7 +2,8 @@
 // The places bar: every place's views, from what each interface publishes in the core's directory (`views` in its
 // status: name, icon, a path relative to its link, and an `order`), sorted by order, so each page links to the
 // others without knowing them. `places` is {here, others}; `current` names this page's view. It sits in the page's
-// header between the project's name and the stamina; on a phone it is the bar along the bottom. (The Classroom serves
+// header between the project's name and the stamina (then your tab, `renderYou`); on a phone it is the bar along the
+// bottom. (The Classroom serves
 // the same file: keep the two alike.)
 (() => {
   // Drawn icons for the views this project knows; any other view shows the emoji its place published.
@@ -108,6 +109,41 @@
     };
   };
 
+  // ---- you: the tab right of the stamina, to your own page ----------------------------------------------------------
+  // The web UI publishes it with its place (`you: {path, name}`, the path relative to its link); any page with the
+  // directory's places finds it there. `current` is true on your page itself.
+  window.renderYou = (holder, places, { current = false } = {}) => {
+    if (!holder) return;
+    let you = null, href = "";
+    if (places?.here?.you) { you = places.here.you; href = String(you.path || "me"); }
+    else {
+      for (const place of places?.others || []) {
+        if (!place?.you) continue;
+        try {
+          const url = new URL(String(place.you.path || "me"), place.link || "");
+          if (/^https?:$/.test(url.protocol)) { you = place.you; href = url.href; break; }
+        } catch { /* a place without a link */ }
+      }
+    }
+    holder.hidden = !you;
+    if (!you) return;
+    const name = String(you.name || "You");
+    holder.href = href;
+    holder.classList.toggle("is-current", current);
+    if (current) holder.setAttribute("aria-current", "page"); else holder.removeAttribute("aria-current");
+    holder.title = window.t ? window.t("Your page: settings, and what the students call you") :
+      "Your page: settings, and what the students call you";
+    const face = document.createElement("span");
+    face.className = "user-face";
+    face.setAttribute("aria-hidden", "true");
+    face.textContent = [...name.trim()][0]?.toUpperCase() || "?";
+    const label = document.createElement("span");
+    label.className = "user-name";
+    label.setAttribute("data-no-i18n", "");
+    label.textContent = name;
+    holder.replaceChildren(face, label);
+  };
+
   window.renderPlaces = (nav, places, current) => {
     if (!nav) return;
     const entries = [];
@@ -150,5 +186,6 @@
     // On a phone the header names the page instead of the project.
     const page = document.querySelector(".site-page");
     if (page) page.textContent = current || "";
+    window.renderYou(document.getElementById("user-tab"), places, { current: current === "You" });
   };
 })();

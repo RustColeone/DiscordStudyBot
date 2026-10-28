@@ -142,6 +142,46 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("(Ally is someone you know", turn)  # her role on the first account
         self.assertEqual(self.facts("gpt", "al")["students.bond"], self.facts("gpt")["students.bond"])
 
+    async def test_what_the_students_call_you_the_most_particular_first(self):
+        script = room.Script(GPT=[room.turn("Hi!"), room.turn("Yo.")], Gemini=[room.turn("Hey."), room.turn("Hm.")])
+        chat = await self.start(script, {"learn": False})
+        await self.say(chat, "$alias gpt Lulu")
+        await self.say(chat, "$alias gemini Gem")
+        self.assertEqual(await self.say(chat, "$callme Captain"), "The students will call you Captain.")
+        self.assertEqual(await self.say(chat, "$callme gemini Sensei"), "Gemini will call you Sensei.")
+        await self.say(chat, "GPT, hi")
+        await self.say(chat, "Gemini, hi")
+        self.assertIn("(Captain calls you Lulu.)", self.seen(script, "GPT"))
+        self.assertIn("(Sensei calls you Gem.)", self.seen(script, "Gemini"))  # hers, over the one for everyone
+        self.assertEqual(self.facts("gemini")["students.called"],
+                         {"name": "Sensei", "asked": "Sensei", "everyone": "Captain", "setting": None})
+        self.assertIn("GPT: Captain", await self.say(chat, "$callme"))
+        self.assertEqual(await self.say(chat, "$callme gemini reset"), "Your name for Gemini is back to the usual.")
+        self.assertEqual(self.facts("gemini")["students.called"]["name"], "Captain")
+        self.assertEqual(await self.say(chat, "$callme reset"), "The students call you as before.")
+        self.assertNotIn("students.called", self.facts("gpt"))
+        self.assertIn("1 to 40 characters", await self.say(chat, "$callme " + "x" * 41))
+        kept = (self.tmp / "data" / "extensions" / "students" / "people.json").read_text(encoding="utf-8")
+        self.assertNotIn("Captain", kept)
+
+    async def test_another_account_joins_with_a_code_from_the_first(self):
+        script = room.Script(GPT=[room.turn("Oolong, noted."), room.turn("Oolong tea!")])
+        chat = await self.start(Mind(script), {"language": "en"})
+        await self.say(chat, "GPT, I love oolong tea")
+        given = await self.say(chat, "$link")
+        self.assertIn("Your accounts: chat:alice.", given)
+        code = given.split("`$link ")[1].split("`")[0]
+        self.assertIn("wrong or too old", await self.say(chat, "$link ZZZZZZ", sender="al"))
+        self.assertEqual(await self.say(chat, f"$link {code.lower()}", sender="al"),
+                         "Linked: chat:al and chat:alice are one person to every student now.")
+        self.assertIn("wrong or too old", await self.say(chat, f"$link {code}", sender="bob"))  # used up
+        await self.say(chat, "GPT, which tea do I like?", sender="al")
+        self.assertIn("Alice loves oolong tea.", self.seen(script, "GPT"))  # what the first account told her
+        self.assertEqual(self.facts("gpt", "al")["students.accounts"], ["chat:alice", "chat:al"])
+        self.assertEqual(self.facts("gpt", "al")["students.bond"], self.facts("gpt")["students.bond"])
+        kept = (self.tmp / "data" / "extensions" / "students" / "people.json").read_text(encoding="utf-8")
+        self.assertIn('"chat:al": "chat:alice"', kept)
+
     async def test_it_speaks_and_learns_only_in_the_engines_it_is_told_and_can_be_turned_off(self):
         script = room.Script(GPT=[room.turn("Hi!")])
         mind = Mind(script)

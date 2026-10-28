@@ -1,7 +1,8 @@
 # Core architecture
 
 The core is a small, fixed runtime. Everything that talks to a platform, decides what to say, or
-does work is a module (built-in in `extensions/`, external in `plugins/`) plugged into one of three slots. The core and each extension see each
+does work is a module (built-in in `extensions/`, external in `plugins/`) plugged into one or more of five slots:
+interfaces, engines, capabilities, personas and watchers (`contracts.Contributions`). The core and each extension see each
 other as black boxes; the only shared code is the [`contracts`](../../contracts) package.
 
 ```mermaid
@@ -14,8 +15,8 @@ flowchart TB
     subgraph CORE["Core · child process"]
         GW["Gateway<br/>admission · order · dedupe · routes · routines · scheduled"]
         BOT[("Bottle<br/>gateway.db")]
-        MG{{"Manager<br/>registries · permissions · durable runs · approvals"}}
-        PR["Providers<br/>model profiles · fallback"]
+        MG{{"Manager<br/>registries · permissions · durable runs · approvals · stamina"}}
+        PR["Providers<br/>model profiles · fallback · prices"]
         TANK[("Tank<br/>tank.db")]
     end
     subgraph ES["Engine slot"]
@@ -26,12 +27,20 @@ flowchart TB
         BA["basic · web · media · images · reminders · system · host · terminal"]
         CC["core.* · interface operations"]
     end
+    subgraph PS["Persona slot"]
+        PE["students · chimera · terminal · wechat"]
+    end
+    subgraph WS["Watcher slot"]
+        WA["students · memory and mood"]
+    end
     SUP -. "runs · watches heartbeat" .-> CORE
     IS <-->|"Request / Reply / Delivery"| GW
     GW --- BOT
     GW <--> MG
     MG <-->|"Session handles"| ES
     MG <-->|"ToolContext handles"| CS
+    PS -->|"Persona"| MG
+    MG -->|"Exchange"| WS
     MG --- PR
     MG --- TANK
 ```
@@ -40,10 +49,12 @@ flowchart TB
 | --- | --- | --- | --- |
 | Interfaces | Platform I/O; convert events to `Request`; render `Reply`; report `Delivery` | Platform connection; its section of the bottle | Decide replies, call capabilities, read the tank |
 | Gateway | Single entry; per-conversation order; duplicate drop; admission rules; `$command` detection; reply routing; routines; scheduled messages | `gateway.db` (interface sections, seen IDs, rules, routes, routines, scheduled messages) | Feature logic, model calls, tank access, formatting |
-| Manager | Registers engines and capabilities; picks the engine per conversation; hands out handles; decides permissions (access, approval, enforcement) on every call; durable runs and approvals | `tank.db` (history and its summaries, runs, events, actions, approvals, grants, modules' scoped stores, persona diaries) | Feature logic, prompts, platform formatting |
+| Manager | Registers engines, capabilities, personas and watchers; picks the engine per conversation; hands out handles; decides permissions (access, approval, enforcement) on every call; durable runs and approvals; stamina (what each persona spends a day, runs that wait at a limit) | `tank.db` (history and its summaries, runs, events, actions, approvals, grants, modules' scoped stores, persona diaries, facts, the stamina ledger) | Feature logic, prompts, platform formatting |
 | Engines | Turn loop through `Session` handles | Their run state (saved through the session) | Import providers, storage or interfaces; bypass policy |
 | Capabilities | One action; returns `ToolResult` | Nothing durable except their extension's store | Call other capabilities or engines; talk to the user |
-| Providers | Model profiles with ordered candidates and fallback; thin SDK adapters | Credentials (from environment) | Prompts, history, storage |
+| Personas | Who speaks: name, prompt, model profiles, aliases, pictures (data, not behaviour) | Nothing; their module keeps its own data | Run code of their own |
+| Watchers | See each message a persona said once it was delivered; learn from it, publish facts | Their module's data (the students' memory) | Run before a delivery; answer; count against a run's budget |
+| Providers | Model profiles with ordered candidates and fallback; thin SDK adapters; the price of every answer | Credentials (from environment); the kept price list | Prompts, history, storage |
 
 ## Rules
 
@@ -252,7 +263,7 @@ flowchart TB
   conversation, from a private chat. The grant is built by the core from the call's exact subject (no
   pattern, nothing the model wrote), covers that capability and subject in that conversation only,
   expires after 30 days and is listed and revoked with `$permissions`.
-* **Stamina.** A run at a spending limit (her day's allowance, or the run's own `budget_usd`) waits with a
+* **Stamina.** A run at a spending limit (her day's allowance, everyone's total for the day, or the run's own `budget_usd`) waits with a
   `core.stamina` card before its next model call (core/manager/stamina.py, contracts 1.12): approved, the limit grows
   by `step` and the run resumes; denied, it stops with the reason. The core prices every answer itself
   (core/providers/prices.py), so the limits hold for every engine.
@@ -382,11 +393,12 @@ to the unit to keep a core that keeps crashing down until it is fixed.
 | [`core/manager/secrets.py`](../../core/manager/secrets.py) | Secret values, formats and paths; scrubbing (S1-S3) |
 | [`core/manager/handles.py`](../../core/manager/handles.py) | Session, tools, models, capability and watcher context handles |
 | [`core/manager/facts.py`](../../core/manager/facts.py), [`core/manager/renames.py`](../../core/manager/renames.py) | Facts modules publish for pages; a renamed persona's former names adopted at start |
+| [`core/manager/stamina.py`](../../core/manager/stamina.py) | Stamina: each persona's day against her allowance, everyone's against the day's total, accounts, runs that wait at a limit, `$stamina` |
 | [`core/manager/core_capabilities.py`](../../core/manager/core_capabilities.py) | `core.*` capabilities and interface operations |
-| [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
+| [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters; model prices ([`prices.py`](../../core/providers/prices.py): core.yml `prices:` over Artificial Analysis's list) |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
-| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot on MomoChat, the DeepSeek student, her voice), `webui` the example interface (MomoChat's page on the local network), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
+| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot on MomoChat, the DeepSeek student, her voice), `webui` the example interface (the web UI on the local network: the Cafe, MomoChat, the Students page and your page, `/me`), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
 | [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, the `momochat` engine (conversations, direct and in groups), `chimera` (the students on coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; the Classroom page), `students` (the five students, one folder each, each with her memory of each person in mneme-llm: roles, aliases, notes, mood, learned by a watcher), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram). Which engine does which job: [DESIGN.md](../DESIGN.md) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 | [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |

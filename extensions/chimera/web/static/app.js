@@ -2365,7 +2365,7 @@
             (row.price.source === "config" ? "your config" : `Artificial Analysis (${row.price.slug})`);
         } else {
           line.textContent = `${label}${row.model}: no price` + (row.candidates.length
-            ? ` (close: ${row.candidates.join(", ")}; pick one under price_aliases)` : "");
+            ? ` (close: ${row.candidates.join(", ")}; pick one under prices: aliases: in core.yml)` : "");
         }
         text.append(line);
       }

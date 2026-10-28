@@ -71,8 +71,8 @@ with her chats' options in core.yml, for example
 
 ## The web UI
 
-[`webui`](webui) is MomoChat's page on your local network, for when you would rather not set up
-Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
+[`webui`](webui) is the web UI on your local network (the Cafe, MomoChat, the Students page and your page,
+`/me`), for when you would rather not set up Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
 printed at startup) from a laptop or phone at home:
 
 * the page is laid out as a messenger: your chats on the left (her picture, your name for her, ♥ your bond

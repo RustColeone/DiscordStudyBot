@@ -361,7 +361,7 @@ Two places, one club (the Codex route: chat and work are separate places that re
 - **MomoChat** is the web UI on :4156, chatting with the students (the momochat engine). The web UI also has the
   **Cafe**.
 - **The Classroom** is this page on :4157, sessions of work on your projects (the chimera engine; a session is a
-  task). Its other view is the **Logbook** (`#logbook`): what was spent each day of the last two weeks, by student
+  task). Its other view is the **Logbook** page (`#logbook`): what was spent each day of the last two weeks, by student
   (the core's spending history, `/api/logbook`), each student's share, and every past session; `#students` still
   opens the seats. The header shows the day's stamina for everyone together (the core's), each seat her own. The
   **Students** page is the web UI's: it shows each student's record here from the facts this module publishes.
@@ -406,10 +406,10 @@ that wording is part of their prompts; renaming it is proposed separately.
 sequenceDiagram
     autonumber
     participant Y as You
-    participant C as MomoChat (room)
+    participant C as MomoChat
     participant L as Classroom (chimera)
     Y->>C: "the schedule lists Sunday first; can you fix it?"
-    C->>C: DeepSeek checks the Logbook (chimera.tasks)
+    C->>C: DeepSeek checks the task log (chimera.tasks)
     C->>Y: "I think we need to go to the lab for this, want to come with me?"
     C->>L: chimera.invite: her brief, her notes on how you like it,<br/>the latest part of this chat (nothing starts)
     C->>Y: a link · on the map she has a ticket for you (still in class)
@@ -428,7 +428,7 @@ sequenceDiagram
 | MomoChat → Classroom | `chimera.invite` (offered to the students while the creator talks, wherever they are): her `brief` (what to do, every decision and name from the chat), her `notes` (what she knows about how you like such work, from her diary), her `companions` (students she asks along; one not in the Classroom's team or without a key is named in the result and stays behind), and the chat's latest messages (`bring_messages`, 16), read through the conversation's history (contracts 1.6). It only makes an invitation and returns a link; following it is accepting, and you start the session on the arrival card (or with `club -c`), where you can still edit the brief and who comes. |
 | In the Classroom | The student who invited you leads: she greets you and speaks for the club in that session (a Classroom seat stands for a MomoChat persona with `also:`, as Flash-chan does for DeepSeek). Every round's brief carries what came from MomoChat and the project's **notebook** (what the club did there before). |
 | Classroom → MomoChat | **Report back** (on the page, or `club`, once the session is done): a session report (title, outcome, commit, tests, who did it, who was in the Classroom and who was asked along but not there, the summary, a link to the visit) goes into the chat it came from, sent with `core.send_message` as your own command. It joins that chat's history, so the students there know it, and it can go into their diaries like anything said there. |
-| MomoChat → Classroom, later | The **Logbook** (`chimera.tasks`, `$tasks <words>`): the students look up what happened in the Classroom; DeepSeek does before she writes a new brief. |
+| MomoChat → Classroom, later | The **task log** (`chimera.tasks`, `$tasks <words>`; not the Logbook page): the students look up what happened in the Classroom; DeepSeek does before she writes a new brief. |
 
 **The mini map**, in both places: MomoChat and the Classroom side by side, and who is in each. A **visit** lasts from
 the start of a session until you report back or it is closed (or `visit_minutes`, 30, after it last moved once
@@ -451,19 +451,23 @@ get them too, so a review checks the change against the project's rules.
 
 ## Cost
 
-Every model call is logged with its seat, model, tokens and seconds. It is also priced from **Artificial Analysis**'s
-free models list: a free key from artificialanalysis.ai, as `ARTIFICIAL_ANALYSIS_API_KEY` in `.env`. Inside the
-bot, `python -m core setup` asks for it.
+Every model call is logged with its seat, model, tokens and seconds. The prices come from the core (contracts 1.12,
+[`core/providers/prices.py`](../../core/providers/prices.py)): every answer arrives priced, for every engine, and
+this module keeps each step's price and shows them. The core's list is **Artificial Analysis**'s free models list,
+under your own figures in core.yml's `prices:`: a free key from artificialanalysis.ai, as `ARTIFICIAL_ANALYSIS_API_KEY` or `AA_API_TOKEN` in
+`.env`. Inside the bot, `python -m core setup` asks for it. See [Prices and
+stamina](../../docs/core/EXTENSIONS.md#prices-and-stamina).
 
-- The list is fetched again **on use**: when a task starts and the kept list (`prices.json`) is more than 24 hours
-  old. A failed fetch keeps the last good list and tries again an hour later; it never holds a task up.
+- The list is fetched again once the kept list (`prices.json`, in the core's data folder) is more than 24 hours old:
+  by the core in the background whenever a model is called, and by the Classroom when a task starts. A failed fetch
+  keeps the last good list and tries again an hour later; it never holds a task up.
 - Each answer is priced when it comes and the price is kept with it, so a later list never rewrites what a past
   step cost. The ledger (Steps & cost) shows each call's price and its source, and the task's total.
 - Models are matched to the list by name: exact, the same words in another order, else the one closest model of
-  the same maker. A tie is never guessed. The club dialog shows the candidates; pick one under `price_aliases:`.
-  Your own `prices:` in config.yml win over the list.
-- These are list prices: cache hits, which some providers charge less for, count at the full input price. The page
-  credits Artificial Analysis wherever its prices appear, as their terms ask.
+  the same maker. A tie is never guessed. The club dialog shows the candidates; name one under `prices: aliases:` in
+  core.yml. Your own `prices: models:` there win over the list.
+- These are list prices; cache hits count at the listed cache price where there is one, else at the input price.
+  The page credits Artificial Analysis wherever its prices appear, as their terms ask.
 
 ## From Discord (remote)
 
@@ -506,7 +510,6 @@ and no access to any project, as everything that touches the computer is creator
 | [`views.py`](views.py), [`places.py`](places.py) | The rules the frontends show: a task's current approval with its checklist, its actions, the report; the Classroom as a place |
 | [`workspace/`](workspace) | `worktree.py` (open, change set, land, remove), `tools.py`, `commands.py` (the allowlist), `projects.py`, `git.py` |
 | [`web/server.py`](web/server.py) | The Classroom's interface: the API ([`PROTOCOL.md`](PROTOCOL.md)), the page unless `web: false`, the place published in the core's directory |
-| [`prices.py`](prices.py) | The price list: fetched on use once a day old, matched to each model, credited |
 | [`board.py`](board.py) | Tasks, steps (with each model call's seat, model, tokens, cost, time), the page's transcript, outcomes |
 | [`web/static/`](web/static) | The page (app, styles, a copy of the web UI's Markdown renderer) |
 | [`demo.py`](demo.py) | The scripted club behind `--demo` (a provider kind the module adds) |
@@ -560,7 +563,6 @@ name, `workbench.db`, so the labs and data folders made before the rename open a
 | --- | --- |
 | `workbench.db` | Tasks, steps, the page's transcript, projects added in the page |
 | `outcomes.jsonl` | One line per routing decision and result, for tuning the router |
-| `prices.json` | The last Artificial Analysis price list, with when it was fetched |
 | `worktrees/<task>` | Each open task's worktree, and `<task>.base` for the tester's probes (removed when it lands or is discarded) |
 | `patches/<task>.diff` | The last change set of a landed or discarded task |
 | `sample/` | The practice project |

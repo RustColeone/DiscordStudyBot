@@ -370,6 +370,32 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             async with self.http.post(f"{self.base}/api/alias", json=body) as response:
                 self.assertEqual(response.status, 400, body)
 
+    async def test_your_page_says_what_the_students_call_you_and_your_tab_follows(self):
+        web = await self.start()
+        self.assertEqual(web.place()["you"], {"path": "me", "name": web.user_name})  # your tab, on every page
+        async with self.http.get(f"{self.base}/me") as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("<title>You · ", await response.text())
+        async with self.http.post(f"{self.base}/api/callme", json={"name": "Captain"}) as response:
+            answer = await response.json()
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["you"]["everyone"], "Captain")
+        self.assertEqual(web.place()["you"]["name"], "Captain")
+        async with self.http.post(f"{self.base}/api/callme", json={"persona": "deepseek", "name": "Master"}) as response:
+            you = (await response.json())["you"]
+        students = {item["name"]: item for item in you["students"]}
+        self.assertEqual((students["deepseek"]["called"], students["deepseek"]["asked"]), ("Master", "Master"))
+        self.assertEqual((students["gpt"]["called"], students["gpt"]["asked"]), ("Captain", None))
+        for body in ({"persona": "nobody", "name": "X"}, {"name": "  "}, {"name": "x" * 41}):
+            async with self.http.post(f"{self.base}/api/callme", json=body) as response:
+                self.assertEqual(response.status, 400, body)
+        async with self.http.post(f"{self.base}/api/link", json={}) as response:
+            answer = await response.json()
+        self.assertTrue(answer["ok"], answer)
+        self.assertRegex(answer["code"], r"^[A-Z2-9]{6}$")  # to send from your other account
+        state = await (await self.http.get(f"{self.base}/api/me")).json()
+        self.assertEqual((state["account"], state["accounts"]), ("webui:creator", ["webui:creator"]))
+
     async def test_the_font_comes_from_the_page_itself_even_before_signing_in(self):
         await self.start({"passphrase": "open sesame"})
         async with self.http.get(f"{self.base}/static/nunito-latin.woff2") as response:
@@ -378,9 +404,13 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 401)  # everything else waits for the passphrase
         async with self.http.get(f"{self.base}/static/i18n.js") as response:
             self.assertEqual(response.status, 200)  # the sign-in page in your language
+        async with self.http.get(f"{self.base}/static/prefs.js") as response:
+            self.assertEqual(response.status, 200)  # and your theme
+        async with self.http.get(f"{self.base}/me", allow_redirects=False) as response:
+            self.assertEqual((response.status, response.headers["Location"]), (303, "login"))
 
     def test_the_classroom_shares_the_header_and_the_translations(self):
-        for name in ("places.js", "i18n.js", "i18n-zh.js"):
+        for name in ("places.js", "prefs.js", "i18n.js", "i18n-zh.js"):
             self.assertEqual((PLUGIN / "static" / name).read_bytes(),
                              (ROOT / "extensions/chimera/web/static" / name).read_bytes(), name)
 

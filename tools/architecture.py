@@ -33,8 +33,8 @@ DATA = ("yml", "yaml", "md")  # a module's data files: settings, prompts (README
 # The core's blocks on the top map (docs/core/ARCHITECTURE.md): id, label, what it owns or does, where it lives.
 CORE_PARTS = [
     ("GW", "Gateway", "admission · order · dedupe · routes · routines", "core/gateway"),
-    ("MG", "Manager", "registries · permissions · durable runs · approvals", "core/manager"),
-    ("PR", "Providers", "model profiles · fallback · adapters", "core/providers"),
+    ("MG", "Manager", "registries · permissions · durable runs · approvals · stamina", "core/manager"),
+    ("PR", "Providers", "model profiles · fallback · adapters · prices", "core/providers"),
     ("BOT", "Bottle", "gateway.db", "core/storage/bottle.py"),
     ("TANK", "Tank", "tank.db", "core/storage/tank.py"),
     ("START", "Startup", "config · loader · app · setup", "core"),
@@ -209,28 +209,51 @@ class DataReader:
         return {"doc": doc, "lines": len(lines), "imports": imports, "symbols": [], "text": self.text, "data": True}
 
 
+def handed_over(files: dict[str, dict], folder: str) -> set[str]:
+    """The slots a module's other files fill: a `contributions(...)` function returning them as a dict, which its
+    setup passes on (the students' memory.py)."""
+    filled = set()
+    for path in files:
+        if not path.startswith(f"{folder}/") or not path.endswith(".py") or path.endswith("/extension.py"):
+            continue
+        for node in ast.walk(ast.parse((ROOT / path).read_text(encoding="utf-8"))):
+            if isinstance(node, ast.FunctionDef) and node.name == "contributions":
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Return) and isinstance(inner.value, ast.Dict):
+                        keys = {key.value for key in inner.value.keys if isinstance(key, ast.Constant)}
+                        if keys and keys <= FIELDS:
+                            filled |= keys & set(SLOTS)
+    return filled
+
+
 def slots(files: dict[str, dict]) -> dict[str, dict]:
-    """Each module (a folder with extension.py): its description, the slots it fills and the modules it requires
-    and uses (contracts 1.10), read from that file."""
+    """Each module (a folder with extension.py): its description, the slots it fills (with what its other files hand
+    over), the modules it requires and uses (contracts 1.10) and the names it had (`formerly`, 1.11), read from that
+    file."""
     modules = {}
     for path in files:
         if not path.endswith("/extension.py") or path.count("/") != 2:
             continue
         folder = path.rsplit("/", 1)[0]
         tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
-        filled, description, declared = set(), "", {"requires": [], "uses": []}
+        filled, description, declared = handed_over(files, folder), "", {"requires": [], "uses": [], "formerly": []}
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Contributions":
                 filled |= {keyword.arg for keyword in node.keywords if keyword.arg in SLOTS}
             keys = {key.value for key in getattr(node, "keys", None) or () if isinstance(key, ast.Constant)}
             if isinstance(node, ast.Dict) and keys and keys <= FIELDS:  # contributions built as a dict first (whale_chan)
                 filled |= keys & set(SLOTS)  # (an assignment's {"engine", "personas", ...} is not one)
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "EngineSpec":  # an engine's former names
+                for keyword in node.keywords:
+                    if keyword.arg == "formerly" and isinstance(keyword.value, (ast.Tuple, ast.List)):
+                        declared["formerly"] += [item.value for item in keyword.value.elts if isinstance(item, ast.Constant)]
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Extension":
                 for keyword in node.keywords:
                     if keyword.arg == "description" and isinstance(keyword.value, ast.Constant):
                         description = str(keyword.value.value)
                     if keyword.arg in declared and isinstance(keyword.value, (ast.Tuple, ast.List)):
-                        declared[keyword.arg] = [item.value for item in keyword.value.elts if isinstance(item, ast.Constant)]
+                        declared[keyword.arg] += [item.value for item in keyword.value.elts if isinstance(item, ast.Constant)]
+        declared["formerly"] = list(dict.fromkeys(declared["formerly"]))
         modules[folder] = {"description": description, "slots": [slot for slot in SLOTS if slot in filled], **declared}
     return modules
 

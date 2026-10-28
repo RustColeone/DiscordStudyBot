@@ -8,7 +8,8 @@
 .cafe-room, .cafe-floor { position: absolute; inset: 0; }
 .cafe-room > * { position: absolute; }
 .cafe-room img.picture { inset: 0; width: 100%; height: 100%; object-fit: cover; }
-@media (prefers-color-scheme: dark) { .cafe-room { filter: brightness(.82) saturate(.9); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cafe-room { filter: brightness(.82) saturate(.9); } }
+:root[data-theme="dark"] .cafe-room { filter: brightness(.82) saturate(.9); }
 .cafe-room-name { position: absolute; left: 16px; top: 14px; z-index: 200; padding: 4px 12px; border-radius: 999px;
                   background: rgba(255, 251, 245, .92); color: #3d3129; font-size: 13px; font-weight: 800; }
 
