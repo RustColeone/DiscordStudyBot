@@ -202,7 +202,9 @@ class WebUI(Interface):
             found.append({**item, **{kind: next((value for key, value in values.items()
                                                  if key.rsplit(".", 1)[-1] == kind), None) for kind in STANDING},
                           # what she spent today and her account (contracts 1.12), None from a core before it
-                          "stamina": stamina(item["name"]) if callable(stamina) else None})
+                          "stamina": stamina(item["name"]) if callable(stamina) else None,
+                          # her mood faces that are drawn (mood-happy, ...), for her face as she feels now
+                          "faces": sorted(kind for kind in self._pictures_of(item["name"]) if kind.startswith("mood-"))})
         return found
 
     def people(self) -> list[dict]:

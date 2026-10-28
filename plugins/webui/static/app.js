@@ -66,11 +66,12 @@
     if (colors.bubble) node.style.setProperty("--cbg", colors.bubble);
     return node;
   }
-  function avatar(name, key = keyOf(name)) {
+  // `picture`: another picture of hers instead of her avatar (her face for her mood now: moodFace).
+  function avatar(name, key = keyOf(name), picture = "") {
     const node = paint(make("div", "avatar"), key);
-    if (state.avatars.has(key)) {
+    if (picture || state.avatars.has(key)) {
       const image = make("img");
-      image.src = `avatars/${key}`;
+      image.src = picture || `avatars/${key}`;
       image.alt = "";
       image.onerror = () => { image.remove(); node.textContent = initial(name); };
       node.append(image);
@@ -90,6 +91,13 @@
   // Where a student stands with you (the companion's facts, when it runs): your name for her, her bond and mood.
   const standingOf = (display) => state.roster.find((item) => item.display === display) || {};
   const FACES = { great: "😄", good: "🙂", ok: "😐", worry: "😟", sad: "😢" };
+  // Her face for her mood now, when it is drawn (her art's mood-happy, mood-calm, mood-worried, mood-sad).
+  const MOOD_FACES = { great: "happy", good: "happy", ok: "calm", worry: "worried", sad: "sad" };
+  const moodFace = (display) => {
+    const { name, mood, faces } = standingOf(display);
+    const kind = `mood-${MOOD_FACES[mood?.face]}`;
+    return name && faces?.includes(kind) ? `pictures/${encodeURIComponent(name)}/${kind}` : "";
+  };
   // Her mood as a word (mneme-llm's face), and the pill's tone.
   const MOODS = { great: ["happy", "good"], good: ["content", "good"], ok: ["calm", "plain"], worry: ["worried", "warn"],
                   sad: ["sad", "low"] };
@@ -329,7 +337,7 @@
       if (typing.has(name)) member.classList.add("is-typing");
       else if (spoke) member.classList.add("is-speaking");
       const face = make("div", "member-face");
-      face.append(avatar(name), make("span", "presence"));
+      face.append(avatar(name, keyOf(name), moodFace(name)), make("span", "presence"));
       const text = make("div", "member-text");
       const { alias } = standingOf(name);
       const shown = make("div", "member-name", alias || name);
@@ -454,7 +462,7 @@
   function chatFaces(chat) {
     const members = membersOf(chat);
     const holder = make("span", `faces${isDirect(chat) ? " is-one" : ""}`);
-    for (const name of members.slice(0, isDirect(chat) ? 1 : 3)) holder.append(avatar(name));
+    for (const name of members.slice(0, isDirect(chat) ? 1 : 3)) holder.append(avatar(name, keyOf(name), moodFace(name)));
     return holder;
   }
   const shownName = (display) => standingOf(display).alias || display;

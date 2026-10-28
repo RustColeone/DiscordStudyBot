@@ -8,11 +8,11 @@ Each picture is drawn from her design sheet (`reference:` in art.yml, a works pa
 address) and her avatar.png; a kind with a `reference:` of its own (the chibi) gets that picture first. References are
 downloaded once into data/art-references/ (git-ignored), at most 1536 pixels on the long side.
 
-Each picture goes to extensions/students/<name>/art/<kind>.webp (portraits at most 768×1152, chibis 512×512, so the
-repository stays small); the students module serves every picture in art/ by its file name. Her model ladder
-(`ladders:`) draws only the tiers she needs, never `chibi` twice. The key is OPENAI_API_KEY, from the environment or
-the .env file named by --env-file (only that key is read from it). Every call is printed with its size, quality and
-the tokens it used, so the cost is known.
+Each picture goes to extensions/students/<name>/art/<kind>.webp (portraits at most 768×1152, chibis 512×512, mood
+faces 384×384, so the repository stays small); the students module serves every picture in art/ by its file name.
+Her model ladder (`ladders:`) draws only the tiers she needs, never `chibi` twice. The key is OPENAI_API_KEY, from
+the environment or the .env file named by --env-file (only that key is read from it). Every call is printed with its
+size, quality and the tokens it used, so the cost is known.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 STUDENTS = ROOT / "extensions" / "students"
 REFERENCES = ROOT / "data" / "art-references"
-LIMITS = {"chibi": (512, 512)}  # kind → the largest size kept; anything else: a portrait
+LIMITS = {"chibi": (512, 512), "mood": (384, 384)}  # kind (or its first word) → the largest size kept; else a portrait
 PORTRAIT = (768, 1152)
 
 
@@ -111,7 +111,7 @@ def keep(data: bytes, kind: str, target: Path) -> int:
     """The drawn PNG as a WebP no bigger than the kind needs; returns its size in bytes."""
     from PIL import Image
     image = Image.open(io.BytesIO(data))
-    image.thumbnail(LIMITS.get(kind, PORTRAIT), Image.LANCZOS)
+    image.thumbnail(LIMITS.get(kind) or LIMITS.get(kind.split("-")[0], PORTRAIT), Image.LANCZOS)
     target.parent.mkdir(parents=True, exist_ok=True)
     image.save(target, "WEBP", quality=86, method=6)
     return target.stat().st_size

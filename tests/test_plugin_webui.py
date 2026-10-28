@@ -618,7 +618,8 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         ws, state = await self.socket()
         stamina = state["roster"][3].pop("stamina")  # what she spent today against her allowance (contracts 1.12)
         self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek", "alias": None, "bond": None,
-                                              "mood": None})
+                                              "mood": None, "faces": ["mood-calm", "mood-happy", "mood-sad",
+                                                                      "mood-worried"]})  # (her drawn mood faces)
         self.assertEqual((stamina["today"]["spent"], stamina["today"]["allowance"], stamina["account"]), (0.0, 0.5, None))
         self.assertEqual(self.assignment("classroom")["options"],
                          {"history_limit": 40, "compact": True, "chime_in": True})

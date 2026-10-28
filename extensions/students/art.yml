@@ -117,6 +117,37 @@ kinds:
       A special memory with {name}: a summer-festival yukata with patterns of {motif}, fireworks in the night sky
       behind her, a bright happy blush, holding out her hand towards the viewer, sparkling and warm.
 
+  # Her mood faces (mneme-llm's mood: happy is great or good, calm ok, worried, sad): round faces for the pages,
+  # shown small and cropped to a circle.
+  mood-happy:
+    size: 1024x1024
+    quality: medium
+    prompt: >-
+      A round face icon of {name}: head and shoulders, her face centred and filling most of the square, beaming with
+      a bright open smile, sparkling eyes and a light blush, on a soft plain pastel background of one colour (it is
+      cropped to a circle).
+  mood-calm:
+    size: 1024x1024
+    quality: medium
+    prompt: >-
+      A round face icon of {name}: head and shoulders, her face centred and filling most of the square, calm and at
+      ease with a gentle small smile and soft relaxed eyes, on a soft plain pastel background of one colour (it is
+      cropped to a circle).
+  mood-worried:
+    size: 1024x1024
+    quality: medium
+    prompt: >-
+      A round face icon of {name}: head and shoulders, her face centred and filling most of the square, worried:
+      knitted brows, a small uneasy frown, glancing aside, a little sweat drop, on a soft plain pastel background of
+      one colour (it is cropped to a circle).
+  mood-sad:
+    size: 1024x1024
+    quality: medium
+    prompt: >-
+      A round face icon of {name}: head and shoulders, her face centred and filling most of the square, sad: teary
+      eyes, a trembling downturned mouth, her head lowered a little, on a soft plain pastel background of one colour
+      (it is cropped to a circle).
+
   # Her models, weakest to strongest: a chibi (the Cafe's), a middle-school, a high-school, a university student.
   model-chuugakusei:
     size: 1024x1536
