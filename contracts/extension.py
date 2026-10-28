@@ -15,6 +15,7 @@ from contracts.stores import Facts
 from contracts.watchers import Watcher
 
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+PACKAGE = re.compile(r"^package:[A-Za-z0-9][A-Za-z0-9._-]*(>=[0-9][0-9A-Za-z.]*)?$")
 
 
 class ExtensionContext(Protocol):
@@ -24,6 +25,7 @@ class ExtensionContext(Protocol):
     config: Mapping[str, Any]
     data_dir: Path
     facts: Facts  # added in 1.9: what this module publishes about personas, for interfaces (any time after setup)
+    present: frozenset  # added in 1.10: which of the modules it `uses` are loaded (they were set up before it)
 
     def log(self, event: str, **fields: Any) -> None: ...
 
@@ -100,6 +102,12 @@ class Extension:
     `setup` receives an ExtensionContext and returns Contributions. `contracts` is the major
     contracts version the extension was written for. `settings` declares what the module can be set
     up with (see Setting); it is read without running `setup`.
+
+    `requires` and `uses` (added in 1.10) declare the other modules it builds on, by module name. Without one it
+    `requires`, the module is not loaded (and says why); a Python package is `package:<name>` or
+    `package:<name>>=<version>`. Without one it `uses`, it loads, minus what that module would add: its setup is
+    told which are there (`ExtensionContext.present`). Every engine and persona its defaults name must belong to the
+    core or to a module it declares, or it is refused.
     """
 
     name: str
@@ -108,11 +116,28 @@ class Extension:
     version: str = "0"
     description: str = ""
     settings: Sequence[Setting] = ()
+    requires: Sequence[str] = ()
+    uses: Sequence[str] = ()
 
     def __post_init__(self):
         if not NAME.match(self.name):
             raise ValueError(f"Extension name must be lowercase letters, digits or _, got {self.name!r}")
         object.__setattr__(self, "settings", tuple(self.settings))
+        for key in ("requires", "uses"):
+            value = getattr(self, key)
+            if isinstance(value, str):
+                raise ValueError(f"{self.name}: `{key}` is a list of module names, not one string")
+            value = tuple(value)
+            for item in value:
+                if not (NAME.match(item) or (key == "requires" and PACKAGE.match(item))):
+                    raise ValueError(f"{self.name}: `{key}` takes module names"
+                                     + (" or package:<name>" if key == "requires" else "") + f", not {item!r}")
+                if item == self.name:
+                    raise ValueError(f"{self.name} cannot depend on itself")
+            object.__setattr__(self, key, value)
+        both = set(self.requires) & set(self.uses)
+        if both:
+            raise ValueError(f"{self.name}: {sorted(both)} cannot be both required and used")
         keys = [setting.key for setting in self.settings]
         if len(keys) != len(set(keys)):
             raise ValueError(f"{self.name}: setting keys must be unique")

@@ -131,9 +131,10 @@ class WatcherTests(Base):
     async def test_a_contribution_that_is_not_a_watcher_is_refused(self):
         source = MODULE.replace('watchers=[Watcher("keeper", watch, timeout_s=0.5), '
                                 'Watcher("ivy_only", watch, personas=("ivy",))]', 'watchers=["keeper"]')
-        with self.assertRaises(Exception) as caught:
-            await self.core(module=source)
-        self.assertIn("not a contracts.Watcher", str(caught.exception))
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(module_folder(self.tmp, source, "watchmod"))]
+        core = await start_core(self.tmp, {"extensions": extensions})
+        self.cores.append(core)
+        self.assertIn("not a contracts.Watcher", core.skipped["watchmod"])
 
     def test_a_watcher_checks_its_fields(self):
         async def run(exchange, context):

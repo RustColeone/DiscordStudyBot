@@ -33,6 +33,7 @@ class ExtensionContextImpl:
     data_dir: Path
     _log: Callable[..., None]
     facts: Any = None  # contracts.Facts for this module (contracts 1.9); None when loaded without a core
+    present: frozenset = frozenset()  # the modules it `uses` that are loaded (contracts 1.10)
 
     def log(self, event: str, **fields: Any) -> None:
         self._log("extension", extension=self.name, detail=event, **fields)
@@ -98,14 +99,18 @@ def local_config(path: str | Path) -> dict:
 
 
 async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[str, Any]], data_root: Path,
-                         log: Callable[..., None], facts_for: Callable[[str], Any] | None = None) -> LoadedExtension:
-    extension, module = import_extension(path)
+                         log: Callable[..., None], facts_for: Callable[[str], Any] | None = None,
+                         present: frozenset = frozenset(), imported: tuple[Extension, ModuleType] | None = None
+                         ) -> LoadedExtension:
+    """Imports the module (unless `imported` already has it) and runs its setup; `present` is which of the modules
+    it uses are loaded."""
+    extension, module = imported or import_extension(path)
     data_dir = data_root / extension.name
     data_dir.mkdir(parents=True, exist_ok=True)
     from core.defaults import merge
     config = merge(local_config(path), dict(config_for(extension.name) or {}))
     context = ExtensionContextImpl(extension.name, config, data_dir, log,
-                                   facts_for(extension.name) if facts_for is not None else None)
+                                   facts_for(extension.name) if facts_for is not None else None, frozenset(present))
     try:
         contributions = extension.setup(context)
         if inspect.isawaitable(contributions):

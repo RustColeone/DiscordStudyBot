@@ -88,7 +88,7 @@ def setup(context) -> Contributions:
                          permissions={f"{name}:*": {"tiers": {"write": "always-ask", "critical": "always-ask"}}})
 
 
-EXTENSION = Extension("whale_chan", setup, contracts="1", version="2",
+EXTENSION = Extension("whale_chan", setup, contracts="1", version="2", requires=("students",),
                       description="Example drop-in: 鲸酱's own Discord bot, a personal AI chat client, speaking as the "
                                   "DeepSeek student", settings=(
     Setting("token", "鲸酱's own Discord bot token (a second application in the Developer Portal)", "secret",

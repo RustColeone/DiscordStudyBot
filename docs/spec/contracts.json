@@ -1,7 +1,7 @@
 {
- "version": "1.9",
+ "version": "1.10",
  "constants": {
-  "CONTRACTS_VERSION": "1.9",
+  "CONTRACTS_VERSION": "1.10",
   "DIARY_KINDS": [
    "fact",
    "episode",
@@ -558,7 +558,7 @@
    ]
   },
   "Extension": {
-   "doc": "Declared as `EXTENSION` in an extension's `extension.py`. `setup` receives an ExtensionContext and returns Contributions. `contracts` is the major contracts version the extension was written for. `settings` declares what the module can be set up with (see Setting); it is read without running `setup`.",
+   "doc": "Declared as `EXTENSION` in an extension's `extension.py`. `setup` receives an ExtensionContext and returns Contributions. `contracts` is the major contracts version the extension was written for. `settings` declares what the module can be set up with (see Setting); it is read without running `setup`. `requires` and `uses` (added in 1.10) declare the other modules it builds on, by module name. Without one it `requires`, the module is not loaded (and says why); a Python package is `package:<name>` or `package:<name>>=<version>`. Without one it `uses`, it loads, minus what that module would add: its setup is told which are there (`ExtensionContext.present`). Every engine and persona its defaults name must belong to the core or to a module it declares, or it is refused.",
    "fields": [
     {
      "name": "name",
@@ -585,6 +585,16 @@
     },
     {
      "name": "settings",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "requires",
+     "type": "Sequence",
+     "default": "()"
+    },
+    {
+     "name": "uses",
      "type": "Sequence",
      "default": "()"
     }
@@ -1489,6 +1499,10 @@
     {
      "name": "facts",
      "type": "Facts"
+    },
+    {
+     "name": "present",
+     "type": "frozenset"
     }
    ],
    "methods": [

@@ -17,7 +17,8 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 # 1.9: 1.8 plus watchers (Watcher, Exchange, WatchContext, Contributions.watchers), facts (Facts,
 #      ExtensionContext.facts, InterfacePort.facts), InterfacePort.personas, Persona.aliases, .formerly, .pictures,
 #      and PartContext.engine.
-CONTRACTS_VERSION = "1.9"
+# 1.10: 1.9 plus declared dependencies (Extension.requires, Extension.uses, ExtensionContext.present).
+CONTRACTS_VERSION = "1.10"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",

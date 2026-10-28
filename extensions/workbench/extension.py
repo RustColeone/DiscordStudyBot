@@ -104,7 +104,7 @@ def setup(context) -> Contributions:
     return assemble(context)[0]
 
 
-EXTENSION = Extension("workbench", setup, contracts="1", version="1",
+EXTENSION = Extension("workbench", setup, contracts="1", version="1", uses=("students",),
                       description="The club works on your code: routed, reviewed, tested, landed on your approval",
                       settings=(
     Setting("port", "Port the workbench page is served on", "number", 4157),

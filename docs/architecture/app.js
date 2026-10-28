@@ -59,12 +59,20 @@
     kind: symbol.kind, target: link(path, symbol.id), current: symbol.id === current, tip: firstLine(symbol.doc),
     sub: symbol.kind === "class" ? plural(methodsOf(path, symbol.name).length, "method") : "" });
 
+  // A module's description, then what it declares it builds on (contracts 1.10).
+  function moduleTip(folder) {
+    const module = A.modules[folder];
+    const declared = [["requires", module.requires], ["uses", module.uses]]
+      .filter(([, names]) => names && names.length).map(([key, names]) => `${key} ${names.join(", ")}`);
+    return [module.description, ...declared].filter(Boolean).join(" · ");
+  }
+
   function topChart() {
     const chart = new Chart("DOWN", { overview: true });
     const supervisor = chart.node("Supervisor", { kind: "supervisor", sub: "parent process · heartbeat · restart",
                                                   target: link("core/supervisor.py"), tip: firstLine(files["core/supervisor.py"]?.doc) });
     const inSlot = (key) => Object.keys(A.modules).filter((folder) => A.modules[folder].slots.includes(key));
-    const module = (folder) => chart.node(folder.split("/").pop(), { kind: "module", target: link(folder), tip: A.modules[folder].description,
+    const module = (folder) => chart.node(folder.split("/").pop(), { kind: "module", target: link(folder), tip: moduleTip(folder),
                                                                     sub: folder.startsWith("plugins/") ? "plugin" : "built-in" });
     const slots = {};
     slots.interfaces = chart.group(SLOT.interfaces, () => inSlot("interfaces").forEach(module), { kind: "interfaces", pack: true });
@@ -113,7 +121,7 @@
                                              sub: `${plural(items, "item")} · ${plural(files[child].lines, "line")}` }));
         } else {
           const module = A.modules[child];
-          ids.set(child, chart.node(`${short}/`, { kind: module ? "module" : "folder", target: link(child), tip: module?.description || "",
+          ids.set(child, chart.node(`${short}/`, { kind: module ? "module" : "folder", target: link(child), tip: module ? moduleTip(child) : "",
             sub: module ? module.slots.map((slot) => slot.replace(/s$/, "")).join(" · ") || "module" : plural(filesUnder(child).length, "file") }));
         }
       }

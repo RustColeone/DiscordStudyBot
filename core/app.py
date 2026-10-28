@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from pathlib import Path
+from types import ModuleType
 
+from contracts import Extension
 from core.audit import Audit
 from core.config import ConfigError, CoreConfig
+from core.dependencies import load_order, missing_package
 from core.gateway.gateway import Gateway
-from core.loader import LoadedExtension, load_extension
+from core.loader import ExtensionError, LoadedExtension, import_extension, load_extension
 from core.manager.manager import Manager
 from core.manager.policy import Permissions, check_extension_permissions
 from core.manager.renames import adopt_former_names
@@ -24,6 +28,8 @@ class Core:
         self._provider_adapters = provider_adapters
         self._tick_seconds, self._clock = tick_seconds, clock
         self.extensions: list[LoadedExtension] = []
+        self.skipped: dict[str, str] = {}  # module → why it is not loaded (contracts 1.10)
+        self.set_aside: list[tuple[str, str, str]] = []  # (module or "core", pattern, why): defaults not applied
         self.started = False
         self.exit_code = 0  # 75 asks the supervisor for a restart (core/supervisor.py)
         self._stopping = asyncio.Event()
@@ -53,33 +59,23 @@ class Core:
             options["clock"] = self._clock
         self.gateway = Gateway(self.bottle, self.manager, audit=self.audit, rules=config.rules,
                                routes=config.routes, routines=config.routines, **options)
-        names = set()
+        # Who registered each engine and persona, to check that a module declares the modules whose names it uses.
+        self._owners: dict[tuple[str, str], str] = {("persona", name): "core" for name in config.personas}
+        found: dict[str, tuple[Path, Extension, ModuleType]] = {}
         for path in config.modules():
-            loaded = await load_extension(path, lambda name: config.extension_config.get(name, {}),
-                                          config.data_dir / "extensions", self.audit.record, self.manager.facts.handle)
-            name = loaded.extension.name
-            if name in names:
-                raise ConfigError(f"Two modules are named {name!r}; exclude one (`modules: {{exclude: [...]}}`)")
-            names.add(name)
-            for interface in loaded.contributions.interfaces:
-                self.gateway.register_interface(interface, name)
-            for engine in loaded.contributions.engines:
-                self.manager.register_engine(engine, name)
-            for capability in loaded.contributions.capabilities:
-                self.manager.register_capability(capability, name)
-            for persona in loaded.contributions.personas:
-                self.manager.register_persona(persona, name)
-            for part in loaded.contributions.prompt_parts:
-                self.manager.register_prompt_part(part, name)
-            for watcher in loaded.contributions.watchers:
-                self.manager.register_watcher(watcher, name)
-            self._register_defaults(loaded)
-            self.extensions.append(loaded)
-            self.audit.record("extension_loaded", extension=name, path=str(path), builtin=config.builtin(path),
-                              interfaces=[i.name for i in loaded.contributions.interfaces],
-                              engines=[e.spec.name for e in loaded.contributions.engines],
-                              capabilities=[c.name for c in loaded.contributions.capabilities],
-                              watchers=[w.name for w in loaded.contributions.watchers])
+            try:
+                extension, module = import_extension(path)
+            except ExtensionError as error:
+                self._skip(path.name, str(error), path)
+                continue
+            if extension.name in found:
+                raise ConfigError(f"Two modules are named {extension.name!r}; exclude one (`modules: {{exclude: [...]}}`)")
+            found[extension.name] = (path, extension, module)
+        order, cyclic = load_order({name: item[1] for name, item in found.items()})
+        for name, why in cyclic.items():
+            self._skip(name, why, found[name][0])
+        for name in order:
+            await self._load(*found[name])
         # Configured profiles may use providers contributed by any loaded module.
         for profile, candidates in config.profiles.items():
             self.providers.add_profile(profile, candidates)
@@ -89,6 +85,7 @@ class Core:
         from core.setup import Setup
         self.manager.setup_desk = Setup(config)
         adopt_former_names(self.manager)  # (Persona.formerly) before the assignments are checked
+        self._set_aside_builtin_defaults()
         problems = self.manager.problems()
         if config.control is not None and config.control.interface not in self.gateway.interfaces:
             problems.append(f"control route {config.control} uses an interface that is not loaded")
@@ -96,6 +93,148 @@ class Core:
             raise ConfigError("; ".join(problems))
         for warning in self.manager.prompt_part_warnings():
             self.audit.record("prompt_part_problem", problem=warning)
+
+    def _skip(self, name: str, why: str, path: Path) -> None:
+        """A module that cannot load is left out with the reason; the rest of the core goes on (`--check` fails)."""
+        self.skipped[name] = why
+        self.audit.record("module_skipped", extension=name, path=str(path), reason=why)
+
+    async def _load(self, path: Path, extension: Extension, module: ModuleType) -> None:
+        name, config = extension.name, self.config
+        loaded_names = {item.extension.name for item in self.extensions}
+        why = self._unmet(extension, loaded_names)
+        if why:
+            return self._skip(name, why, path)
+        present = frozenset(item for item in extension.uses if item in loaded_names)
+        try:
+            loaded = await load_extension(path, lambda module_name: config.extension_config.get(module_name, {}),
+                                          config.data_dir / "extensions", self.audit.record,
+                                          self.manager.facts.handle, present, (extension, module))
+        except ExtensionError as error:
+            return self._skip(name, str(error), path)
+        why, aside = self._check_names(loaded, loaded_names)
+        if why:
+            return self._skip(name, why, path)
+        if aside:
+            loaded.contributions = dataclasses.replace(loaded.contributions, assignments={
+                pattern: value for pattern, value in loaded.contributions.assignments.items() if pattern not in aside})
+            for pattern, reason in aside.items():
+                self.set_aside.append((name, pattern, reason))
+                self.audit.record("default_unusable", extension=name, pattern=pattern, reason=reason)
+        saved = self._registries()
+        try:
+            self._check_defaults(loaded)
+            self._register(loaded)
+        except (ValueError, ConfigError) as error:
+            self._restore(saved)
+            return self._skip(name, str(error), path)
+        self._register_defaults(loaded)
+        self.extensions.append(loaded)
+        self.audit.record("extension_loaded", extension=name, path=str(path), builtin=config.builtin(path),
+                          interfaces=[i.name for i in loaded.contributions.interfaces],
+                          engines=[e.spec.name for e in loaded.contributions.engines],
+                          capabilities=[c.name for c in loaded.contributions.capabilities],
+                          watchers=[w.name for w in loaded.contributions.watchers],
+                          requires=list(extension.requires), uses=sorted(present))
+
+    def _unmet(self, extension: Extension, loaded_names: set[str]) -> str | None:
+        """Why the module cannot load (something it requires is missing), or None."""
+        for item in extension.requires:
+            if item.startswith("package:"):
+                missing = missing_package(item)
+                if missing:
+                    return f"it requires {missing}"
+            elif item not in loaded_names:
+                reason = self.skipped.get(item)
+                return (f"it requires the {item} module, which was not loaded ({reason})" if reason
+                        else f"it requires the {item} module, which is not installed or is excluded")
+        return None
+
+    def _check_names(self, loaded: LoadedExtension, loaded_names: set[str]) -> tuple[str | None, dict[str, str]]:
+        """Every engine and persona the module's suggested assignments name must be its own, the core's, or a
+        declared module's. Returns why the module is refused (an undeclared name), and the suggested assignments to
+        set aside (they name what a module it uses would add, and that module is not here)."""
+        extension, contributions = loaded.extension, loaded.contributions
+        declared = {*extension.requires, *extension.uses}
+        absent = [item for item in extension.uses if item not in loaded_names]
+        own = {("engine", engine.spec.name) for engine in contributions.engines}
+        own |= {("persona", persona.name) for persona in contributions.personas}
+        aside: dict[str, str] = {}
+        for pattern, value in contributions.assignments.items():
+            value = value if isinstance(value, dict) else {}
+            named = [("engine", value.get("engine"))] + [("persona", item) for item in value.get("personas") or []]
+            for kind, item in named:
+                if not item or (kind, item) in own:
+                    continue
+                owner = self._owners.get((kind, item))
+                if owner is None and absent:
+                    aside.setdefault(pattern, f"the {kind} {item!r} is not loaded (without {', '.join(absent)})")
+                elif owner is None:
+                    return (f"its default for {pattern!r} names the {kind} {item!r}, which no loaded module adds and "
+                            "no module it declares could add (add that module to `requires` or `uses`)"), {}
+                elif owner != "core" and owner not in declared:
+                    return (f"its default for {pattern!r} names the {kind} {item!r} of the {owner} module, which it "
+                            f"does not declare (add {owner!r} to `requires` or `uses`)"), {}
+        return None, aside
+
+    def _check_defaults(self, loaded: LoadedExtension) -> None:
+        """What _register_defaults would refuse, checked before anything is registered."""
+        contributions, name = loaded.contributions, loaded.extension.name
+        own = {interface.name for interface in contributions.interfaces}
+        for pattern in [*contributions.assignments, *contributions.admission]:
+            if pattern.split(":", 1)[0] not in own or ":" not in pattern:
+                raise ConfigError(f"defaults may only cover its own interfaces, not {pattern!r}")
+        for kind, factory in contributions.adapters.items():
+            if kind in self.providers._kinds or not callable(factory):
+                raise ConfigError(f"provider kind {kind!r} " + ("already exists" if kind in self.providers._kinds
+                                                                 else "needs an adapter factory"))
+
+    def _register(self, loaded: LoadedExtension) -> None:
+        name, contributions = loaded.extension.name, loaded.contributions
+        for interface in contributions.interfaces:
+            self.gateway.register_interface(interface, name)
+        for engine in contributions.engines:
+            self.manager.register_engine(engine, name)
+            self._owners[("engine", engine.spec.name)] = name
+        for capability in contributions.capabilities:
+            self.manager.register_capability(capability, name)
+        for persona in contributions.personas:
+            self.manager.register_persona(persona, name)
+            self._owners.setdefault(("persona", persona.name), name)  # the first module's persona wins
+        for part in contributions.prompt_parts:
+            self.manager.register_prompt_part(part, name)
+        for watcher in contributions.watchers:
+            self.manager.register_watcher(watcher, name)
+
+    def _registries(self) -> list:
+        """The registries a module adds to, copied, so a module that fails halfway can be taken out again."""
+        gateway, manager = self.gateway, self.manager
+        return [(store, type(store)(store)) for store in (
+            gateway.interfaces, gateway._origin, manager.engines, manager._origin, manager.capabilities,
+            manager.personas, manager.prompt_parts, manager._part_origin, manager.watchers, self._owners)]
+
+    @staticmethod
+    def _restore(saved: list) -> None:
+        for store, copy in saved:
+            if isinstance(store, dict):
+                store.clear()
+                store.update(copy)
+            else:
+                store[:] = copy
+
+    def _set_aside_builtin_defaults(self) -> None:
+        """The core's own default assignments (`*`, `routine:*`) apply only while what they name is loaded."""
+        for pattern in self.config.builtin_assignments:
+            assignment = self.manager.assignments.get(pattern)
+            if assignment is None or pattern in self.manager._overrides.keys():
+                continue
+            missing = ([f"the engine {assignment.engine!r}"] if assignment.engine not in self.manager.engines else []) \
+                + [f"the persona {item!r}" for item in assignment.personas if item not in self.manager.personas]
+            if missing:
+                self.manager._config_assignments.pop(pattern, None)
+                reason = f"{' and '.join(missing)} not loaded"
+                self.set_aside.append(("core", pattern, reason))
+                self.audit.record("default_unusable", extension="core", pattern=pattern, reason=reason)
 
     def _permissions(self) -> Permissions:
         """Built-in defaults, extension defaults (code, then the module's config.yml), then core.yml, setting by
@@ -139,18 +278,11 @@ class Core:
 
     def _register_defaults(self, loaded: LoadedExtension) -> None:
         """Provider kinds an extension adds; providers, profiles, assignments and admission it suggests (core.yml
-        and runtime edits win)."""
-        contributions, name = loaded.contributions, loaded.extension.name
-        own = {interface.name for interface in contributions.interfaces}
-        for pattern in [*contributions.assignments, *contributions.admission]:
-            if pattern.split(":", 1)[0] not in own or ":" not in pattern:
-                raise ConfigError(f"{name}: defaults may only cover its own interfaces, not {pattern!r}")
+        and runtime edits win). _check_defaults has checked them."""
+        contributions = loaded.contributions
         # Kinds, then providers, then profiles: each may use the ones before.
         for kind, factory in contributions.adapters.items():
-            try:
-                self.providers.add_kind(kind, factory)
-            except ValueError as error:
-                raise ConfigError(f"{name}: {error}") from error
+            self.providers.add_kind(kind, factory)
         for provider, settings in contributions.providers.items():
             self.providers.add_provider(provider, settings)
         for profile, candidates in contributions.profiles.items():

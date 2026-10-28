@@ -324,9 +324,9 @@ class AssistantTests(unittest.IsolatedAsyncioTestCase):
                 f"EXTENSION = Extension({name!r}, lambda context: Contributions("
                 "prompt_parts=[PromptPart('house', 'Rules.')]), contracts='1')\n", encoding="utf-8")
         extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(self.tmp / "one"), str(self.tmp / "two")]
-        with self.assertRaises(ValueError) as caught:
-            await self.core([], overrides={"extensions": extensions})
-        self.assertIn("already registered by 'one'", str(caught.exception))
+        core, _ = await self.core([], overrides={"extensions": extensions})
+        self.assertIn("already registered by 'one'", core.skipped["two"])  # the second is left out
+        self.assertEqual([part.name for part in core.manager.prompt_parts], ["house"])
 
     async def test_an_edited_file_part_applies_from_the_next_turn(self):
         path = self.tmp / "pat.md"

@@ -79,6 +79,9 @@ ones are dropped into [`plugins/`](plugins); all load at startup unless `core.ym
 like a personal AI web client, as the DeepSeek student. [`plugins/webui`](plugins/webui) is the example interface: the
 bot as a web page on your local network.
 
+* [docs/DESIGN.md](docs/DESIGN.md): the decisions to read first: students are the models, engines are the
+  harnesses (MomoChat converses, Chimera works), interfaces are the frontends; declared dependencies; the
+  minimum core.
 * [docs/core/ARCHITECTURE.md](docs/core/ARCHITECTURE.md): how the core is built (interfaces, gateway,
   manager, engines, capabilities, storage) and its rules.
 * [docs/core/EXTENSIONS.md](docs/core/EXTENSIONS.md): writing modules, configuration, policy, and which

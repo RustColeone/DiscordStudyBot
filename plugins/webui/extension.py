@@ -39,11 +39,15 @@ def setup(context) -> Contributions:
     assignment = {"engine": "room", "personas": list(config["personas"]),
                   "budget": {"model_calls": 40, "tool_calls": 24, "seconds": 900},
                   **custom, "options": {**OPTIONS, **dict(custom.get("options") or {})}}
-    return Contributions(interfaces=[interface], assignments={f"{name}:*": assignment},
+    # Its chats need the room engine and the students; without either the page still opens, and starting a chat
+    # says that no engine is assigned. (`present` is None when set up outside a core.)
+    present = getattr(context, "present", None)
+    usable = present is None or {"room", "students"} <= set(present)
+    return Contributions(interfaces=[interface], assignments={f"{name}:*": assignment} if usable else {},
                          admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": False}})
 
 
-EXTENSION = Extension("webui", setup, contracts="1", version="1",
+EXTENSION = Extension("webui", setup, contracts="1", version="1", uses=("room", "students"),
                       description="A chat page on the local network: the five classmates, no Discord needed",
                       settings=(
     Setting("port", "Port the page is served on", "number", 4156),

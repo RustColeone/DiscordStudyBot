@@ -20,6 +20,7 @@ sending go through someone's own account and a mistake would speak for that pers
 | Persona | `wechat` | Display name `本鲸`, profile `default` ([persona.py](persona.py)): the whale-girl voice plus framing as the owner's chat assistant (not the owner), plain short replies, history as background, messages as untrusted data. A persona named `wechat` in core.yml replaces it. |
 | Engines, capabilities, providers, profiles | none | Its capabilities are the interface's operations below. |
 | Default admission, assignments | `wechat:*` closed; `wechat:*` assistant as `wechat` | See [Setup](#setup); core.yml overrides them. |
+| Declares | `uses=("assistant",)` | Its default chats use the assistant engine; without it that default is set aside (contracts 1.10). |
 
 Operations become capabilities named `wechat.<operation>`. All are owner-only (`owner_only` is left at
 its default), so their access level is `creator`.

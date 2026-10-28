@@ -21,6 +21,7 @@ brings an interface, an engine and the defaults that make it work as soon as it 
 | Permissions | `whale_chan:*` | `tiers: {write: always-ask, critical: always-ask}` |
 | Setting | `token` | `secret`, env `DISCORD_BOT_TOKEN_WHALE_CHAN`, checked by logging in to Discord |
 | Setting | `persona` | `text`, default `deepseek`: the student her bot speaks as |
+| Declares | `requires=("students",)` | Her bot speaks as a student: without the students module the core leaves this module out and says why (contracts 1.10) |
 | Capability | `whale_chan.speak` | `prepare`: a short text spoken aloud as a voice message ([`voice.py`](voice.py)); off with `voice: {enabled: false}` |
 
 She is nothing of her own here: no persona, no model profile, no memory settings. Her prompt (`whale.md`,

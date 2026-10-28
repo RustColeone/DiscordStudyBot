@@ -95,6 +95,8 @@ PERMISSIONS_COMMAND = Command(
 BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND, SETUP_COMMAND, PERMISSIONS_COMMAND)
 GRANT_DAYS = 30
 CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
+NOTHING_ANSWERS = ("Nothing answers here yet: no engine is assigned to this conversation (see `--check`). "
+                   "`$help` lists what works.")
 LEVELS = {"member": 0, "admin": 1, "creator": 2}
 
 
@@ -173,6 +175,7 @@ class Manager:
         # new messages start new runs instead of queuing behind long work (a video conversion).
         self._working: dict[str, list[tuple[str, float]]] = {}
         self._side_tasks: set[asyncio.Task] = set()
+        self._told_unassigned: set[str] = set()  # owner's direct chats told that nothing answers there
 
     @property
     def control(self) -> Address | None:
@@ -561,6 +564,12 @@ class Manager:
                 self.audit.record("not_assigned", address=address,
                                   reason="none" if assignment is None else "disabled" if not assignment.enabled
                                   else "before_assignment")
+                # In the owner's own direct chat, say once why nothing answers (no engine there, say); elsewhere the
+                # silence stays.
+                if assignment is None and request.is_direct and self.is_owner(request) \
+                        and address not in self._told_unassigned:
+                    self._told_unassigned.add(address)
+                    await self._deliver(Reply(request.address, "text", text=NOTHING_ANSWERS, in_reply_to=request.id))
                 return
             for active in self.tank.lane_runs(assignment.lane_key(request)):
                 if self._working.get(active.id):

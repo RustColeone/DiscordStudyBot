@@ -432,7 +432,7 @@ def setup(context):
                          admission={name + ":*": {"require_mention_in_groups": False}})
 
 
-EXTENSION = Extension("dropin", setup, contracts="1")
+EXTENSION = Extension("dropin", setup, contracts="1", uses=("probe",))  # its default names the probe engine
 '''
 
 # A provider kind of a module's own (contracts.ModelAdapter): answers "<prefix><model>: <last message>".
@@ -482,8 +482,9 @@ class PluginTests(CoreCase):
         from core.config import ConfigError
         folder = self.plugin("interface: sage_bot\n")
         (folder / "extension.py").write_text(DROP_IN.replace('name + ":*": {"engine"', '"chat:*": {"engine"'))
-        with self.assertRaisesRegex(ConfigError, "only cover its own interfaces"):
-            await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
+        self.assertIn("only cover its own interfaces", core.skipped["dropin"])  # left out; the core runs
+        self.assertNotIn("sage_bot", core.gateway.interfaces)
 
     async def test_contributed_providers_serve_its_profiles_and_core_yml_settings_win(self):
         import os
@@ -523,8 +524,8 @@ class PluginTests(CoreCase):
         (folder / "extension.py").write_text(ECHO_KIND + DROP_IN.replace(
             'profiles={"sage": [{"provider": "fake", "model": "big"}]},',
             'adapters={"openai_compatible": Echo}, profiles={"sage": [{"provider": "fake", "model": "big"}]},'))
-        with self.assertRaisesRegex(ConfigError, "dropin: Provider kind 'openai_compatible' already exists"):
-            await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
+        core = await self.core({"modules": {"dirs": [str(self.tmp / "plugins")]}})
+        self.assertIn("provider kind 'openai_compatible' already exists", core.skipped["dropin"])
 
     async def test_configured_profile_can_override_one_using_a_contributed_provider(self):
         folder = self.plugin("interface: sage_bot\n")

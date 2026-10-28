@@ -15,6 +15,10 @@ from core.config import CoreConfig
 
 
 def describe(core: Core) -> None:
+    for name, why in core.skipped.items():
+        print(f"[core] not loaded: {name}: {why}", flush=True)
+    for module, pattern, why in core.set_aside:
+        print(f"[core] default assignment {pattern} ({module}) set aside: {why}", flush=True)
     configured = core.providers.configured()
     print(f"[core] modules: {', '.join(item.extension.name for item in core.extensions)}; "
           f"interfaces: {', '.join(core.gateway.interfaces) or 'none'}; "
@@ -37,10 +41,12 @@ async def main(arguments: argparse.Namespace) -> int:
         for loaded in core.extensions:
             contributions = loaded.contributions
             kind = "built-in" if core.config.builtin(loaded.path) else "external"
+            declared = "".join(f" {key}={list(getattr(loaded.extension, key))}" for key in ("requires", "uses")
+                               if getattr(loaded.extension, key))
             print(f"{loaded.extension.name} ({kind}, {loaded.path}): "
                   f"interfaces={[i.name for i in contributions.interfaces]} "
                   f"engines={[e.spec.name for e in contributions.engines]} "
-                  f"capabilities={[c.name for c in contributions.capabilities]}")
+                  f"capabilities={[c.name for c in contributions.capabilities]}{declared}")
         print("core capabilities:", sorted(name for name in core.manager.capabilities if name.startswith("core.")))
         for persona in core.manager.personas.values():
             if persona.parts:
@@ -52,7 +58,7 @@ async def main(arguments: argparse.Namespace) -> int:
         describe(core)
         core.tank.close()
         core.bottle.close()
-        return 0
+        return 1 if core.skipped else 0  # a module that did not load is a problem to fix, though the core runs
     task = asyncio.current_task()
     loop = asyncio.get_running_loop()
     on_signal = supervised.stop_on_signal(core, task)

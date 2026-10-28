@@ -343,12 +343,14 @@ from contracts import Contributions, Extension, Persona
 
 def setup(context) -> Contributions:
     # context.name, context.config (local config.yml, overridden by core.yml), context.data_dir (private dir),
-    # context.facts (what it publishes for pages, contracts 1.9), context.log(event, **fields)
+    # context.facts (what it publishes for pages, contracts 1.9), context.present (which modules it uses are
+    # loaded, contracts 1.10), context.log(event, **fields)
     return Contributions(interfaces=[...], engines=[...], capabilities=[...],
                          personas=[Persona("whale", "本鲸", "…", profile="default")],
                          prompt_parts=[...], watchers=[...])
 
-EXTENSION = Extension("my_extension", setup, contracts="1", version="1", description="...")
+EXTENSION = Extension("my_extension", setup, contracts="1", version="1", description="...",
+                      requires=("students",), uses=("room",))   # see Dependencies below
 ```
 
 * `name`: lowercase letters, digits and `_`; unique across loaded extensions.
@@ -401,13 +403,51 @@ Setting("channels", "Channel IDs to work in", "list", [])     # kinds: text, sec
   (name → settings, as in core.yml; over the built-in settings, and under those core.yml gives, key by key), model
   `profiles` (name → ordered candidates, as in core.yml; they may use the module's own providers), and
   `assignments` / `admission` for the extension's own interfaces only (`<interface>:*` or
-  `<interface>:<conversation>`; anything else refuses to load), and
+  `<interface>:<conversation>`; anything else leaves the module out), and
   `permissions` (`use` and `tiers` for its own interfaces, `rules` for its own capabilities; whale_chan
   makes every write ask in her conversations). The module's own `config.yml` may set `permissions:` under
   the same limits. core.yml and runtime edits always win.
 
 `python -m core --config core.yml --check` loads and validates every module, marks it built-in or
-external, and lists what each contributes, without starting anything.
+external, and lists what each contributes and declares, without starting anything. It exits with 1 when a module
+was left out (see below), though the core itself would run.
+
+### Dependencies
+
+Since contracts 1.10 every module declares, in its `Extension(...)`, the other modules it builds on, by module name
+(the `name` in their `EXTENSION`):
+
+| Field | Meaning | Without it |
+| --- | --- | --- |
+| `requires` | The module cannot work without these. A Python package is `package:<name>` or `package:<name>>=<version>` (the distribution's name, as pip knows it). | The module is not loaded, `--check` says why, and every module that requires it is left out too |
+| `uses` | The module works without these, minus what they would add. | It loads; `context.present` says which of them are there, so it offers only what it can |
+
+```python
+EXTENSION = Extension("webui", setup, uses=("room", "students"))            # its chats need both; the page opens without
+EXTENSION = Extension("whale_chan", setup, requires=("students",))          # her bot is a student's bot
+EXTENSION = Extension("companion", setup, requires=("package:mneme-llm>=0.2",))
+```
+
+* **Declaring is not optional.** After setup, the core checks every engine and persona your suggested
+  `assignments` name. Each must be your own, the core's, or one a module in your `requires` or `uses` adds;
+  otherwise your module is left out with "names the engine 'room' of the room module, which it does not declare".
+  You find out the first time you run it.
+* **Order:** a module loads after the modules it requires or uses that are there, so `context.present` is known at
+  setup. Modules that depend on each other in a circle are both left out.
+* **A suggested assignment naming a module you `use` that is not there** is set aside (`default_unusable` in the
+  audit log, a line in `--check`), instead of stopping anything. Better: leave it out yourself, from
+  `context.present`, as the web UI does.
+* **A module that cannot load is left out, never the whole core:** an import error, a failing `setup`, contributions
+  of the wrong type, a name another module already registered, a default for someone else's interface. The audit
+  log records `module_skipped` with the reason, the console prints `not loaded: <module>: <reason>`, and `--check`
+  exits with 1.
+* **What stays fatal:** what the owner wrote. An assignment in core.yml (or set at run time) naming an engine or
+  persona that is not loaded stops the core with that message, as do two modules of the same name.
+* **The core needs no module.** Its own default assignments (`*` and `routine:*`, to the `assistant` engine) apply
+  only while that engine is loaded. With no engine at all, the typed `$` commands still work through any
+  interface, and a plain message in the owner's own direct chat gets one line saying nothing answers there.
+
+The architecture page shows each module's declarations beside its description.
 
 ## Interfaces
 

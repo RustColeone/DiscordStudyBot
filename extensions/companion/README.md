@@ -22,8 +22,8 @@ companion". Without it, the students still talk as before.
 | Capability | `companion.alias` | `$alias`: what you call each student; `$alias <student> <name>` names her, `$alias <student> reset` takes it back. The student is found by her name, her display name, her other names (Luna for GPT) or your alias for her. Typed only (models are not offered it); it runs without asking, since it changes only your own name for her. |
 | Capability | `companion.bond` | `$bond`: each student's role, closeness and mood with you, and your name for her. |
 
-It needs mneme-llm 0.2 or newer (`pip install -U mneme-llm`). Without it, the module adds nothing and records
-`mneme_llm_missing` in the audit log.
+It needs mneme-llm 0.2 or newer (`pip install -U mneme-llm`), and declares it (`requires=("package:mneme-llm>=0.2",)`):
+without it, the core leaves the module out and says why (`--check`, and `module_skipped` in the audit log).
 
 **What learning costs.** Each message a student says in conversation is one decision call (her mood, and whether to
 write a note), plus a note-writer call when there is something to keep, plus her impression once a day. They are

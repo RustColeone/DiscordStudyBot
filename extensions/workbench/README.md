@@ -300,6 +300,11 @@ A **seat** is a classmate with a model family and two model lists (`cheap`, `str
 list of seats; the first seat that can answer takes it. Reviewers (judge, critic) come from **another family**
 than the drafter when one can answer, otherwise from another seat.
 
+The module declares `uses=("students",)` (contracts 1.10): where the students module is loaded, its personas (names,
+prompts, pictures) are the seats' faces. The seats' own definitions here are still a second copy of four of them;
+the plan is that the seats come from the students module, which the module will then require
+([docs/DESIGN.md](../../docs/DESIGN.md)).
+
 | Role | Default order | Tier |
 | --- | --- | --- |
 | router (sorts, announces) | GPT, Claude, Gemini, DeepSeek, Grok | cheap |

@@ -18,6 +18,7 @@ to connect the core to a new platform, especially one you host yourself.
 | Default assignment | `webui:*` | `{engine: room, personas: [gpt, gemini, claude, deepseek, grok], budget: {model_calls: 40, tool_calls: 24, seconds: 900}, options: {history_limit: 40, compact: true, chime_in: true}}`. `personas` and `assignment` in the config change it; core.yml wins over both. |
 | Runtime assignments | `webui:<chat>` | One per chat started with some of the classmates (not all), set with `core.set_assignment` and removed with the chat (below). |
 | Default admission | `webui:*` | `{enabled: true, require_mention_in_groups: false}` |
+| Declares | `uses=("room", "students")` | Its chats need both (contracts 1.10). Without either the page still opens, its default assignment is left out, and starting a chat says that no engine is assigned. |
 | Owner report | `port.set_owners(["creator"], control=webui:classroom, fallback=True)` | Used only when core.yml lists no `webui` owners; the default chat (`classroom`) becomes the control route only when no other interface offers one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
 
 It contributes no engines, capabilities, personas, profiles or permissions. The five personas come from

@@ -210,14 +210,15 @@ class DataReader:
 
 
 def slots(files: dict[str, dict]) -> dict[str, dict]:
-    """Each module (a folder with extension.py): its description and the slots it fills, read from that file."""
+    """Each module (a folder with extension.py): its description, the slots it fills and the modules it requires
+    and uses (contracts 1.10), read from that file."""
     modules = {}
     for path in files:
         if not path.endswith("/extension.py") or path.count("/") != 2:
             continue
         folder = path.rsplit("/", 1)[0]
         tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
-        filled, description = set(), ""
+        filled, description, declared = set(), "", {"requires": [], "uses": []}
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Contributions":
                 filled |= {keyword.arg for keyword in node.keywords if keyword.arg in SLOTS}
@@ -228,7 +229,9 @@ def slots(files: dict[str, dict]) -> dict[str, dict]:
                 for keyword in node.keywords:
                     if keyword.arg == "description" and isinstance(keyword.value, ast.Constant):
                         description = str(keyword.value.value)
-        modules[folder] = {"description": description, "slots": [slot for slot in SLOTS if slot in filled]}
+                    if keyword.arg in declared and isinstance(keyword.value, (ast.Tuple, ast.List)):
+                        declared[keyword.arg] = [item.value for item in keyword.value.elts if isinstance(item, ast.Constant)]
+        modules[folder] = {"description": description, "slots": [slot for slot in SLOTS if slot in filled], **declared}
     return modules
 
 

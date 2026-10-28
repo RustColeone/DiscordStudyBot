@@ -439,6 +439,6 @@ def setup(context) -> Contributions:
         permissions={"*": {"rules": {"companion.alias": "auto"}}})
 
 
-EXTENSION = Extension("companion", setup, contracts="1", version="2",
+EXTENSION = Extension("companion", setup, contracts="1", version="2", requires=("package:mneme-llm>=0.2",),
                       description="What each student keeps of each person (mneme-llm): roles, aliases, notes, mood, "
                                   "plans; group-chat notes shared, one person's accounts as one")

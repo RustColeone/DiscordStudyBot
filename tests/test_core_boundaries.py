@@ -111,15 +111,20 @@ class LoaderTests(unittest.IsolatedAsyncioTestCase):
             "future": "from contracts import Contributions, Extension\nEXTENSION = Extension('future', lambda c: Contributions(), contracts='2')\n",
             "bad_setup": "from contracts import Extension\nEXTENSION = Extension('bad_setup', lambda c: [])\n",
         }
+        reasons = {"no_entry": "has no extension.py", "no_decl": "must define EXTENSION",
+                   "future": "targets contracts 2", "bad_setup": "setup must return contracts.Contributions"}
+        skipped_as = {"no_entry": "no_entry", "no_decl": "no_decl", "future": "future", "bad_setup": "bad_setup"}
         for name, body in cases.items():
             directory = self.tmp / "bad" / name
             directory.mkdir(parents=True)
             if body is not None:
                 (directory / "extension.py").write_text(body)
             with self.subTest(name=name):
-                core = new_core(make_config(self.tmp / name, {"extensions": [str(directory)]}))
-                with self.assertRaises(ExtensionError):
-                    await core.build()
+                # Since contracts 1.10 a module that cannot load is left out with the reason; the core goes on.
+                core = new_core(make_config(self.tmp / name, {"extensions": [
+                    *make_config(self.tmp).raw["modules"]["paths"], str(directory)]}))
+                await core.build()
+                self.assertIn(reasons[name], core.skipped[skipped_as[name]])
                 close(core)
 
     async def test_capabilities_must_use_their_extensions_namespace(self):
@@ -128,9 +133,10 @@ class LoaderTests(unittest.IsolatedAsyncioTestCase):
             async def run(a, c): return ToolResult.ok("x")
             EXTENSION = Extension("thief", lambda ctx: Contributions(capabilities=[Capability("tools.steal", "x", run)]))
             """)
-        core = new_core(make_config(self.tmp, {"extensions": [str(path)]}))
-        with self.assertRaisesRegex(ValueError, "namespace"):
-            await core.build()
+        core = new_core(make_config(self.tmp, {"extensions": [*make_config(self.tmp).raw["modules"]["paths"], str(path)]}))
+        await core.build()
+        self.assertIn("namespace", core.skipped["thief"])
+        self.assertNotIn("tools.steal", core.manager.capabilities)
         close(core)
 
     async def test_assignments_are_checked_against_registered_engines_and_personas(self):

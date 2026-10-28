@@ -90,6 +90,12 @@ class CoreConfig:
                     self.persona_parts[name] = parts
             self.assignments = {pattern: Assignment.from_config(pattern, value)
                                 for pattern, value in (raw.get("assignments") or {}).items()}
+            # The core's own defaults, where core.yml left them as they are: they apply only while what they name is
+            # loaded, while an assignment the owner wrote that names something missing stops the core.
+            from core.defaults import default_config
+            builtin = default_config().get("assignments") or {}
+            self.builtin_assignments = [pattern for pattern, value in builtin.items()
+                                        if (raw.get("assignments") or {}).get(pattern) == value]
         except (KeyError, TypeError, ValueError) as error:
             raise ConfigError(f"Invalid persona or assignment: {error}") from error
         self.permissions = dict(raw.get("permissions") or {})
