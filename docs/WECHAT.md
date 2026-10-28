@@ -13,7 +13,7 @@ flowchart LR
     K[Private key files] --> R
     R --> P[One-second polling, per-chat read positions]
     P --> G[Gateway: admission rules, mentions, $commands]
-    G --> E[Engine: assistant + wechat persona]
+    G --> E[Engine: MomoChat + wechat agent]
     E --> S[Desktop helper: verified account, recipient, Send once]
     S --> C[Outgoing row in the database = receipt]
 ```
@@ -100,7 +100,7 @@ variables still work as fallbacks.
 
 Conversations are `wechat:<account>/<native id>` (`…@chatroom` for groups), so policy for one account
 never applies to another. A typical policy: nothing answered by default, a whitelist, and the
-assistant engine with the extension's `wechat` persona:
+MomoChat with the extension's `wechat` agent:
 
 ```yaml
 admission:
@@ -109,7 +109,7 @@ admission:
   "wechat:wxid_me/wxid_friend": {enabled: true, max_age_s: 900}
 assignments:
   "wechat:*":
-    engine: assistant
+    engine: momochat
     personas: [wechat]
     lane: sender                      # group members are handled independently
     budget: {model_calls: 24, tool_calls: 24, seconds: 1800}

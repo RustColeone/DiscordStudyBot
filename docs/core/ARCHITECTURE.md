@@ -19,8 +19,8 @@ flowchart TB
         TANK[("Tank<br/>tank.db")]
     end
     subgraph ES["Engine slot"]
-        AS["assistant · room · terminal · built-in"]
-        CH["chat · whale_chan"]
+        AS["momochat · chimera · terminal · built-in"]
+        CH["any module's engine"]
     end
     subgraph CS["Capability slot"]
         BA["basic · web · media · images · reminders · system · host · terminal"]
@@ -102,7 +102,7 @@ state, action log and approvals live in the tank. Statuses: `running`, `waiting_
   messages) only while it is thinking or waiting for input. A new message goes to the newest holding
   run: into its inbox if it is thinking, as the answer if it is waiting for input. While a run waits on a
   capability or a file delivery (tracked in memory by the Manager) or for approval, it holds nothing and
-  new messages start parallel runs, as in the shared room: long work never gates the conversation.
+  new messages start parallel runs: long work never gates the conversation.
   `Session.activity()` shows each run the other open work in its conversation. Unread inbox messages
   start a new run when a run ends.
 * Before a run's output is delivered, the Manager re-checks that the run is open and its assignment
@@ -382,8 +382,8 @@ to the unit to keep a core that keeps crashing down until it is fixed.
 | [`core/providers/`](../../core/providers) | Profiles, fallback, OpenAI-compatible / Gemini / Anthropic adapters |
 | [`core/storage/`](../../core/storage) | Tank and bottle (separate SQLite files) |
 | [`core/loader.py`](../../core/loader.py), [`core/app.py`](../../core/app.py) | Module loading and assembly ([`core/config.py`](../../core/config.py) decides which modules load) |
-| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot, `chat` engine, DeepSeek), `webui` the example interface (MomoChat: a chat page on the local network, the room by default), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
-| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, `assistant` and `room` engines, `students` (the five characters, one folder each), `companion` (what each student keeps of each person, in mneme-llm: roles, aliases, notes, mood, learned by a watcher), `workbench` (coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; its own page), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram) |
+| [`plugins/`](../../plugins) | External modules, dropped in; `whale_chan` is the example (鲸酱: her own Discord bot on MomoChat, the DeepSeek student, her voice), `webui` the example interface (MomoChat's page on the local network), `wechat` the WeChat interface (dormant until configured, see [WECHAT.md](../WECHAT.md)) |
+| [`extensions/`](../../extensions) | Built-in modules: `discord` (with music, live clock and math rendering) and `cli` interfaces, the `momochat` engine (conversations, direct and in groups), `chimera` (the students on coding tasks in git worktrees, routed single/cascade/critique, landed after your approval; the Classroom page), `students` (the five students, one folder each, each with her memory of each person in mneme-llm: roles, aliases, notes, mood, learned by a watcher), `terminal` (creator-only shell, also an engine), `host` (creator-only screen, files, clipboard, apps); capabilities `basic` (time, notes), `media` (video downloads and clips), `images` (Gemini/OpenAI), `system` (host status), `reminders`, `web` (search, pages, image search, maps, Wolfram). Which engine does which job: [DESIGN.md](../DESIGN.md) |
 | [`core/defaults.py`](../../core/defaults.py) | Built-in configuration for a fresh clone |
 | [`core/supervisor.py`](../../core/supervisor.py), [`core/supervised.py`](../../core/supervised.py) | The supervisor (parent) and the core's side of it: heartbeat, restart reports |
 | [`core/setup.py`](../../core/setup.py), [`core/wizard.py`](../../core/wizard.py) | Setting up: module settings, file edits (one key at a time), `$setup`, and the guided `python -m core setup` |

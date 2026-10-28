@@ -3,7 +3,7 @@ name: gpt                   # the folder's name; engines and assignments use it
 display_name: GPT
 aliases: [Luna]             # other names that call on her ("Luna, ..."): she was Luna before Luna and Sol were one
 formerly: [luna]            # her persona name before: what was kept under it is hers (moved on the next start)
-order: 1                    # where she stands in lists (and the room's default rotation)
+order: 1                    # where she stands in lists (and a group chat's default rotation)
 # One line on who she is, for engines that write their own prompts around her (Chimera's work prompts).
 description: "GPT, the white-haired dragon girl and calm, dependable student-council president"
 models:                     # her own models, preferred in this order

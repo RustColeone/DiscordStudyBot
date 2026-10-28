@@ -13,7 +13,7 @@ interface to read before writing your own (one file, about 110 lines).
 | Owner report | `port.set_owners([user], control=cli:<conversation>, fallback=True)` | Only when stdin is an interactive terminal. Used only when core.yml lists no `cli` owners, and the console becomes the control route only when no interface offers a real one ([ARCHITECTURE.md, Owners and control](../../docs/core/ARCHITECTURE.md#owners-and-control)). |
 
 No engines, capabilities, personas, profiles, assignments, admission or permissions: its conversation
-follows core.yml's `*` rules (by default the `assistant` engine).
+follows core.yml's `*` rules (by default MomoChat with the core's `assistant` agent).
 
 Declared setting: `user_name` (text, default `you`; no env var).
 

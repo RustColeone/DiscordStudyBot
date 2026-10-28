@@ -61,7 +61,7 @@ def setup(context) -> Contributions:
                    {"timezone": {"type": "string", "description": "IANA name such as Asia/Shanghai"}},
                    risk=Risk.READ, command="now", command_argument="timezone"),
         # Typed by people only (`$remember`): offered to models, it was taken for a memory of their own, a write
-        # that waits for the owner each time, while the companion module keeps what a student remembers.
+        # that waits for the owner each time, while the students module keeps what a student remembers.
         Capability("basic.remember", "Save a short note for later, in this conversation.", remember,
                    {"text": {"type": "string"}}, ("text",), Risk.WRITE, command="remember",
                    command_argument="text", internal=True),

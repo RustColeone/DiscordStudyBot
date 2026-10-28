@@ -38,7 +38,7 @@ $notes                    1. buy milk
 
 * `$now` with an unknown zone answers `Unknown IANA timezone 'X'` (error code `invalid_timezone`).
 * `$remember` is typed by people only: models are not offered it (`internal`), since a student took it for a memory
-  of her own, a write that asked the owner at every fact, while the companion module keeps what she remembers.
+  of her own, a write that asked the owner at every fact, while the students module keeps what she remembers.
   Models may still read the notes (`basic.notes`).
 * `$remember` is a write: when a member (not an owner) types it, the owner is
   asked first. An owner's own `$remember` counts as the approval and runs at once. Text is cut to
