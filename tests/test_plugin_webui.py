@@ -579,8 +579,10 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
     async def test_a_new_chat_has_the_classmates_picked_for_it_and_one_makes_a_direct_chat(self):
         spoke = await self.start_room()
         ws, state = await self.socket()
+        stamina = state["roster"][3].pop("stamina")  # what she spent today against her allowance (contracts 1.12)
         self.assertEqual(state["roster"][3], {"name": "deepseek", "display": "DeepSeek", "alias": None, "bond": None,
                                               "mood": None})
+        self.assertEqual((stamina["today"]["spent"], stamina["today"]["allowance"], stamina["account"]), (0.0, 0.5, None))
         self.assertEqual(self.assignment("classroom")["options"],
                          {"history_limit": 40, "compact": True, "chime_in": True})
         await ws.send_json({"type": "new", "conversation": "chat-two", "title": "New chat",

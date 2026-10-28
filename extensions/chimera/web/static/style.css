@@ -485,6 +485,24 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
 }
 body.keyboard-open .places-nav { display: none; }
 
+/* the stamina pill (places.js): each student's account (thick bar) and what is left of today (thin bar) */
+.stamina-bolt { display: inline-flex; line-height: 0; }
+.stamina-who { display: flex; align-items: center; gap: 6px; text-decoration: none; color: inherit; border-radius: 999px; }
+.stamina-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; object-position: 50% 15%;
+                display: grid; place-items: center; background: #e4d4c0; font-weight: 900; font-size: 12px; }
+.stamina-bars { display: flex; flex-direction: column; gap: 3px; }
+.stamina-track { display: block; width: 64px; height: 6px; border-radius: 3px; background: #e4d4c0; overflow: hidden; }
+.stamina-track.is-today { height: 4px; border-radius: 2px; }
+.stamina-track.is-unknown { background: repeating-linear-gradient(90deg, #e4d4c0 0 4px, transparent 4px 7px); }
+.stamina-fill { display: block; height: 100%; border-radius: inherit; background: #e08a2e; }
+.stamina-note { font-size: 11px; font-weight: 700; line-height: 1.25; color: #6b5847; }
+@media (max-width: 760px) {
+  .stamina { gap: 8px; padding: 4px 10px 4px 8px; }
+  .stamina-face { width: 24px; height: 24px; }
+  .stamina-track { width: 40px; }
+  .stamina-note { display: none; }
+}
+
 /* ---- the Classroom's pages (the design canvas): sessions as cards, a new session's team, a session's report ---- */
 :root { --ink-2: #4f3f33; --line-2: #d9c7b2; --tab: #fbe2c2; --tab-ink: #5a3510; --ground: #f8f1e7; --track: #efe2d1; }
 @media (prefers-color-scheme: dark) {
@@ -629,6 +647,13 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .budget-line { padding: 8px 12px; border-radius: 10px; font-size: 14px; font-weight: 800; line-height: 1.4; }
 .budget-line.is-ok { background: #d9f1e3; color: #1f6440; }
 .budget-line.is-warn { background: #fbe9c8; color: #7a4d0e; }
+.tanks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.tank { display: flex; flex-direction: column; gap: 3px; font-size: 13px; line-height: 1.4; }
+.tank-head { display: flex; justify-content: space-between; gap: 8px; }
+.tank-head span, .tank-line { color: var(--ink-2); }
+.tank-bar { display: block; height: 6px; border-radius: 3px; background: #e4d4c0; overflow: hidden; }
+.tank-fill { display: block; height: 100%; border-radius: 3px; }
+.tank-warn { font-weight: 800; color: #7a4d0e; }
 .measured-pick { min-height: 44px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--ground);
                  color: var(--ink); text-align: left; font-size: 14px; line-height: 1.35; cursor: pointer; }
 .price-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }

@@ -120,6 +120,15 @@ class InterfacePort(Protocol):
         `aliases`, `formerly`, `pictures` (kind → absolute image path, see Persona) and `ready` (some candidate of
         her profile can be called). Pages show the students from this rather than keeping their own list."""
 
+    def prices(self) -> Any:
+        """Added in 1.12: the core's model prices (contracts.Prices), to show them on a page."""
+
+    def stamina(self, persona: str) -> Mapping[str, Any] | None:
+        """Added in 1.12: what a persona has spent today against her daily allowance, and the account she spends from:
+        `{today: {spent, allowance, left, day}, account: {provider, kind (balance or budget), currency, total, left,
+        as_of}}` (allowance and left None without a daily limit; account None when none is set up). None for one the
+        core does not know. A run that reaches her allowance (or its own `budget_usd`) waits for the owner."""
+
     def facts(self, persona: str, sender_id: str | None = None) -> Mapping[str, Any]:
         """What modules publish about a persona (`<module>.<key>` → value, see contracts.Facts), and with
         `sender_id`, what they publish about her and that person of this interface over it (added in 1.9)."""

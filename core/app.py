@@ -16,6 +16,7 @@ from core.loader import ExtensionError, LoadedExtension, import_extension, load_
 from core.manager.manager import Manager
 from core.manager.policy import Permissions, check_extension_permissions
 from core.manager.renames import adopt_engine_names, adopt_former_names
+from core.providers.prices import PriceBook
 from core.manager.secrets import Secrets
 from core.providers.registry import Providers
 from core.storage.bottle import Bottle
@@ -52,9 +53,10 @@ class Core:
         self.bottle = Bottle(config.data_dir / "gateway.db")
         self.providers = Providers(config.providers, {}, adapters=self._provider_adapters,
                                    record=self.audit.record, configured=config.configured_providers)
+        self.providers.prices = PriceBook(config.data_dir / "prices.json", config.prices)
         self.manager = Manager(self.tank, self.providers, personas=config.personas, assignments=config.assignments,
                                owners=config.owners, control=config.control, data_dir=config.data_dir,
-                               audit=self.audit, persona_parts=config.persona_parts)
+                               audit=self.audit, persona_parts=config.persona_parts, stamina=config.stamina)
         options = {"tick_seconds": self._tick_seconds}
         if self._clock is not None:
             options["clock"] = self._clock
@@ -119,7 +121,7 @@ class Core:
             loaded = await load_extension(path, lambda module_name: config.extension_config.get(module_name, {}),
                                           config.data_dir / "extensions", self.audit.record,
                                           self.manager.facts.handle, present, (extension, module),
-                                          lambda: self.manager.persona_views(config.profiles))
+                                          lambda: self.manager.persona_views(config.profiles), self.providers.prices)
         except ExtensionError as error:
             return self._skip(name, str(error), path)
         why, aside = self._check_names(loaded, loaded_names)

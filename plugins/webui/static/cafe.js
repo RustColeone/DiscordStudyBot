@@ -199,6 +199,10 @@
     state.avatars = new Set(data.avatars || []);
     state.rooms = data.rooms || [];
     window.renderPlaces?.($("#places-nav"), data.places || { here: data.here, others: [] }, "Cafe");
+    window.renderStamina?.($("#stamina"), state.students.filter((student) => student.own_ready !== false).map((student) => ({
+      name: shown(student), href: `students#${encodeURIComponent(student.name)}`, plate: colourOf(student.name),
+      picture: state.avatars.has(student.avatar) ? `avatars/${encodeURIComponent(student.avatar)}` : "",
+      stamina: student.stamina })));
     // the Classroom next door, when there is one: who is at work in it now
     const classroom = (data.places?.others || []).find((place) => place.place?.name === "Classroom");
     state.classroom = classroom ? new Set((classroom.people || []).map((person) => person.key)) : null;

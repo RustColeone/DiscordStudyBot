@@ -98,20 +98,6 @@
 # budget: {model_calls: 120, tool_calls: 400, seconds: 3600}   # per run, inside the bot
 
 # ---- cost ----------------------------------------------------------------------------------------------------
-# Prices come from Artificial Analysis's free models list (credited on the page, as their terms ask): put a free key
-# from artificialanalysis.ai in .env as ARTIFICIAL_ANALYSIS_API_KEY. The list is fetched again on use once it is more
-# than a day old; a failed fetch keeps the last list and tries again an hour later. Each answer is priced when it
-# comes, so a later list never changes what a past step cost. Costs are list-price estimates (cache hits count at the
-# full input price).
-# prices_max_age_h: 24
-# prices_key_env: ARTIFICIAL_ANALYSIS_API_KEY
-#
-# A model is matched by name (exact, the same words in another order, else the one closest model of the same maker).
-# When two are equally close it is left unpriced and the club dialog lists the candidates: pick one here.
-# price_aliases:
-#   deepseek/deepseek-flash: deepseek-v4-flash
-#
-# Your own prices (dollars per million tokens) win over the list, by provider/model or by provider:
-# prices:
-#   deepseek/deepseek-flash: {input: 0.07, output: 0.28}
-#   mylocal: {input: 0, output: 0}
+# Prices are the core's (contracts 1.12): core.yml `prices:` (a free key from artificialanalysis.ai in .env as
+# ARTIFICIAL_ANALYSIS_API_KEY, your own figures, aliases; see core.example.yml). Every answer arrives priced, so a
+# later list never changes what a past step cost, and the page shows each seat's price and where it came from.

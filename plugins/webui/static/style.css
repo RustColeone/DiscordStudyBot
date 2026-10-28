@@ -263,6 +263,13 @@ button.member:hover { background: var(--panel); }
 .meter-bar { height: 8px; margin-top: 4px; border-radius: 4px; background: var(--heart-track); overflow: hidden; }
 .meter-fill { height: 100%; border-radius: 4px; background: var(--heart); }
 .meter-note { margin-top: 3px; font-size: 12px; color: var(--muted); }
+.meter-value.is-stamina { color: #7a4d0e; }
+.meter-value.is-today { color: #234f9c; }
+.meter-head.is-small { margin-top: 6px; font-size: 13px; font-weight: 800; }
+.meter-bar.is-stamina { background: #efe2d1; }
+.meter-bar.is-stamina .meter-fill { background: #e08a2e; }
+.meter-bar.is-today { height: 5px; background: #efe2d1; }
+.meter-bar.is-today .meter-fill { background: var(--cp); }
 .card-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
 .card-note.is-warn { padding: 8px 10px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink); font-weight: 700; }
 .her-card .member-model { margin: 0; max-width: 100%; padding: 6px 10px; border-radius: 10px; background: var(--panel);
@@ -489,6 +496,24 @@ body.keyboard-open .places-nav { display: none; }  /* typing on a phone: every l
 .login button { border: 0; background: var(--accent); color: var(--accent-ink); padding: 11px; border-radius: 14px;
                 font-weight: 700; }
 .login-error { color: #b4512d !important; min-height: 1.2em; }
+
+/* the stamina pill (places.js): each student's account (thick bar) and what is left of today (thin bar) */
+.stamina-bolt { display: inline-flex; line-height: 0; }
+.stamina-who { display: flex; align-items: center; gap: 6px; text-decoration: none; color: inherit; border-radius: 999px; }
+.stamina-face { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; object-position: 50% 15%;
+                display: grid; place-items: center; background: #e4d4c0; font-weight: 900; font-size: 12px; }
+.stamina-bars { display: flex; flex-direction: column; gap: 3px; }
+.stamina-track { display: block; width: 64px; height: 6px; border-radius: 3px; background: #e4d4c0; overflow: hidden; }
+.stamina-track.is-today { height: 4px; border-radius: 2px; }
+.stamina-track.is-unknown { background: repeating-linear-gradient(90deg, #e4d4c0 0 4px, transparent 4px 7px); }
+.stamina-fill { display: block; height: 100%; border-radius: inherit; background: #e08a2e; }
+.stamina-note { font-size: 11px; font-weight: 700; line-height: 1.25; color: #6b5847; }
+@media (max-width: 760px) {
+  .stamina { gap: 8px; padding: 4px 10px 4px 8px; }
+  .stamina-face { width: 24px; height: 24px; }
+  .stamina-track { width: 40px; }
+  .stamina-note { display: none; }
+}
 
 /* MomoChat not loaded (the momochat engine or the students): the page opens greyed, and says why. */
 body.momochat-off .messages, body.momochat-off .members { filter: grayscale(1); opacity: .6; }

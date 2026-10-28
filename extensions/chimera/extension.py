@@ -23,7 +23,6 @@ from .board import Board
 from .capabilities import Chimera, build
 from .demo import DemoAdapter
 from .engine import ChimeraEngine
-from .prices import PriceBook
 from .record import Records
 from .team import build_team, family_of
 from .web.server import ClassroomUI
@@ -71,7 +70,7 @@ def assemble(context) -> tuple[Contributions, dict]:
     records.publish()
     board.subscribe(records.listen)
     chimera = Chimera(board, registry, trees, config, team)
-    prices = PriceBook(data_dir / "prices.json", config)
+    prices = getattr(context, "prices", None)  # the core's price list (contracts 1.12; core.yml `prices:`)
     interfaces = []
     page = None
     if config.get("api", True) is not False:  # the Classroom's interface: its API, and the page unless `web: false`

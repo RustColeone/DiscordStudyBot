@@ -125,3 +125,16 @@
   .students-heading h1 { font-size: 26px; }
   .student-left { max-width: none; }
 }
+
+/* stamina: her account (thick) and what is left of today (thin, in her colour) */
+.stamina-rows { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.stamina-line { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; }
+.stamina-meter { height: 7px; border-radius: 4px; background: #efe2d1; overflow: hidden; }
+.stamina-meter.is-today { height: 5px; }
+.stamina-meter .meter-fill { height: 100%; border-radius: inherit; background: #e08a2e; }
+.stamina-meter.is-today .meter-fill { background: var(--plate); }
+.big-number.is-stamina { color: #7a4d0e; }
+.meter-stamina .meter-fill { background: #e08a2e; }
+.meter-today { height: 6px; }
+.meter-today .meter-fill { background: var(--plate); }
+.today-line { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }

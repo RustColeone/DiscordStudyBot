@@ -151,6 +151,7 @@
     if (working) chips.append(make("span", "chip chip-class", `Classroom · ${working}`));
     body.append(chips);
     if (lacking) body.append(make("p", "student-warn", "Answers on a classmate's model until you add her key."));
+    else body.append(...staminaRows(student));
     const run = aloneRun(student);
     if (run) {
       const box = make("div", "bench-box");
@@ -164,6 +165,24 @@
     body.append(open);
     card.append(top, plate, body);
     return card;
+  }
+  // Her stamina on her card: her account (the thick bar) and what is left of today (the thin bar, in her colour).
+  function staminaRows(student) {
+    const view = window.staminaOf?.(student.stamina);
+    if (!view || (view.account == null && view.today == null && !view.accountText)) return [];
+    const rows = make("div", "stamina-rows");
+    const line = (label, text, fraction, kind) => {
+      const head = make("div", "stamina-line");
+      head.append(make("span", "", label), make("span", "", text));
+      const bar = make("div", `stamina-meter is-${kind}`);
+      const fill = make("div", "meter-fill");
+      fill.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
+      bar.append(fill);
+      rows.append(head, bar);
+    };
+    if (view.accountText) line("Stamina", view.accountText, view.account, "account");
+    if (view.today != null) line("Today", view.todayText, view.today, "today");
+    return [rows];
   }
   function classroomNow(student) {  // what she is doing in the Classroom now, from the places it publishes
     const classroom = (state.places?.others || []).find((place) => place.place?.name === "Classroom");
@@ -265,6 +284,27 @@
     }
     bondBox.append(make("p", "panel-note", "Grows and falls in MomoChat, as mneme-llm reads how your talks with her go."));
     trio.append(levelBox, bondBox);
+    const view = window.staminaOf?.(student.stamina);
+    if (view && student.own_ready !== false && (view.accountText || view.today != null)) {
+      const staminaBox = section("");
+      const title = staminaBox.querySelector("h2");
+      const account = student.stamina?.account;
+      title.append(make("span", "", "⚡ Stamina "), make("span", "big-number is-stamina",
+        account?.left != null ? view.amount(account.left, account.currency) : "–"));
+      if (view.account != null) staminaBox.append(meter(view.account, "stamina"));
+      staminaBox.append(make("div", "panel-meta", !account ? "No account set up: core.yml stamina: accounts"
+        : account.kind === "budget" ? `of the ${view.amount(account.total)} ${companyOf(student)} budget you entered`
+        : `in her ${companyOf(student)} account, as ${companyOf(student)} reports it`));
+      if (view.today != null) {
+        const today = make("div", "panel-meta today-line");
+        today.append(make("span", "", "Today"), make("span", "", `${view.todayText} · refills at midnight`));
+        staminaBox.append(today, meter(view.today, "today"));
+      }
+      staminaBox.append(make("p", "panel-note", account?.kind === "budget"
+        ? `${companyOf(student)} shows no balance to an ordinary key, so this counts down from what she spends.`
+        : "When today's allowance is spent, her work stops and asks you before she spends more."));
+      trio.append(staminaBox);
+    }
 
     const models = section((student.strong || []).length ? "Two models, one student" : "Her model");
     const list = make("div", "model-list");
@@ -366,6 +406,10 @@
     state.avatars = new Set(data.avatars || []);
     state.places = data.places;
     window.renderPlaces?.($("#places-nav"), data.places || { here: data.here, others: [] }, "Students");
+    window.renderStamina?.($("#stamina"), state.students.filter((student) => student.own_ready !== false).map((student) => ({
+      name: shown(student), href: `#${encodeURIComponent(student.name)}`, plate: plateOf(student),
+      picture: state.avatars.has(student.avatar) ? `avatars/${encodeURIComponent(student.avatar)}` : "",
+      stamina: student.stamina })));
     route();
   }
   async function refresh() {

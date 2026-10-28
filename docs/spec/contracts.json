@@ -1,7 +1,7 @@
 {
- "version": "1.11",
+ "version": "1.12",
  "constants": {
-  "CONTRACTS_VERSION": "1.11",
+  "CONTRACTS_VERSION": "1.12",
   "DIARY_KINDS": [
    "fact",
    "episode",
@@ -789,7 +789,7 @@
    ]
   },
   "ModelResult": {
-   "doc": "ModelResult(text: 'str', data: 'Any' = None, provider: 'str' = '', model: 'str' = '', input_tokens: 'int' = 0, output_tokens: 'int' = 0, duration_s: 'float' = 0.0, schema_mode: 'str' = '', fallbacks: 'tuple[str, ...]' = (), cached_input_tokens: 'int' = 0, tool_calls: 'tuple[ToolCall, ...]' = (), replay: 'Mapping[str, Any] | None' = None)",
+   "doc": "ModelResult(text: 'str', data: 'Any' = None, provider: 'str' = '', model: 'str' = '', input_tokens: 'int' = 0, output_tokens: 'int' = 0, duration_s: 'float' = 0.0, schema_mode: 'str' = '', fallbacks: 'tuple[str, ...]' = (), cached_input_tokens: 'int' = 0, tool_calls: 'tuple[ToolCall, ...]' = (), replay: 'Mapping[str, Any] | None' = None, price: 'Mapping[str, Any] | None' = None, cost: 'float | None' = None)",
    "fields": [
     {
      "name": "text",
@@ -848,6 +848,16 @@
     {
      "name": "replay",
      "type": "Mapping | none",
+     "default": null
+    },
+    {
+     "name": "price",
+     "type": "Mapping | none",
+     "default": null
+    },
+    {
+     "name": "cost",
+     "type": "float | none",
      "default": null
     }
    ]
@@ -1527,6 +1537,10 @@
     {
      "name": "present",
      "type": "frozenset"
+    },
+    {
+     "name": "prices",
+     "type": "any"
     }
    ],
    "methods": [
@@ -2037,6 +2051,13 @@
      "doc": "Read-only view of the core's current policy for one of your conversations: `{\"admission\": {...rule...}, \"assignment\": {...} | None}`."
     },
     {
+     "name": "prices",
+     "async": false,
+     "parameters": [],
+     "returns": "any",
+     "doc": "Added in 1.12: the core's model prices (contracts.Prices), to show them on a page."
+    },
+    {
      "name": "publish",
      "async": false,
      "parameters": [
@@ -2099,6 +2120,19 @@
      ],
      "returns": "none",
      "doc": "Report whether the platform can send. While not ready, deliveries are refused (not uncertain) and the owner is told about each transition."
+    },
+    {
+     "name": "stamina",
+     "async": false,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Mapping | none",
+     "doc": "Added in 1.12: what a persona has spent today against her daily allowance, and the account she spends from: `{today: {spent, allowance, left, day}, account: {provider, kind (balance or budget), currency, total, left, as_of}}` (allowance and left None without a daily limit; account None when none is set up). None for one the core does not know. A run that reaches her allowance (or its own `budget_usd`) waits for the owner."
     },
     {
      "name": "submit",
@@ -2207,6 +2241,80 @@
      ],
      "returns": "bool",
      "doc": "Whether some candidate of `profile` (default: the run's first persona's) has its provider configured, so a call can be tried (added in 1.6). Engines use it to pick who works before trying; a call can still fail."
+    }
+   ]
+  },
+  "Prices": {
+   "doc": "Model prices, as the core keeps them (added in 1.12): a list fetched once a day (Artificial Analysis's, with a key) under the owner's own figures (core.yml `prices:`). Every ModelResult already carries its price and cost; this is for pages and engines that show prices or estimate before a call.",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "cost",
+     "async": false,
+     "parameters": [
+      {
+       "name": "price",
+       "type": "Mapping | none",
+       "keyword_only": false
+      },
+      {
+       "name": "input_tokens",
+       "type": "int",
+       "keyword_only": false
+      },
+      {
+       "name": "output_tokens",
+       "type": "int",
+       "keyword_only": false
+      },
+      {
+       "name": "cached_input_tokens",
+       "type": "int",
+       "keyword_only": false,
+       "default": 0
+      }
+     ],
+     "returns": "float | none",
+     "doc": ""
+    },
+    {
+     "name": "price",
+     "async": false,
+     "parameters": [
+      {
+       "name": "provider",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "model",
+       "type": "str",
+       "keyword_only": false
+      }
+     ],
+     "returns": "Mapping | none",
+     "doc": "Dollars per million input and output tokens (and cache hits, when listed), with where the figure came from; None when unknown (never a guess)."
+    },
+    {
+     "name": "refresh_if_stale",
+     "async": true,
+     "parameters": [],
+     "returns": "str",
+     "doc": ""
+    },
+    {
+     "name": "status",
+     "async": false,
+     "parameters": [
+      {
+       "name": "models",
+       "type": "Iterable",
+       "keyword_only": false,
+       "default": "()"
+      }
+     ],
+     "returns": "Mapping",
+     "doc": "Where prices come from (with the attribution their source asks for), how old the list is, and the price of each of `models` (`{provider, model, ...}` rows, given back with `price` and, when unknown, `candidates`)."
     }
    ]
   },

@@ -88,6 +88,7 @@ class ClassroomUI(Interface):
             web.get("/api/tasks/{task}", self._task_api), web.get("/api/tasks/{task}/diff", self._diff_api),
             web.get("/api/tasks/{task}/file", self._file_api), web.get("/files/{file}/{name}", self._file),
             web.get("/api/prices", self._prices_api), web.get("/api/presence", self._presence_api),
+            web.get("/api/stamina", self._stamina_api),
             web.get("/api/state", self._state_api), web.get("/ws", self._socket),
             web.get("/avatars/{key}", self._avatar), web.get("/favicon.ico", self._favicon)])
         if self.page:  # the web page, one frontend of the API
@@ -303,6 +304,14 @@ class ClassroomUI(Interface):
         return web.json_response({"files": change.get("files", []), "stat": change.get("stat", "no changes"),
                                   "fingerprint": change.get("fingerprint", ""), "patch": patch, "live": False})
 
+    async def _stamina_api(self, request):
+        """Each seat's stamina (the core's, contracts 1.12), for the page's header and the team picker."""
+        return web.json_response({seat.persona: self._stamina(seat.persona) for seat in self.team.seats.values()})
+
+    def _stamina(self, persona: str):
+        asking = getattr(self.port, "stamina", None) if self.port is not None else None
+        return asking(persona) if callable(asking) else None
+
     async def _presence_api(self, request):
         return web.json_response(self.presence())
 
@@ -312,7 +321,7 @@ class ClassroomUI(Interface):
             return web.json_response({"error": "no price list"})
         if request.query.get("refresh"):
             await self.prices.refresh_if_stale()
-        return web.json_response(self.prices.status(self.team))
+        return web.json_response(self.prices.status(self._seat_models()))
 
     async def _file_api(self, request):
         """One file of the task as it is now (its worktree, else the checkout), for reading it whole."""
@@ -527,6 +536,10 @@ class ClassroomUI(Interface):
         self._tell(socket_, {"type": "ack", "id": client_id, "ok": bool(result), "reason": result.reason})
 
     async def _submit(self, task_id: str, client_id: str, text: str, extra: dict, action: str = ""):
+        task = self.board.task(task_id)
+        budget = (((task or {}).get("data") or {}).get("team") or {}).get("budget")
+        if budget and not text.lstrip().startswith("$"):  # each round of a session with a budget stops and asks there
+            extra = {**extra, "budget_usd": float(budget)}  # (the core's stamina, contracts 1.12)
         request = Request(id=f"wb-{client_id}", address=Address(self.name, task_id),
                           sender=Sender(self.user_id, self.user_name), text=text, received_at=time.time(),
                           is_direct=True, mentions_me=True, display=self.display, extra=extra)
@@ -652,9 +665,14 @@ class ClassroomUI(Interface):
                          # (a seat without strong models of her own falls back to her cheap ones: then she has none)
                          "strong": seat.label("strong") if seat.label("strong") != seat.label("cheap") else "",
                          "ready": self._ready(seat),
-                         "alias": alias if isinstance(alias, str) else None,
+                         "alias": alias if isinstance(alias, str) else None, "stamina": self._stamina(seat.persona),
                          "level": (found.get(seat.persona) or level_of(0))["level"], "alone": alone})
         return team
+
+    def _seat_models(self) -> list[dict]:
+        """Each seat's first model of each tier, for the price list's status (the core's, contracts 1.12)."""
+        return [{"seat": seat.persona, "tier": tier, "provider": candidate["provider"], "model": candidate["model"]}
+                for seat in self.team.seats.values() for tier in ("cheap", "strong") for candidate in seat.models(tier)[:1]]
 
     def _ready(self, seat) -> bool | None:
         """Whether she has a key: the core can tell (contracts 1.7), else what the latest run saw."""
@@ -678,7 +696,7 @@ class ClassroomUI(Interface):
                              "commands": str(self.config.get("commands", "allowlist")),
                              "command_network": self.config.get("command_network", True) is not False,
                              "command_filesystem": str(self.config.get("command_filesystem") or "all")},
-                "prices": self.prices.status(self.team) if self.prices else None, "workflows": catalog(),
+                "prices": self.prices.status(self._seat_models()) if self.prices else None, "workflows": catalog(),
                 "benchmarks": benchmarks(), "formations": {name: list(roles) for name, (_, roles) in FORMATIONS.items()},
                 "places": self.places(), "links": self.links(), "page": self.page}
 

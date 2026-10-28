@@ -30,6 +30,7 @@ from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
 from core.manager.secrets import Secrets
+from core.manager.stamina import Paused, Stamina, money
 from core.prompts import FileText, parts_for, render, with_parts
 from core.providers.registry import Providers
 from core.serialize import request_from_dict, request_to_dict
@@ -94,6 +95,7 @@ PERMISSIONS_COMMAND = Command(
                "module's config.yml (`permissions:`); grants are made by answering an approval with Always allow.")
 BUILTIN_COMMANDS = (*BUILTIN_COMMANDS, ADMIN_COMMAND, ROUTINE_COMMAND, SETUP_COMMAND, PERMISSIONS_COMMAND)
 GRANT_DAYS = 30
+STAMINA = "core.stamina"  # the approval a run waits for at a spending limit (core/manager/stamina.py)
 CORE_COMMANDS = tuple(command.name for command in BUILTIN_COMMANDS)
 NOTHING_ANSWERS = ("Nothing answers here yet: no engine is assigned to this conversation (see `--check`). "
                    "`$help` lists what works.")
@@ -128,7 +130,8 @@ class Manager:
     def __init__(self, tank: Tank, providers: Providers, *, personas: Mapping[str, Persona],
                  assignments: Mapping[str, Assignment], owners: Owners, control: Address | None,
                  data_dir: str | Path, audit: Audit | None = None,
-                 persona_parts: Mapping[str, tuple[PromptPart, ...]] | None = None):
+                 persona_parts: Mapping[str, tuple[PromptPart, ...]] | None = None,
+                 stamina: Mapping[str, Any] | None = None):
         self.tank, self.providers = tank, providers
         self.personas = dict(personas)
         self._persona_parts = dict(persona_parts or {})  # core.yml's parts for modules' personas, by name
@@ -136,6 +139,8 @@ class Manager:
         self.watchers: list[tuple[Watcher, str]] = []  # (watcher, its module), in the order modules gave them
         self._watching: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)  # (watcher, persona)
         self.facts = FactsDesk(tank)
+        # What each persona may spend a day, her account, and runs that wait at a limit (core/manager/stamina.py).
+        self.stamina = Stamina(tank, stamina, providers, lambda: self.personas)
         self._part_origin: dict[int, str] = {}  # id(part) → the module that contributed it
         self._part_problems: set[tuple] = set()  # (persona, part, place, kind) audited and not yet recovered
         self._config_assignments = dict(assignments)
@@ -433,6 +438,7 @@ class Manager:
     # ---- lifecycle --------------------------------------------------------------------------------
     async def start(self) -> None:
         self._stopping = False
+        self.stamina.start()
         self._clean_workspaces()
         self._refile_shared_diaries()
         # Decisions the stop cut off are reported first, for running runs too (a room keeps running while one job
@@ -516,6 +522,7 @@ class Manager:
 
     async def stop(self) -> None:
         self._stopping = True
+        self.stamina.stop()
         for task in list(self._side_tasks):
             task.cancel()
         await asyncio.gather(*self._side_tasks, return_exceptions=True)
@@ -683,6 +690,8 @@ class Manager:
                 raise
             except asyncio.TimeoutError:
                 failure = ("budget_exceeded", "The run's time budget is used up")
+            except Paused:  # at a spending limit: it waits for the owner's approval (the card is out)
+                outcome = RunYield.WAIT_APPROVAL
             except ModelError as error:
                 failure = (error.kind, str(error))
             except Exception as error:
@@ -825,7 +834,9 @@ class Manager:
         if watcher:  # a watcher's call: counted in the run's usage, outside its budget, and no one's answer
             result = await self.providers.generate(request, profile)
             self._add_usage(run_id, watcher_calls=1, input_tokens=result.input_tokens,
-                            output_tokens=result.output_tokens)
+                            output_tokens=result.output_tokens, cost=result.cost or 0.0)
+            self.stamina.record(request.persona if request.persona in self.personas else None, result.provider,
+                                result.cost)  # (counted on her day, never stopped)
             self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
                               duration_s=result.duration_s, input_tokens=result.input_tokens,
                               output_tokens=result.output_tokens, watcher=True)
@@ -834,8 +845,9 @@ class Manager:
         budget = Assignment.from_dict(record.assignment).budget
         if record.usage.get("model_calls", 0) >= budget.model_calls:
             raise ModelError("budget_exceeded", "This run used its model-call budget")
-        self._add_usage(run_id, model_calls=1)
         persona = self._model_persona(record, request, profile)
+        await self._stamina_check(record, persona)
+        self._add_usage(run_id, model_calls=1)
         try:
             result = await self.providers.generate(request, profile,
                                                    first=self.model_choices.first(record.address, persona))
@@ -845,7 +857,10 @@ class Manager:
             raise
         if persona:
             self._answered.setdefault(run_id, {})[persona] = result
-        self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens)
+        self._add_usage(run_id, input_tokens=result.input_tokens, output_tokens=result.output_tokens,
+                        cost=result.cost or 0.0)
+        self.stamina.record(persona or (request.persona if request.persona in self.personas else None),
+                            result.provider, result.cost)
         self.audit.record("model_call", run=run_id, profile=profile, provider=result.provider, model=result.model,
                           duration_s=result.duration_s, input_tokens=result.input_tokens,
                           output_tokens=result.output_tokens)
@@ -1090,7 +1105,12 @@ class Manager:
         summary = self.secrets.scrub(capability.summary(arguments))
         shown = json.dumps(self.secrets.scrub_value(arguments), ensure_ascii=False)
         who = trigger.sender.name or trigger.sender.id
-        if typed:
+        if capability.name == STAMINA:  # a run at a spending limit: the question is the card's own
+            title, asked = "Stamina", summary
+            actions = (Action("Let her", f"$approve {approval_id}", "success") if arguments.get("kind") == "daily"
+                       else Action("Allow more", f"$approve {approval_id}", "success"),
+                       Action("Stop here", f"$deny {approval_id}", "danger"))
+        elif typed:
             title, asked = "Confirm", f"You typed: {summary}"
             actions = (Action("Confirm", f"$approve {approval_id}", "success"),
                        Action("Cancel", f"$deny {approval_id}", "danger"))
@@ -1145,8 +1165,47 @@ class Manager:
                 self.tank.append_event(record.id, "approval_denied", call)
                 summary = f"Denied {approval_id}: {approval['name']} was not run."
             self.audit.record("approval_decided", approval=approval_id, approved=approve)
+        if not approve and approval["name"] == STAMINA:  # no more spending: the run stops here
+            await self._stop_at_limit(record.id, arguments)
+            return f"Denied {approval_id}: the run stopped at its limit."
         await self._resume_after_decision(record.id, result)
         return summary
+
+    # ---- stamina: spending limits -------------------------------------------------------------------------------
+    async def _stamina_check(self, record: RunRecord, persona: str | None) -> None:
+        """Before a model call: a run at her day's allowance, or at its own budget (Request.extra `budget_usd`),
+        asks the owner (a `core.stamina` card) and waits (`Paused`) instead of spending more."""
+        trigger = request_from_dict(record.trigger)
+        try:
+            budget = float(trigger.extra.get("budget_usd") or 0) or None
+        except (TypeError, ValueError):
+            budget = None
+        stop = self.stamina.check(record, persona, budget)
+        if stop is None:
+            return
+        capability = self.capabilities.get(STAMINA)
+        key = (f"stamina:daily:{stop['persona']}:{stop['day']}" if stop["kind"] == "daily"
+               else f"stamina:session:{record.id}:{stop['limit']}")
+        result = await self._request_approval(record, capability, stop, key) if capability else None
+        if result is None or result.status != "needs_approval":
+            raise ModelError("budget_exceeded", "This run reached a spending limit and nobody can approve more"
+                             if result is None else result.text)
+        self.audit.record("stamina_paused", run=record.id, kind=stop["kind"], persona=stop["persona"],
+                          spent=stop["spent"], limit=stop["limit"])
+        raise Paused(str(result.data.get("approval_id") or ""))
+
+    async def _stop_at_limit(self, run_id: str, stop: Mapping[str, Any]) -> None:
+        record = self.tank.run(run_id)
+        if record is None or record.status not in ("running", "waiting_approval"):
+            return
+        who = self.stamina.name(str(stop.get("persona") or "")) if stop.get("persona") else "The session"
+        reason = (f"{who} reached her daily allowance ({money(float(stop.get('limit') or 0))}) and you said no more today"
+                  if stop.get("kind") == "daily" else
+                  f"The session reached its budget ({money(float(stop.get('limit') or 0))}) and you said no more")
+        async with self._locks[record.address]:
+            record = self.tank.run(run_id)
+            if record.status in ("running", "waiting_approval"):
+                await self._fail(record, "stamina", reason)
 
     async def _carry_out(self, record: RunRecord, approval: Mapping[str, Any], arguments: Any) -> ToolResult:
         """An approved action, carried out as the run's own work: `$cancel` stops it too, and it gets only the time

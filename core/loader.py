@@ -36,6 +36,7 @@ class ExtensionContextImpl:
     facts: Any = None  # contracts.Facts for this module (contracts 1.9); None when loaded without a core
     present: frozenset = frozenset()  # the modules it `uses` that are loaded (contracts 1.10)
     _personas: Callable[[], list] | None = None  # the agents loaded so far (contracts 1.11)
+    prices: Any = None  # the core's model prices (contracts 1.12); None when loaded without a core
 
     def log(self, event: str, **fields: Any) -> None:
         self._log("extension", extension=self.name, detail=event, **fields)
@@ -143,7 +144,7 @@ def settings(path: Path, extension: Extension, config_for: Callable[[str], Mappi
 async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[str, Any]], data_root: Path,
                          log: Callable[..., None], facts_for: Callable[[str], Any] | None = None,
                          present: frozenset = frozenset(), imported: tuple[Extension, ModuleType] | None = None,
-                         personas: Callable[[], list] | None = None) -> LoadedExtension:
+                         personas: Callable[[], list] | None = None, prices: Any = None) -> LoadedExtension:
     """Imports the module (unless `imported` already has it) and runs its setup; `present` is which of the modules
     it uses are loaded, `personas` lists the agents loaded so far."""
     extension, module = imported or import_extension(path)
@@ -153,7 +154,7 @@ async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[s
     config = settings(Path(path).resolve(), extension, config_for, log)
     context = ExtensionContextImpl(extension.name, config, data_dir, log,
                                    facts_for(extension.name) if facts_for is not None else None, frozenset(present),
-                                   personas)
+                                   personas, prices)
     try:
         contributions = extension.setup(context)
         if inspect.isawaitable(contributions):

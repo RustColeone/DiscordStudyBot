@@ -252,6 +252,10 @@ flowchart TB
   conversation, from a private chat. The grant is built by the core from the call's exact subject (no
   pattern, nothing the model wrote), covers that capability and subject in that conversation only,
   expires after 30 days and is listed and revoked with `$permissions`.
+* **Stamina.** A run at a spending limit (her day's allowance, or the run's own `budget_usd`) waits with a
+  `core.stamina` card before its next model call (core/manager/stamina.py, contracts 1.12): approved, the limit grows
+  by `step` and the run resumes; denied, it stops with the reason. The core prices every answer itself
+  (core/providers/prices.py), so the limits hold for every engine.
 * **Typed commands.** The owner's own `$command` (typed, not forwarded, not a routine a model set up) is
   their approval: it skips Approval and the conversation's `use` list. It still asks to confirm for a
   `confirm` capability, a secret in the arguments, or private data in a shared conversation. Members'

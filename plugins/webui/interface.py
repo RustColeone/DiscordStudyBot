@@ -194,11 +194,14 @@ class WebUI(Interface):
     def standing(self) -> list[dict]:
         """The roster with where each student stands with you (STANDING facts; None when nothing is published)."""
         facts = getattr(self.port, "facts", None) if self.port is not None else None
+        stamina = getattr(self.port, "stamina", None) if self.port is not None else None
         found = []
         for item in self.roster:
             values = facts(item["name"], self.user_id) if callable(facts) else {}
             found.append({**item, **{kind: next((value for key, value in values.items()
-                                                 if key.rsplit(".", 1)[-1] == kind), None) for kind in STANDING}})
+                                                 if key.rsplit(".", 1)[-1] == kind), None) for kind in STANDING},
+                          # what she spent today and her account (contracts 1.12), None from a core before it
+                          "stamina": stamina(item["name"]) if callable(stamina) else None})
         return found
 
     def people(self) -> list[dict]:

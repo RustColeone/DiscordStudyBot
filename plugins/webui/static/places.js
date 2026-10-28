@@ -27,6 +27,68 @@
     return holder;
   }
 
+  // ---- stamina: each student with her own account, in the header -------------------------------------------------
+  const CURRENCY = { USD: "$", CNY: "¥", EUR: "€" };
+  const amount = (value, currency = "USD") => value == null ? "–"
+    : `${CURRENCY[currency] ?? `${currency} `}${value > 0 && value < 0.1 ? value.toFixed(3) : value.toFixed(2)}`;
+  // Her account (how full: a budget against its total, a reported balance against the fullest it was seen) and today.
+  window.staminaOf = (stamina) => {
+    const account = stamina?.account || null, today = stamina?.today || null;
+    const full = account ? (account.kind === "budget" ? account.total : account.peak || account.left) : null;
+    return {
+      account: account && account.left != null && full ? Math.max(0, Math.min(1, account.left / full)) : null,
+      accountText: !account ? "" : account.kind === "budget"
+        ? `${amount(account.left)} of a ${amount(account.total)} budget` : account.left == null ? "balance not read yet"
+        : `${amount(account.left, account.currency)} in her account`,
+      today: today && today.allowance ? Math.max(0, Math.min(1, today.left / today.allowance)) : null,
+      todayText: today && today.allowance ? `${amount(today.left)} of ${amount(today.allowance)}` : "",
+      amount,
+    };
+  };
+  // `students`: [{name, href, picture, plate, stamina}]; only those with an account or a daily allowance show.
+  window.renderStamina = (holder, students) => {
+    if (!holder) return;
+    const shown = (students || []).filter((item) => item.stamina && (item.stamina.account || item.stamina.today?.allowance));
+    holder.hidden = !shown.length;
+    if (!shown.length) { holder.replaceChildren(); return; }
+    const bolt = document.createElement("span");
+    bolt.className = "stamina-bolt";
+    bolt.setAttribute("aria-hidden", "true");
+    bolt.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#f0a04b" stroke="#a8601c" stroke-width="1.5" ' +
+                     'stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>';
+    const people = shown.map((item) => {
+      const view = window.staminaOf(item.stamina);
+      const link = document.createElement("a");
+      link.className = "stamina-who";
+      link.href = item.href || "#";
+      link.setAttribute("aria-label", `${item.name}: ${[view.accountText, view.todayText && `today ${view.todayText} left`]
+        .filter(Boolean).join("; ")}`);
+      link.title = link.getAttribute("aria-label");
+      const face = document.createElement(item.picture ? "img" : "span");
+      face.className = "stamina-face";
+      if (item.picture) { face.src = item.picture; face.alt = ""; } else face.textContent = item.name.charAt(0);
+      const bars = document.createElement("span");
+      bars.className = "stamina-bars";
+      for (const [fraction, kind] of [[view.account, "account"], [view.today, "today"]]) {
+        const track = document.createElement("span");
+        track.className = `stamina-track is-${kind}`;
+        const fill = document.createElement("span");
+        fill.className = "stamina-fill";
+        fill.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
+        if (kind === "today") fill.style.background = item.plate || "#5a5296";
+        if (fraction == null) track.classList.add("is-unknown");
+        track.append(fill);
+        bars.append(track);
+      }
+      link.append(face, bars);
+      return link;
+    });
+    const note = document.createElement("span");
+    note.className = "stamina-note";
+    note.innerHTML = "stamina<br>and today";
+    holder.replaceChildren(bolt, ...people, note);
+  };
+
   window.renderPlaces = (nav, places, current) => {
     if (!nav) return;
     const entries = [];

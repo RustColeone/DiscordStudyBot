@@ -33,7 +33,8 @@ def records(board) -> dict[str, dict]:
     for task in board.tasks(5000):
         bucket = task["status"] if task["status"] in ("landed", "discarded") else (
             "open" if task["status"] in ("queued", "working", "review", "approved") else "other")
-        for seat in {step["seat"] for step in board.steps(task["id"]) if step["seat"]}:
+        # (the router only sorts the request: routing is not working on the session)
+        for seat in {step["seat"] for step in board.steps(task["id"]) if step["seat"] and step["role"] != "router"}:
             counts[seat][bucket] += 1
     return {seat: {"landed": found["landed"], "discarded": found["discarded"], "open": found["open"],
                    **level_of(found["landed"])} for seat, found in counts.items()}

@@ -184,7 +184,7 @@
       case "team":  // who has a key, as the latest run could tell
         state.team = event.team;
         state.seats = new Map(event.team.map((seat) => [seat.persona, seat]));
-        renderTeam(); renderComposer(); schedule();
+        renderTeam(); renderComposer(); schedule(); renderStaminaBar();
         if (state.view === "new") renderTeamPage();
         return;
       case "deleted":
@@ -228,6 +228,7 @@
     state.settings = data.settings;
     state.prices = data.prices;
     state.benchmarks = data.benchmarks || [];
+    renderStaminaBar();
     state.places = data.places;
     state.links = data.links || {};
     if (data.workflows) WORKFLOWS = data.workflows.map((item) => [item.name, item.title, item.text]);
@@ -507,6 +508,28 @@
     return `${called(persona)}${strong} ${SEATS[seatName].verb}`;
   }).join(", ");
 
+  // The stamina pill in the header (places.js): each seat with a key and stamina to show, asked again every 20 s.
+  function renderStaminaBar() {
+    const momo = (state.places?.others || []).find((place) => place.place?.name === "MomoChat");  // her card is there
+    const cardOf = (persona) => { try { return momo?.link ? new URL(`students#${persona}`, momo.link).href : ""; } catch { return ""; } };
+    window.renderStamina?.($("#stamina"), state.team.filter((seat) => seat.ready !== false).map((seat) => ({
+      name: called(seat.persona), picture: picture(seat.persona), plate: plateOf(seat.persona),
+      href: cardOf(seat.persona), stamina: seat.stamina })));
+  }
+  async function refreshStamina() {
+    if (document.hidden) return;
+    try {
+      const response = await fetch("api/stamina", { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const found = await response.json();
+      for (const seat of state.team) if (seat.persona in found) seat.stamina = found[seat.persona];
+      renderStaminaBar();
+      if (state.view === "new") renderTeamPage();
+    } catch { /* the next try */ }
+  }
+  setInterval(refreshStamina, 20000);
+  document.addEventListener("visibilitychange", refreshStamina);
+
   function showTeamPage() {
     showPage("new");
     state.current = null;
@@ -727,7 +750,28 @@
     budget.append(make("span", "", "Budget for this session"), field);
     sayBudget();
     stamina.append(budget, make("div", "row-note", "Each student spends her own stamina; when one runs out for the day, " +
-                                                   "the session stops and asks before she spends more."), line);
+                                                   "the session stops and asks before she spends more."));
+    const tanks = make("ul", "tanks");
+    const split = team?.share || {};
+    for (const persona of [...new Set(list.map((seatName) => chosen.seats[seatName]))]) {
+      const view = window.staminaOf?.(state.seats.get(persona)?.stamina);
+      const share = estimate != null && (split[persona] != null || list.length === 1) ? estimate * (split[persona] ?? 1) : null;
+      const item = make("li", "tank");
+      const head = make("span", "tank-head");
+      head.append(make("strong", "", called(persona)), make("span", "", share != null ? `about ${priced(chosen, share)} of it` : "no estimate yet"));
+      const bar = make("span", "tank-bar");
+      const fill = make("span", "tank-fill");
+      fill.style.width = `${Math.round((view?.today ?? 0) * 100)}%`;
+      fill.style.background = plateOf(persona);
+      bar.append(fill);
+      item.append(head, bar, make("span", "tank-line", [view?.todayText ? `Today ${view.todayText} left` : "No daily limit",
+                                                       view?.accountText].filter(Boolean).join(" · ")));
+      if (share != null && view?.today != null && share > (state.seats.get(persona).stamina.today.left || 0)) {
+        item.append(make("span", "tank-warn", "More than she has left today: the session will stop and ask first."));
+      }
+      tanks.append(item);
+    }
+    stamina.append(tanks, line);
     aside.append(stamina);
     const picks = measuredPicks();
     const pickRow = make("div", "aside-block");

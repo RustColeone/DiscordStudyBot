@@ -137,8 +137,10 @@ class Context:
                                           tools)
             answer["seat"] = seat.persona  # whose answer it is, even when a replay is driven by whoever took over
             answer["effort"] = effort  # and how hard she thought (the one replaying may have another limit)
-            # Priced now and kept with the answer: a later price list never rewrites what a past step cost.
-            answer["price"] = self.prices.price(answer["provider"], answer["model"]) if self.prices else None
+            # Priced now and kept with the answer: a later price list never rewrites what a past step cost. (The
+            # core prices every answer; a core before 1.12 does not, and then the price list is asked here.)
+            if answer.get("price") is None and self.prices is not None:
+                answer["price"] = self.prices.price(answer["provider"], answer["model"])
             self.done[key] = answer
             if self.staffing:
                 self.done[self.staffing] = seat.persona
@@ -196,7 +198,10 @@ class Context:
                                for call in getattr(result, "tool_calls", ())],
                 "replay": dict(result.replay) if getattr(result, "replay", None) else None,
                 "seconds": round(result.duration_s or time.monotonic() - started, 3),
-                "fallbacks": list(result.fallbacks)}
+                "fallbacks": list(result.fallbacks),
+                # priced by the core (contracts 1.12), cache hits at their price
+                "price": dict(result.price) if getattr(result, "price", None) else None,
+                "cost": getattr(result, "cost", None)}
 
     def _call_row(self, answer: dict, seat: Seat, tier: str, role: str, effort: str) -> dict:
         return {"seat": seat.persona, "role": role, "tier": tier, "effort": effort, "provider": answer["provider"],
@@ -249,7 +254,10 @@ class Context:
 
     @staticmethod
     def cost(answer: dict) -> float | None:
-        """Dollars at the price the answer was given when it came; None when no price was known."""
+        """Dollars at the price the answer was given when it came (the core's figure, cache hits at their price);
+        None when no price was known."""
+        if answer.get("cost") is not None:
+            return answer["cost"]
         price = answer.get("price")
         if not price:
             return None

@@ -9,6 +9,7 @@
   crash               raise
   bad                 return an invalid yield
   models <n>          make n model calls
+  spend <n>           make n model calls, keeping count in the state (a resumed run goes on from there)
   echo <text>         reply the text
 """
 
@@ -83,6 +84,13 @@ class ProbeEngine(Engine):
             for _ in range(int(rest)):
                 await session.models.generate(ModelRequest([{"role": "user", "content": "hi"}]))
             await session.reply("models done")
+            return RunYield.DONE
+        if command == "spend":  # `spend <n>`: n model calls, each kept in the run's state (resumed, it goes on)
+            for index in range(int(state.get("spent", 0)), int(rest)):
+                await session.models.generate(ModelRequest([{"role": "user", "content": "hi"}]))
+                state["spent"] = index + 1
+                await session.save(state)
+            await session.reply("spent")
             return RunYield.DONE
         if command == "speak":  # `speak [persona]`: one model call for (and a reply as) that persona, if named
             name = rest.strip() or None

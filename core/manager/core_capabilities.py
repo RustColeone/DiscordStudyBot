@@ -17,6 +17,7 @@ from core.serialize import request_from_dict
 from core.manager.handles import local_time as when
 from core.manager.model_choice import model_arguments_tier
 from core.manager.routines import Caller
+from core.manager.stamina import money
 
 if TYPE_CHECKING:
     from core.manager.manager import GatewayLink, Manager
@@ -134,8 +135,27 @@ def core_capabilities(manager: "Manager", gateway: "GatewayLink") -> list[Capabi
     async def model(arguments, context) -> ToolResult:
         return await manager.model_choices.command(context.address, str(arguments.get("text") or ""))
 
+    async def stamina(arguments, context) -> ToolResult:
+        return ToolResult.ok(manager.stamina.extend(arguments))
+
+    def stamina_card(arguments) -> str:
+        """The question on the card a run waits with at a spending limit (core/manager/stamina.py)."""
+        amount = money(float(arguments.get("amount") or 0))
+        if arguments.get("kind") == "session":
+            return (f"The session spent its budget ({money(float(arguments.get('spent') or 0))} of "
+                    f"{money(float(arguments.get('limit') or 0))}). Let it spend {amount} more?")
+        name = manager.stamina.name(str(arguments.get("persona") or ""))
+        return (f"{name} has spent her {money(float(arguments.get('limit') or 0))} for today. "
+                f"Let her spend {amount} more today?")
+
     rule_schema = {"type": ["object", "null"], "description": "enabled, allow_senders, require_mention_in_groups; null deletes"}
     capabilities = [
+        # Not a tool: the card a run waits with at a spending limit, carried out when the owner approves it.
+        Capability("core.stamina", "Let a persona spend more today, or a session past its budget.", guarded(stamina),
+                   {"kind": {"type": "string"}, "persona": {"type": "string"}, "amount": {"type": "number"},
+                    "day": {"type": "string"}, "run": {"type": "string"}, "spent": {"type": "number"},
+                    "limit": {"type": "number"}}, ("kind", "amount"), Risk.WRITE, internal=True,
+                   describe=stamina_card),
         Capability("core.send_message", "Send a text message to another conversation (interface:conversation).",
                    guarded(send_message), {"address": {"type": "string"}, "text": {"type": "string"}},
                    ("address", "text"), Risk.CRITICAL, owner_only=True, subject="address", grantable=True,

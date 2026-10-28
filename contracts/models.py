@@ -83,6 +83,11 @@ class ModelResult:
     # provider that wrote it; DeepSeek's thinking travels this way).
     tool_calls: tuple[ToolCall, ...] = ()
     replay: Mapping[str, Any] | None = None
+    # Added in 1.12: the model's list price when the core knows it (`{input, output, cache_hit, source, ...}`, dollars
+    # per million tokens), and what this answer cost at it (cache hits at the cache price where one is listed);
+    # None when no price is known.
+    price: Mapping[str, Any] | None = None
+    cost: float | None = None
 
 
 class ModelError(RuntimeError):

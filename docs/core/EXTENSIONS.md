@@ -210,6 +210,26 @@ module set up earlier (every module it requires or uses that is there), as `Inte
 plus each one's `module`, `description`, `profile`, `profiles` and `models` (`default` and each tier → the
 candidates, core.yml's profiles winning). Chimera builds its seats from it. Called after setup, it lists every agent.
 
+### Prices and stamina
+
+Since contracts 1.12 the core prices every model answer: `ModelResult.price` (dollars per million input and output
+tokens, and cache hits where listed, with where the figure came from) and `ModelResult.cost` (this answer's dollars,
+cache hits at their price), None when no price is known (never a guess). The prices are core.yml's `prices:` over
+Artificial Analysis's free list (core/providers/prices.py); a module reads them with `context.prices`
+(`contracts.Prices`: `price`, `cost`, `status`, `refresh_if_stale`) and a page with `port.prices()`. Chimera shows
+each step's cost and each seat's price from them.
+
+The core also keeps **stamina** (core/manager/stamina.py): what each persona spends a day against her allowance
+(core.yml `stamina: allowance`, $0.50 by default; `personas:` per persona; 0 turns it off) and the account she spends
+from (`accounts:` a balance her provider reports, DeepSeek's, or a budget you enter). Before each model call, a run
+whose persona has spent her allowance today, or that has spent its own budget (`Request.extra["budget_usd"]`, which
+the Classroom sets from the team picker), waits for the owner: a `core.stamina` card ("DeepSeek has spent her $0.50
+for today. Let her spend $0.50 more today?"). Approved, the limit grows and the run carries on where it was (an engine
+that saves its state per step goes on; one that starts over makes its calls again); denied, the run stops with the
+reason. The wait reaches the core as `Paused`, a BaseException, so an engine's own `except Exception` lets it pass. A
+watcher's calls are counted, never stopped. Pages read it with `port.stamina(persona)`: `{today: {spent, allowance,
+left, day}, account: {provider, kind, currency, total, left, as_of}}`.
+
 ### Prompt parts
 
 A persona can carry prompt parts beside its prompt: its personality, house rules, anything an engine should

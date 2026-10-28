@@ -176,6 +176,8 @@ class Providers:
         self._given = set(self._adapters)  # adapters handed in (tests): ready by themselves, unlike ones made on use
         self._kinds = dict(ADAPTERS)  # provider kind → adapter factory: the built-in ones, then modules'
         self._record = record or (lambda *args, **kwargs: None)
+        self.prices = None  # the price book (prices.py), set by the core: every answer carries its price and cost
+        self._refreshing: asyncio.Task | None = None
         self._spacing: dict[str, asyncio.Lock] = {}
         self._last_request: dict[str, float] = {}
         self._model_lists: dict[str, tuple[float, list]] = {}  # provider → (fetched at, [(ID, released)])
@@ -215,6 +217,14 @@ class Providers:
         kind that names no key (a local server, say; the built-in kinds always need one)."""
         used = {candidate["provider"] for candidates in self._profiles.values() for candidate in candidates}
         return sorted(name for name in used if self.ready(name))
+
+    def key(self, name: str) -> str:
+        """The provider's API key, as its adapter would read it ("" when none is set): for other calls to the same
+        account (stamina asks DeepSeek for its balance)."""
+        try:
+            return api_key(self._settings.get(name, {}))
+        except NotConfigured:
+            return ""
 
     def ready(self, name: str) -> bool:
         """Can this provider be called (see configured)?"""
@@ -302,6 +312,16 @@ class Providers:
                              delay_s=pause)
                 await asyncio.sleep(pause)
 
+    def refresh_prices(self) -> None:
+        """Fetch the price list again in the background when it is a day old (never waited for: prices only label
+        work, and a missing one is None)."""
+        if self.prices is None or not self.prices.stale() or (self._refreshing and not self._refreshing.done()):
+            return
+        try:
+            self._refreshing = asyncio.get_running_loop().create_task(self.prices.refresh_if_stale())
+        except RuntimeError:  # (no loop running: tests calling outside one)
+            self._refreshing = None
+
     async def generate(self, request: ModelRequest, profile: str | None = None,
                        first: Mapping[str, Any] | None = None) -> ModelResult:
         """`first`: a candidate tried before the profile's own (a model chosen with $model); the profile's
@@ -310,6 +330,7 @@ class Providers:
         candidates = self._profiles.get(name)
         if not candidates:
             raise ModelError("not_configured", f"Model profile {name!r} is not configured")
+        self.refresh_prices()
         if first is not None and self.known(first["provider"]):
             candidates = [dict(first), *(candidate for candidate in candidates
                                          if (candidate["provider"], candidate["model"])
@@ -392,12 +413,15 @@ class Providers:
                 self._record("provider_rejected", profile=name, provider=provider, model=model, reason=rejected,
                              duration_s=duration, output_tokens=result.output_tokens)
                 continue
+            price = self.prices.price(provider, model) if self.prices is not None else None
             return ModelResult(text=result.text, data=data, provider=provider, model=model,
                                input_tokens=result.input_tokens, output_tokens=result.output_tokens,
                                duration_s=duration, schema_mode=result.schema_mode, fallbacks=tuple(skipped),
                                cached_input_tokens=result.cached_input_tokens,
                                tool_calls=tuple(result.tool_calls),
-                               replay={"provider": provider, "fields": dict(result.replay)} if result.replay else None)
+                               replay={"provider": provider, "fields": dict(result.replay)} if result.replay else None,
+                               price=price, cost=self.prices.cost(price, result.input_tokens, result.output_tokens,
+                                                                  result.cached_input_tokens) if price else None)
         if unsupported:
             raise ModelError("tools_unsupported", f"{unsupported} cannot call tools" + (
                 f"; before it: {'; '.join(failures)}" if failures else ""))

@@ -253,6 +253,31 @@
       meter.append(head, bar, make("div", "meter-note", bond.role));
       body.append(meter);
     }
+    const { stamina } = standingOf(name);
+    const view = window.staminaOf?.(stamina);
+    if (view && (view.account != null || view.today != null)) {
+      const meter = make("div", "meter meter-stamina");
+      const head = make("div", "meter-head");
+      head.append(make("span", "", "Stamina"), make("span", "meter-value is-stamina", view.accountText || ""));
+      meter.append(head);
+      if (view.account != null) {
+        const bar = make("div", "meter-bar is-stamina");
+        const fill = make("div", "meter-fill");
+        fill.style.width = `${Math.round(view.account * 100)}%`;
+        bar.append(fill);
+        meter.append(bar);
+      }
+      if (view.today != null) {
+        const today = make("div", "meter-head is-small");
+        today.append(make("span", "", "Today"), make("span", "meter-value is-today", view.todayText));
+        const bar = make("div", "meter-bar is-today");
+        const fill = make("div", "meter-fill");
+        fill.style.width = `${Math.round(view.today * 100)}%`;
+        bar.append(fill);
+        meter.append(today, bar);
+      }
+      body.append(meter);
+    }
     if (person.own_ready === false) {
       body.append(make("p", "card-note is-warn", "Her own company's key isn't set, so she answers on a classmate's model."));
     }
@@ -922,6 +947,7 @@
                              roster: s.roster || s.classmates.map((name) => ({ name: keyOf(name), display: name })) });
       state.progress = new Map(s.progress.map((item) => [item.run_id, item]));
       state.people = s.people || [];
+      renderStaminaBar();
       renderMembers();
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
       state.places = s.places;
@@ -958,9 +984,10 @@
       renderMap();
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       if (moved) renderMembers();  // "also in the Classroom" in the member list too
-    } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed
+    } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed, stamina spent
       noteBonds(state.roster, event.roster);
       state.roster = event.roster;
+      renderStaminaBar();
       renderMembers();
       renderChats();
     } else if (event.type === "models") {
@@ -1004,6 +1031,15 @@
           ? "That chat isn't there (it couldn't be set up, or was deleted), so this wasn't sent."
           : `Not sent (${event.reason}).`);
     }
+  }
+
+  // The stamina pill in the header: each student with her own key (the others spend a classmate's account).
+  function renderStaminaBar() {
+    window.renderStamina?.($("#stamina"), state.roster
+      .filter((item) => state.people.find((person) => person.name === item.name)?.own_ready !== false)
+      .map((item) => ({ name: item.alias || item.display, href: `students#${encodeURIComponent(item.name)}`,
+                        picture: state.avatars.has(keyOf(item.display)) ? `avatars/${keyOf(item.display)}` : "",
+                        plate: look(keyOf(item.display)).plate, stamina: item.stamina })));
   }
 
   // A bond that moved, said in the chat with her (or a group she is in) as it happens; it is not kept.

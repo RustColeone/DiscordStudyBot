@@ -83,6 +83,9 @@ class CoreConfig:
         self.routes = dict(raw.get("routes") or {})
         self.routines = dict(raw.get("routines") or {})
         self.audit_echo = bool(raw.get("audit_echo", False))
+        # Model prices (core/providers/prices.py) and spending limits (core/manager/stamina.py).
+        self.prices = dict(raw.get("prices") or {})
+        self.stamina = dict(raw.get("stamina") or {})
         secrets = raw.get("secrets") or []
         if isinstance(secrets, str) or not all(isinstance(item, str) for item in secrets):
             raise ConfigError("`secrets:` must be a list of file paths or patterns")

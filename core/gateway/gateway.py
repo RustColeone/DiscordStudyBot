@@ -103,6 +103,13 @@ class Port:
     def personas(self):
         return self._gateway.manager.persona_views()
 
+    def prices(self):
+        return self._gateway.manager.providers.prices
+
+    def stamina(self, persona: str):
+        manager = self._gateway.manager
+        return manager.stamina.view(str(persona)) if str(persona) in manager.personas else None
+
     def facts(self, persona: str, sender_id: str | None = None):
         person = (self.name, str(sender_id)) if sender_id not in (None, "") else None
         return self._gateway.manager.facts.read(str(persona), person)

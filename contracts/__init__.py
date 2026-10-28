@@ -10,7 +10,7 @@ from contracts.interface import PLACE_STATUS, Interface, InterfacePort, Operatio
 from contracts.messages import Action, Address, Delivery, Display, FileRef, Reply, Request, Sender, SubmitResult
 from contracts.models import (AdapterFactory, AdapterResult, Image, ModelAdapter, ModelError, ModelRequest,
                               ModelResult, Models, NotConfigured, ToolCall, ToolSpec)
-from contracts.stores import Facts, Store
+from contracts.stores import Facts, Prices, Store
 from contracts.watchers import Exchange, WatchContext, Watcher
 
 # 1.8: 1.7 plus prompt parts (PromptPart, PartContext, Persona.parts, Contributions.prompt_parts, Session.prompt).
@@ -20,7 +20,10 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 # 1.10: 1.9 plus declared dependencies (Extension.requires, Extension.uses, ExtensionContext.present).
 # 1.11: 1.10 plus former names of engines and modules (EngineSpec.formerly, Extension.formerly), agents described for
 #       other engines (Persona.description, Persona.profiles, Persona.tier, TIERS, ExtensionContext.personas).
-CONTRACTS_VERSION = "1.11"
+# 1.12: 1.11 plus model prices (Prices, ModelResult.price and .cost, ExtensionContext.prices, InterfacePort.prices) and
+#       stamina (a run that reaches a persona's daily allowance, or its Request.extra `budget_usd`, waits for the
+#       owner; InterfacePort.stamina).
+CONTRACTS_VERSION = "1.12"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",
@@ -30,7 +33,7 @@ __all__ = [
     "HistoryItem",
     "HistorySummary",
     "Interface", "InterfacePort", "PLACE_STATUS", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
-    "PART_PLACES", "PartContext", "Persona", "PromptPart", "Reply", "Request", "Risk", "TIER_ORDER", "TIERS", "RunYield", "SHUTDOWN", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
+    "PART_PLACES", "PartContext", "Persona", "Prices", "PromptPart", "Reply", "Request", "Risk", "TIER_ORDER", "TIERS", "RunYield", "SHUTDOWN", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolCall", "ToolResult", "ToolSpec", "Tools",
     "WatchContext", "Watcher",
 ]
