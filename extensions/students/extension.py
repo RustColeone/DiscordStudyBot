@@ -143,9 +143,10 @@ def setup(context) -> Contributions:
             providers[name] = dict(settings)
     for name, settings in (config.get("providers") or {}).items():
         providers[name] = {**providers.get(name, {}), **dict(settings)}
-    remembered = memory.contributions(context, {persona.name: {"display_name": persona.display_name,
-                                                               "aliases": list(persona.aliases)}
-                                                for persona in personas})
+    remembered = memory.contributions(context, {data["name"]: {"display_name": data["display_name"],
+                                                             "aliases": list(data.get("aliases") or ()),
+                                                             "memory": dict(data.get("memory") or {})}
+                                                for data in STUDENTS})
     return Contributions(personas=personas, providers=providers,
                          profiles={**profiles(STUDENTS), **dict(config.get("profiles") or {})}, **remembered)
 

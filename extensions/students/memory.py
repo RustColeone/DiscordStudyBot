@@ -33,9 +33,12 @@ CODE_LETTERS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # (no 0/O, 1/I/L)
 # that still name them.
 ENGINES = ("momochat",)
 FORMER = {"room": "momochat", "assistant": "momochat", "chat": "momochat"}
-# What `students: <persona>:` may set for one student, over the settings for all.
-OWN = ("learn", "notes", "mood", "met_role", "writer_profile", "reflect_after_notes", "language", "memory_language",
-       "decisions", "config", "call_owner")
+# What `students: <persona>:` (or her student.yml `memory:`, under it) may set for one student, over the settings for
+# all.
+OWN = ("learn", "notes", "mood", "met_role", "owner_role", "writer_profile", "reflect_after_notes", "language",
+       "memory_language", "decisions", "config", "call_owner")
+# Interfaces whose people are another's (`platforms:` adds to it): Whale-chan's own bot is on Discord.
+PLATFORMS = {"whale_chan": "discord"}
 
 
 def conversation(engine: str, settings: "Settings") -> bool:
@@ -62,6 +65,7 @@ class Settings:
         self.notes = flag(config.get("notes"), True)
         self.mood = flag(config.get("mood"), True)
         self.met_role = str(config.get("met_role", "acquaintance") or "")
+        self.owner_role = str(config.get("owner_role", "creator") or "")  # the bot's owner, when they first talk
         self.writer_profile = str(config.get("writer_profile") or "") or None
         self.reflect_after = int(config.get("reflect_after_notes", 5))
         self.language = str(config.get("language") or "")
@@ -403,6 +407,18 @@ def writer(models, profile: str | None):
     return complete
 
 
+def first_role(memory, subject: str, own: Settings, owner: bool) -> None:
+    """Who someone new is to her: the bot's owner her creator (`owner_role`), anyone else an acquaintance
+    (`met_role`); your `roles:` say more. An owner's second account, not joined to the first, is no second creator."""
+    for role in ([own.owner_role] if owner else []) + [own.met_role]:
+        try:
+            if role:
+                memory.relate(subject, role)
+                return
+        except ValueError:  # (there is one creator)
+            continue
+
+
 def make_learner(book: Book, settings: Settings):
     async def learn(exchange, context) -> None:
         """After each of her messages: how it left her feeling and what is worth keeping (one decision call, and
@@ -420,8 +436,8 @@ def make_learner(book: Book, settings: Settings):
         subject = book.subject(exchange.address.interface, trigger.sender.id)
         person = called(book, persona.name, subject, exchange.owner, trigger.sender)
         motive = impulse(trigger)
-        if own.met_role and not motive and memory.relations.get(subject) is None:
-            memory.relate(subject, own.met_role)  # someone new is an acquaintance; your settings say more
+        if not motive and memory.relations.get(subject) is None:
+            first_role(memory, subject, own, exchange.owner)
         complete = writer(context.models, own.writer_profile)
         memory.mood.news(subject, mark=True)  # she has replied: what moved her before was told
         said = [(f"({persona.display_name}'s own thought)", motive) if motive else (person, trigger.text),
@@ -558,12 +574,16 @@ def make_bond(book: Book):
 def contributions(context, students: dict[str, dict]) -> dict:
     """The memory's prompt part, watcher, commands and facts, for these students (persona → display name and other
     names), or those of them `personas:` names."""
-    config = context.config
+    config = dict(context.config)
+    # Each student's own memory settings (her student.yml `memory:`), under this module's `students: <name>:`.
+    given = dict(config.get("students") or {})
+    config["students"] = {name: {**dict((students.get(name) or {}).get("memory") or {}), **dict(given.get(name) or {})}
+                          for name in [*given, *(name for name in students if (students[name] or {}).get("memory"))]}
     settings = Settings(config, Path(context.data_dir))
     keep = tuple(name for name in settings.personas or students if name in students)
     settings.personas = keep
-    book = Book(context.data_dir, personas=keep, platforms=config.get("platforms"), roles=config.get("roles"),
-                people=config.get("people"), settings=settings)
+    book = Book(context.data_dir, personas=keep, platforms={**PLATFORMS, **dict(config.get("platforms") or {})},
+                roles=config.get("roles"), people=config.get("people"), settings=settings)
     for name, names in students.items():  # her names, before she has spoken anywhere
         book.names.setdefault(name, names)
     facts = getattr(context, "facts", None)  # (None when loaded without a core)

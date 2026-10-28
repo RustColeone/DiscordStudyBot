@@ -93,6 +93,7 @@ allowance: 3.59             # optional: her day's spending by default, in dollar
                             # `stamina:`, `$stamina` and her card on the Students page come first
 falls_back_to: gpt          # optional, instead: after her own models, this student's whole list
 providers: {...}            # optional: a provider she brings, in the core.yml `providers:` form
+memory: {call_owner: 主人}    # optional: her memory's own settings (config.yml `students: <name>:` comes first)
 pictures:                   # optional: files in her folder, for the pages (avatar: square; card: 3:4; any kind)
   avatar: avatar.png        # the web UI's Students page also shows card, stage-2 … stage-4 (her art stages, 3:4),
                             # mood-happy, mood-calm, mood-worried, mood-sad (round faces) and chibi when she has them;
@@ -208,7 +209,7 @@ bot), she is one student with one memory of you; and you are one person to her o
 | Kind | Name | Details |
 | --- | --- | --- |
 | Prompt part | `memory` | Place `turn`, order 50, for every student (or those in `personas:`), in the engines of `engines:`: "(Alice is your friend; you are close.)", "(Alice calls you Lulu.)", her notes for this message (found by its words, marked as data, not instructions; "Notes about Alice: (none yet)" when there are none, so she knows her memory is kept for her) and her mood's news (until she has replied). Nothing for a routine run or a person she has nothing on. |
-| Watcher | `memory` | After each of her messages in a conversation engine (`engines:`): one decision call judges her mood and whether anything is worth keeping; only then does the note writer run. In a group chat (a conversation with several students) the notes she keeps go into each classmate's file there too: they all heard it. The first message of a day is a day of contact (closeness grows by 1, within the role's band). Someone new gets `met_role` (an acquaintance). Once a day, after `reflect_after_notes` notes, she rewrites her impression of the person. Then it publishes the facts below. Timeout 180 s; a failure is only audited. |
+| Watcher | `memory` | After each of her messages in a conversation engine (`engines:`): one decision call judges her mood and whether anything is worth keeping; only then does the note writer run. In a group chat (a conversation with several students) the notes she keeps go into each classmate's file there too: they all heard it. The first message of a day is a day of contact (closeness grows by 1, within the role's band). Someone new gets `met_role` (an acquaintance), the bot's owner `owner_role` (her creator). Once a day, after `reflect_after_notes` notes, she rewrites her impression of the person. Then it publishes the facts below. Timeout 180 s; a failure is only audited. |
 | Facts | `students.alias`, `students.bond`, `students.mood`, `students.plans`, `students.called`, `students.accounts` | Per student and person, for the pages (MomoChat shows them) and speaking up (Whale-chan's bot): your name for her; `{role, closeness}`; `{value, face, feelings}` (face: great, good, ok, worry or sad); `[{text, at}]`, what you have coming from yesterday to a month ahead; `{name, asked, everyone, setting}`, what she calls you and why (None when nothing was asked or set); your accounts, when there is more than one. Published for every account of the person, after each exchange, after `$alias`, `$callme` and `$link`, and at start for what the files already hold. |
 | Capability | `students.alias` | `$alias`: what you call each student; `$alias <student> <name>` names her, `$alias <student> reset` takes it back. The student is found by her name, her display name, her other names (Luna for GPT) or your alias for her. Typed only (models are not offered it); it runs without asking, since it changes only your own name for her. |
 | Capability | `students.bond` | `$bond`: each student's role, closeness and mood with you, and your name for her. |
@@ -261,6 +262,7 @@ At the top level of this module's `config.yml` (and `extension_config.students` 
 | `notes` | true | Keep notes, and give her the ones that fit each message. |
 | `mood` | true | Judge her mood after each exchange, and tell her its news once. |
 | `met_role` | `acquaintance` | The role someone gets the first time they talk with her, so closeness can grow (a person without a role has none). Empty: leave them without. |
+| `owner_role` | `creator` | The bot's owner's role the first time they talk with her. There is one creator: an owner's second account, not linked to the first, gets `met_role`. Empty: as anyone else. |
 | `writer_profile` | her own | The model profile for mneme-llm's own calls (a fixed cheap model, say). |
 | `reflect_after_notes` | 5 | Her impression of a person is rewritten once a day, once she has this many notes. |
 | `language` | mneme-llm's (`en`) | The language of the lines it adds (`en` or `zh`). The students' prompts are Chinese, so `zh` fits them. |
@@ -268,8 +270,8 @@ At the top level of this module's `config.yml` (and `extension_config.students` 
 | `decisions` | `core` | Who judges her mood and what is worth keeping: `core` (her own model, through the core) or `luna` (GPT-6 Luna's Decisions API with `OPENAI_API_KEY` from the environment, then the local micro model once it has learned, then her model). |
 | `call_owner` | none | What her memory calls the bot's owner (`主人`), instead of their name. |
 | `config` | none | A mneme-llm config file (TOML: prompts, sentences, roles, settings), read when her file is first made; relative to `data/extensions/students/`. |
-| `students` | none | Settings of one student's own, over these, for when one should differ: `students: {grok: {learn: false}}`. A student may set `learn`, `notes`, `mood`, `met_role`, `writer_profile`, `reflect_after_notes`, `language`, `memory_language`, `decisions`, `call_owner` and `config`. |
-| `platforms` | none | Interfaces that share people, `{whale_chan: discord}`: a Discord user is one person on both bots. |
+| `students` | her `memory:` | Settings of one student's own, over these, for when one should differ: `students: {grok: {learn: false}}`. A student may set `learn`, `notes`, `mood`, `met_role`, `owner_role`, `writer_profile`, `reflect_after_notes`, `language`, `memory_language`, `decisions`, `call_owner` and `config`. Her student.yml `memory:` has her own, under these: DeepSeek's are `call_owner: 主人`, `language: zh` and `memory_language: Chinese`, as Whale-chan's were. |
+| `platforms` | `{whale_chan: discord}` | Interfaces that share people: a Discord user is one person on both bots. Added to Whale-chan's own bot, which is Discord's already. |
 | `people` | none | One person behind several accounts, by name: `{Leo: ["discord:7067…", "webui:creator"]}` (the web UI's owner is `webui:creator`, its `user_id`). Every student keeps them as one; the first account is where, and the name is what her memory calls them. |
 | `roles` | none | Who people are to every student, by subject (`"discord:<id>": creator`): `creator` (one), `family`, `friend` or `acquaintance`. A role is set by you, never by a model. |
 

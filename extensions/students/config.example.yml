@@ -18,6 +18,7 @@
 # notes: true                   # keep notes, and give her those that fit each message
 # mood: true                    # judge her mood after each exchange; tell her its news once
 # met_role: acquaintance        # the role someone gets when they first talk with her ("": leave them without one)
+# owner_role: creator           # the bot's owner's, when they first talk with her ("": as anyone else's)
 # writer_profile: deepseek      # the model profile for mneme-llm's own calls (left out: her own)
 # reflect_after_notes: 5        # rewrite her impression of a person once a day, once she has this many notes
 # language: zh                  # the language of the lines it adds to prompts (en or zh; mneme-llm's default: en)
@@ -25,9 +26,10 @@
 # decisions: core               # core (her model) or luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
 # call_owner: 主人               # what her memory calls the bot's owner (left out: their name)
 # config: whale.toml            # a mneme-llm config file, read when her file is first made (relative to its data folder)
-# students:                     # a student's own settings, over the ones above, when one should differ
-#   grok: {learn: false}
-# platforms: {whale_chan: discord}   # interfaces that share people: one Discord user is one person on both bots
+# students:                     # a student's own settings, over the ones above, when one should differ (her
+#   grok: {learn: false}        # student.yml `memory:` has her own, under these: DeepSeek's call_owner 主人, zh)
+# platforms: {mybot: discord}   # interfaces that share people: one Discord user is one person on both bots
+#                               # (Whale-chan's bot, whale_chan, is Discord's already)
 # people:                       # one person behind several accounts: kept as one by every student, under the first
 #   Leo: ["discord:123456789012345678", "webui:creator"]   # and her memory calls them Leo (after call_owner)
 # roles:                        # who people are to every student it keeps: creator (one), family, friend, acquaintance

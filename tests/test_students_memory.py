@@ -100,6 +100,29 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("GPT: creator, closeness 100/100", await self.say(chat, "$bond"))
         self.assertTrue((self.tmp / "data" / "extensions" / "students" / "gpt.db").is_file())
 
+    async def test_the_bots_owner_is_her_creator_when_they_first_talk(self):
+        script = room.Script(GPT=[room.turn("Hi!"), room.turn("Hello again."), room.turn("Hm?")])
+        chat = await self.start(Mind(script), {"language": "en"})
+        await self.say(chat, "GPT, hello", sender="boss")  # an owner
+        self.assertEqual(self.facts("gpt", "boss")["students.bond"], {"role": "creator", "closeness": 100})
+        await self.say(chat, "GPT, hi", sender="alice")
+        self.assertEqual(self.facts("gpt")["students.bond"]["role"], "acquaintance")
+        await self.core.stop()
+        self.core = None
+        memory = memory_module()
+        owner = SimpleNamespace(relations={}, relate=lambda subject, role: owner.relations.setdefault(subject, role))
+        two = memory.Settings({})
+        memory.first_role(owner, "chat:boss", two, True)
+
+        def one_creator(subject, role):
+            if role == "creator":
+                raise ValueError("chat:boss is already the creator")
+            owner.relations[subject] = role
+        owner.relate = one_creator
+        memory.first_role(owner, "web:boss", two, True)  # an owner's other account, not joined: no second creator
+        memory.first_role(owner, "chat:carol", memory.Settings({"met_role": ""}), False)
+        self.assertEqual(owner.relations, {"chat:boss": "creator", "web:boss": "acquaintance"})
+
     async def test_she_learns_from_what_is_said_and_the_pages_see_where_she_stands(self):
         script = room.Script(GPT=[room.turn("Oolong, noted."), room.turn("Oolong tea!")], Gemini=[room.turn("Hm.")])
         mind = Mind(script)
@@ -214,6 +237,20 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((settings.decisions, settings.config_file), ("luna", str(self.tmp / "whale.toml")))
         self.assertEqual((settings.of("gpt").call_owner, settings.of("gpt").personas, settings.of("gemini").call_owner),
                          ("主人", (), ""))  # (`personas` is not a student's own setting)
+
+    async def test_a_student_brings_memory_settings_of_her_own(self):
+        script = room.Script(DeepSeek=[room.turn("主人好~"), room.turn("嗯？")], GPT=[room.turn("Hi.")])
+        chat = await self.start(script, {"learn": False, "roles": {"chat:boss": "creator"}})
+        await self.say(chat, "DeepSeek, hi", sender="boss")
+        await self.say(chat, "GPT, hi", sender="boss")
+        # her student.yml `memory: {call_owner: 主人, language: zh}`; GPT has none
+        self.assertIn("（主人是创造你的人，你们非常亲近。）", self.seen(script, "DeepSeek"))
+        self.assertIn("(Alice is your creator; you are very close.)", self.seen(script, "GPT"))  # (her name here)
+        await self.core.stop()
+        chat = await self.start(script, {"learn": False, "roles": {"chat:boss": "creator"},
+                                         "students": {"deepseek": {"call_owner": "Boss"}}})
+        await self.say(chat, "DeepSeek, hi", sender="boss")
+        self.assertIn("（Boss是创造你的人", self.seen(script, "DeepSeek"))  # this module's settings first
 
     async def test_the_pages_see_what_her_file_already_holds_at_start(self):
         import mneme_llm
