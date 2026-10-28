@@ -14,8 +14,8 @@ import time
 from typing import Callable
 
 # This page's entries in every page's places bar (paths relative to its link), sorted among all places' by `order`.
+# (The Students page is the web UI's, which reads every student's record from Chimera's facts.)
 VIEWS = [{"name": "Classroom", "icon": "📝", "path": "", "order": 30},
-         {"name": "Students", "icon": "👥", "path": "#students", "order": 40},
          {"name": "Logbook", "icon": "📖", "path": "#logbook", "order": 50}]
 DOING = {"review": "waiting for your check", "approved": "waiting for the final approval", "landed": "just landed it",
          "answered": "answered", "failed": "waiting for you"}

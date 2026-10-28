@@ -133,6 +133,10 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
 | `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif), else the student's own `avatar` picture whose name or display name has that key. |
 | `GET /cafe` | The cafe page, with its data inside (`no-cache`); signed out, it goes to the sign-in page. |
+| `GET /students` | The Students page: every student's card, and one in full at `#<student>` (her art stages and moods, level, bond, models, her benchmark rows, your record together, her folder's files). Its data is inside, as the cafe's. |
+| `GET /api/students` | The Students page's data again: `{title, students: [{... the cafe's fields, own, strong, record, benchmark, pictures, folder}], avatars, here, places}`. `record` and `benchmark` are the facts any module publishes under those names (Chimera's `chimera.record` and `chimera.benchmark`), None when nobody does; `pictures` the kinds of her pictures that exist; `folder` the files in her folder, by name. |
+| `GET /pictures/{student}/{kind}` | One of her pictures (`Persona.pictures`: avatar, card, stage-2, mood-happy, ...), an image file inside her folder; anything else is 404. |
+| `POST /api/alias` | `{persona, name}`: your name for a student, from her card. Sent quietly as you, as `$alias <student> <name>` (`reset` takes it back); answers `{ok, text}`. |
 | `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, alias, bond, mood, avatar, ready, own_ready, description, chats}], avatars, rooms, here, places}`. `ready` is the core's (`port.personas()`), else `models_ready` for the profile named after her; `own_ready` whether her own tier can be called (else she answers on a classmate's model); `chats` how many web chats she is in. Over her head the cafe shows her mood (♪, ~, ?, …) or, from 01:00 to 07:00, zzz. |
 | `GET /rooms/{name}` | Only a picture `rooms/` lists (nothing else, and never outside it). |
 | `GET /favicon.ico` | `static/favicon.png`. |

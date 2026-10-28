@@ -361,7 +361,17 @@ Two places, one club (the Codex route: chat and work are separate places that re
 - **MomoChat** is the web UI on :4156, chatting with the students (the momochat engine). The web UI also has the
   **Cafe**.
 - **The Classroom** is this page on :4157, sessions of work on your projects (the chimera engine; a session is a
-  task). Its other views are **Students** (`#students`, the seats) and the **Logbook** (`#logbook`, the task list).
+  task). Its other view is the **Logbook** (`#logbook`, the task list); `#students` still opens the seats. The
+  **Students** page is the web UI's: it shows each student's record here from the facts this module publishes.
+
+**Each student's record, as facts** ([`record.py`](record.py)). The module publishes, for every seat, everyone who
+worked a session and every student in a measured team: `chimera.record` (the sessions she worked in by how they
+ended: `landed`, `discarded`, `open`; her `level`, 1 + landed // 3, how far `toward` the next, and her art `stage`,
+which opens at levels 1, 10, 20 and 30) and `chimera.benchmark` (the measured teams she was in: her seats, her model,
+the team's points, fully solved exercises, cost a session off-peak and at peak, median time and her share of the
+cost). They are written at start and again whenever a session lands or is discarded. The measured teams come from
+[`benchmarks/`](benchmarks) (`polyglot.json`, the round of 2026-10-25, made by `experiments/polyglot/export_benchmark.py`
+outside this repository); another round is another file there.
 
 Each page publishes its views in its directory status (`views`: name, icon, a path relative to its link, `order`),
 and every page draws one places bar from them (`static/places.js`). A student is in every place at once: the maps

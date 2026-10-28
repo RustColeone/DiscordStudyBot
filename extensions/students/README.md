@@ -92,7 +92,8 @@ fallback: 2                 # optional: her first model is everyone else's 2nd f
 falls_back_to: gpt          # optional, instead: after her own models, this student's whole list
 providers: {...}            # optional: a provider she brings, in the core.yml `providers:` form
 pictures:                   # optional: files in her folder, for the pages (avatar: square; card: 3:4; any kind)
-  avatar: avatar.png
+  avatar: avatar.png        # the web UI's Students page also shows card, stage-2 … stage-4 (her art stages, 3:4),
+                            # mood-happy, mood-calm, mood-worried, mood-sad (round faces) and chibi when she has them
 prompt:                     # her prompt: these files in order (default: [prompt.md])
   - prompt.md
   - ../shared/school.md

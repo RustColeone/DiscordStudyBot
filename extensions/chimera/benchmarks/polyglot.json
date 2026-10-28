@@ -1,0 +1,127 @@
+{
+ "name": "polyglot",
+ "date": "2026-10-25",
+ "exercises": 34,
+ "about": "34 Python exercises, hidden tests, one run per team",
+ "teams": [
+  {
+   "setup": "sol",
+   "formation": "alone",
+   "seats": {
+    "builder": "gpt"
+   },
+   "tiers": {
+    "gpt": "strong"
+   },
+   "models": {
+    "gpt": "gpt-6.1-sol"
+   },
+   "points": 550,
+   "total": 584,
+   "solved": 28,
+   "exercises": 34,
+   "offpeak": 2.9956,
+   "peak": 3.0003,
+   "median_min": 0.9,
+   "share": {
+    "gpt": 1.0
+   }
+  },
+  {
+   "setup": "flash-native-notester",
+   "formation": "alone",
+   "seats": {
+    "builder": "deepseek"
+   },
+   "tiers": {},
+   "models": {
+    "deepseek": "deepseek-flash"
+   },
+   "points": 558,
+   "total": 584,
+   "solved": 23,
+   "exercises": 34,
+   "offpeak": 0.4229,
+   "peak": 0.8457,
+   "median_min": 1.1,
+   "share": {
+    "deepseek": 1.0
+   }
+  },
+  {
+   "setup": "flash-native",
+   "formation": "alone",
+   "seats": {
+    "builder": "deepseek",
+    "tester": "deepseek"
+   },
+   "tiers": {},
+   "models": {
+    "deepseek": "deepseek-flash"
+   },
+   "points": 527,
+   "total": 584,
+   "solved": 22,
+   "exercises": 34,
+   "offpeak": 1.7936,
+   "peak": 3.5871,
+   "median_min": 6.6,
+   "share": {
+    "deepseek": 1.0
+   }
+  },
+  {
+   "setup": "plan",
+   "formation": "plan",
+   "seats": {
+    "planner": "gpt",
+    "builder": "deepseek"
+   },
+   "tiers": {
+    "gpt": "strong"
+   },
+   "models": {
+    "gpt": "gpt-6.1-sol",
+    "deepseek": "deepseek-flash"
+   },
+   "points": 558,
+   "total": 584,
+   "solved": 25,
+   "exercises": 34,
+   "offpeak": 0.9354,
+   "peak": 1.2544,
+   "median_min": 1.1,
+   "share": {
+    "deepseek": 0.34,
+    "gpt": 0.66
+   }
+  },
+  {
+   "setup": "plan-tester",
+   "formation": "plan",
+   "seats": {
+    "planner": "gpt",
+    "builder": "deepseek",
+    "tester": "deepseek"
+   },
+   "tiers": {
+    "gpt": "strong"
+   },
+   "models": {
+    "gpt": "gpt-6.1-sol",
+    "deepseek": "deepseek-flash"
+   },
+   "points": 563,
+   "total": 584,
+   "solved": 28,
+   "exercises": 34,
+   "offpeak": 2.1144,
+   "peak": 3.5849,
+   "median_min": 4.2,
+   "share": {
+    "deepseek": 0.7,
+    "gpt": 0.3
+   }
+  }
+ ]
+}

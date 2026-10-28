@@ -1276,7 +1276,7 @@ class VerifyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state["places"]["here"]["place"]["name"], "Classroom")
             # its entries in every page's places bar (the web UI's Cafe and MomoChat come before them)
             self.assertEqual([(view["name"], view["path"], view["order"]) for view in state["places"]["here"]["views"]],
-                             [("Classroom", "", 30), ("Students", "#students", 40), ("Logbook", "#logbook", 50)])
+                             [("Classroom", "", 30), ("Logbook", "#logbook", 50)])  # (Students is the web UI's)
 
 
 # ---- `club`, the lab from a terminal --------------------------------------------------------------------------

@@ -238,7 +238,9 @@
     }
     const plate = make("div", "card-plate");
     plate.append(make("h2", "card-name", alias || name),
-                 make("div", "card-what", [name, ...(person.own || []).slice(0, 1).map(shortModel)].join(" · ")));
+                 make("div", "card-what", [name, person.stage ? `Stage ${person.stage} art` : "",
+                                           person.level ? `Lv ${person.level}` : "",
+                                           ...(person.own || []).slice(0, 1).map(shortModel)].filter(Boolean).join(" · ")));
     const body = make("div", "card-body");
     if (bond) {
       const meter = make("div", "meter meter-bond");
@@ -255,9 +257,16 @@
       body.append(make("p", "card-note is-warn", "Her own company's key isn't set, so she answers on a classmate's model."));
     }
     if (person.description) body.append(make("p", "card-note", person.description));
-    body.append(make("p", "card-note", "Bond grows here, in MomoChat, as mneme-llm reads how your talks go."));
+    body.append(make("p", "card-note", "Bond grows here, in MomoChat, as mneme-llm reads how your talks go. " +
+                                       "Her level grows in the Classroom, with the work you land."));
     const model = modelLine(name);
     if (model) body.append(model);
+    const persona = state.roster.find((item) => item.display === name)?.name;
+    if (persona) {
+      const link = make("a", "card-link", "Her student card");
+      link.href = `students#${encodeURIComponent(persona)}`;
+      body.append(link);
+    }
     card.replaceChildren(portrait, plate, body);
   }
 

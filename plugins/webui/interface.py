@@ -48,6 +48,11 @@ QUIET_PREFIX = "web-quiet-"  # the request IDs of the page's own commands
 # What pages show of where a student stands with you: the facts any module publishes under these names
 # (contracts.Facts; the companion's `companion.alias`, say), the first of each found.
 STANDING = ("alias", "bond", "mood")
+# What the Students page shows of her work: the facts any module publishes under these names (Chimera's
+# `chimera.record`, her sessions and level, and `chimera.benchmark`, her measured runs), the first of each found.
+WORK = ("record", "benchmark")
+PICTURE_KIND = re.compile(r"^[a-z0-9_-]{1,40}$")
+ALIAS_MAX = 40
 QUIET_TIMEOUT_S = 20
 TIDY_AFTER_START_S = 5  # the core's manager starts after its interfaces; commands wait for it
 PERSONA = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
@@ -200,16 +205,23 @@ class WebUI(Interface):
         """Who each student is, for the page's cards: her one-line description, her own and strong models, and whether
         her own company's key is set (without it she answers on a classmate's model, her fallback)."""
         ready = getattr(self.port, "models_ready", None) if self.port is not None else None
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
         found = []
         for name in self.personas:
             view = self.views.get(name, {})
+            values = facts(name) if callable(facts) else {}
+            record = next((value for key, value in values.items() if key.rsplit(".", 1)[-1] == "record"), None)
             models = view.get("models") or {}
             listed = lambda tier: [f"{item.get('provider')}/{item.get('model')}" for item in models.get(tier) or ()
                                    if isinstance(item, dict)]
-            own = (view.get("profiles") or {}).get("own")
+            tiers = view.get("profiles") or {}
+            own = tiers.get("own")
             found.append({"name": name, "description": str(view.get("description") or ""),
-                          "own": listed("own") or listed("default")[:1], "strong": listed("strong"),
-                          "own_ready": bool(ready(own)) if own and callable(ready) else self.ready.get(name, True)})
+                          # (a student without a strong tier falls back to her own: then she has no strong models)
+                          "own": listed("own") or listed("default")[:1], "strong": listed("strong") if "strong" in tiers else [],
+                          "own_ready": bool(ready(own)) if own and callable(ready) else self.ready.get(name, True),
+                          "level": record.get("level") if isinstance(record, dict) else None,
+                          "stage": record.get("stage") if isinstance(record, dict) else None})
         return found
 
     async def _watch_standing(self) -> None:
@@ -248,6 +260,8 @@ class WebUI(Interface):
             web.get("/static/{name}", self._static), web.get("/avatars/{key}", self._avatar),
             web.get("/favicon.ico", self._favicon), web.get("/cafe", self._cafe),
             web.get("/api/cafe", self._cafe_state), web.get("/rooms/{name}", self._room),
+            web.get("/students", self._students_page), web.get("/api/students", self._students_state),
+            web.get("/pictures/{name}/{kind}", self._picture), web.post("/api/alias", self._alias),
             web.get("/files/{file_id}", self._file), web.get("/api/history", self._history),
             web.post("/api/upload", self._upload), web.get("/ws", self._socket)])
         self._runner = web.AppRunner(app, access_log=None)
@@ -283,7 +297,8 @@ class WebUI(Interface):
                 "people": [{"key": place_key(item["name"]), "name": item["display"],
                             "avatar": avatar_key(item["name"])} for item in self.roster],
                 "views": [{"name": "Cafe", "icon": "☕", "path": "cafe", "order": 10},
-                          {"name": "MomoChat", "icon": "💬", "path": "", "order": 20, **off}]}
+                          {"name": "MomoChat", "icon": "💬", "path": "", "order": 20, **off},
+                          {"name": "Students", "icon": "👥", "path": "students", "order": 40}]}
 
     def here(self) -> dict:
         return {"interface": self.name, "link": self.address_shown, **self.place()}
@@ -352,7 +367,7 @@ class WebUI(Interface):
         public = request.path in ("/login", "/static/style.css", "/favicon.ico") or bool(
             re.fullmatch(r"/static/nunito[a-z-]*\.woff2", request.path))  # the sign-in page uses the font too
         if self.passphrase and not public and not self._signed_in(request):
-            if request.method == "GET" and request.path in ("/", "/cafe"):  # the pages: sign in first
+            if request.method == "GET" and request.path in ("/", "/cafe", "/students"):  # the pages: sign in first
                 raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path (/chat/login)
             return self._secured(web.Response(status=401, text="Sign in first."))
         return self._secured(await handler(request))
@@ -546,6 +561,62 @@ class WebUI(Interface):
                     for item in self.standing()]
         return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
                 "here": self.here(), "places": self._places()}
+
+    def students(self) -> dict:
+        """Every student for the Students page: who she is and where she stands with you (as the cafe has it), her
+        models, her work (her record and benchmark runs, from any module's facts), which pictures she has, and the
+        files in her folder."""
+        facts = getattr(self.port, "facts", None) if self.port is not None else None
+        people = {item["name"]: item for item in self.people()}
+        found = []
+        for item in self.cafe()["students"]:
+            name = item["name"]
+            values = facts(name, self.user_id) if callable(facts) else {}
+            work = {kind: next((value for key, value in values.items() if key.rsplit(".", 1)[-1] == kind), None)
+                    for kind in WORK}
+            pictures = self._pictures_of(name)
+            folder = pictures["avatar"].parent if "avatar" in pictures else None
+            files = sorted(entry.name for entry in folder.iterdir() if entry.is_file()
+                           and not entry.name.startswith(".")) if folder is not None and folder.is_dir() else []
+            found.append({**item, **work, "own": people.get(name, {}).get("own", []),
+                          "strong": people.get(name, {}).get("strong", []), "pictures": sorted(pictures),
+                          "folder": files[:40]})
+        return {"title": self.title, "students": found, "avatars": self.avatars(), "here": self.here(),
+                "places": self._places()}
+
+    def _pictures_of(self, name: str) -> dict[str, Path]:
+        """Her pictures by kind (Persona.pictures: avatar, card, stage-2, mood-happy, chibi, ...) that exist."""
+        given = (self.views.get(name, {}).get("pictures") or {})
+        return {kind: Path(path) for kind, path in given.items()
+                if PICTURE_KIND.fullmatch(kind) and Path(path).suffix.lower() in AVATAR_TYPES and Path(path).is_file()}
+
+    async def _students_page(self, request: web.Request) -> web.Response:
+        page = (self.folder / "static" / "students.html").read_text(encoding="utf-8")
+        return web.Response(text=self._fill(page, title=self._html(self.title), data=self._json(self.students())),
+                            content_type="text/html", headers={"Cache-Control": "no-cache"})
+
+    async def _students_state(self, request: web.Request) -> web.Response:
+        return web.json_response(self.students(), headers={"Cache-Control": "no-cache"})
+
+    async def _picture(self, request: web.Request) -> web.StreamResponse:
+        name, kind = request.match_info["name"], request.match_info["kind"]
+        path = self._pictures_of(name).get(kind) if name in self.personas else None
+        if path is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Content-Type": AVATAR_TYPES[path.suffix.lower()],
+                                               "Cache-Control": "max-age=300"})
+
+    async def _alias(self, request: web.Request) -> web.Response:
+        """Your name for a student, from her card: `$alias <student> <name>` (or `reset`), sent quietly as you."""
+        try:
+            body = await request.json()
+            persona, name = str(body.get("persona") or ""), " ".join(str(body.get("name") or "").split())
+        except (ValueError, AttributeError):
+            raise web.HTTPBadRequest() from None
+        if persona not in self.personas or not name or len(name) > ALIAS_MAX:
+            raise web.HTTPBadRequest()
+        answer = await self._quietly(DEFAULT_CONVERSATION, f"$alias {persona} {name}", "alias")
+        return web.json_response({"ok": bool(answer.get("ok")), "text": answer.get("text") or ""})
 
     async def _cafe_state(self, request: web.Request) -> web.Response:
         return web.json_response(self.cafe(), headers={"Cache-Control": "no-cache"})

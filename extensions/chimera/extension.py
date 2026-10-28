@@ -24,6 +24,7 @@ from .capabilities import Chimera, build
 from .demo import DemoAdapter
 from .engine import ChimeraEngine
 from .prices import PriceBook
+from .record import Records
 from .team import build_team, family_of
 from .web.server import ClassroomUI
 from .workspace.projects import Registry
@@ -65,6 +66,10 @@ def assemble(context) -> tuple[Contributions, dict]:
     if demo:  # the scripted club: each provider's models answered by the demo, families kept for the reviews
         config["families"] = {**{f"demo_{name}": family_of(name) for name in used}, **dict(config.get("families") or {})}
     team.ready = {key: bool(value) for key, value in dict(board.get("ready") or {}).items()}  # as last seen
+    # Each student's record (sessions landed and discarded, her level) and benchmark runs, as facts for the pages.
+    records = Records(board, team, getattr(context, "facts", None))  # (no facts when loaded without a core)
+    records.publish()
+    board.subscribe(records.listen)
     chimera = Chimera(board, registry, trees, config, team)
     prices = PriceBook(data_dir / "prices.json", config)
     interfaces = []
@@ -93,7 +98,7 @@ def assemble(context) -> tuple[Contributions, dict]:
         providers=providers, adapters={"chimera_demo": lambda settings: DemoAdapter()} if demo else {})
     return contributions, {"board": board, "registry": registry, "trees": trees, "team": team, "engine": engine,
                            "page": page, "chimera": chimera, "settings": config, "providers": providers,
-                           "prices": prices}
+                           "prices": prices, "records": records}
 
 
 def setup(context) -> Contributions:

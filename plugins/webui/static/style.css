@@ -267,6 +267,9 @@ button.member:hover { background: var(--panel); }
 .card-note.is-warn { padding: 8px 10px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink); font-weight: 700; }
 .her-card .member-model { margin: 0; max-width: 100%; padding: 6px 10px; border-radius: 10px; background: var(--panel);
                           color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.her-card .card-link { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 12px;
+                       background: var(--panel); color: var(--tab-ink); font-weight: 800; text-decoration: none; }
+.her-card .card-link:hover { background: var(--tab); }
 .scrim { position: fixed; inset: 0; background: rgba(40, 28, 18, .35); z-index: 9; }
 .scrim[hidden] { display: none; }
 

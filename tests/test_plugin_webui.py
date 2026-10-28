@@ -120,13 +120,13 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         ws, state = await self.socket()
         self.assertEqual(state["here"]["link"], web_.address_shown)  # the bar is drawn even with no other place
         self.assertEqual([(view["name"], view["path"], view["order"]) for view in state["here"]["views"]],
-                         [("Cafe", "cafe", 10), ("MomoChat", "", 20)])
+                         [("Cafe", "cafe", 10), ("MomoChat", "", 20), ("Students", "students", 40)])
         published = iface(self.core, "chat").port.directory()["webui"]["status"]
-        self.assertEqual([view["name"] for view in published["views"]], ["Cafe", "MomoChat"])
+        self.assertEqual([view["name"] for view in published["views"]], ["Cafe", "MomoChat", "Students"])
         async with self.http.get(f"{self.base}/") as response:  # the page comes with them, for its first paint
             page = await response.text()
         given = json.loads(page.split('id="places-data">', 1)[1].split("</script>", 1)[0])
-        self.assertEqual(([view["name"] for view in given["here"]["views"]], given["others"]), (["Cafe", "MomoChat"], []))
+        self.assertEqual(([view["name"] for view in given["here"]["views"]], given["others"]), (["Cafe", "MomoChat", "Students"], []))
         await ws.close()
 
     async def test_the_cafe_shows_every_student_whether_she_can_answer_and_the_preset_rooms(self):
@@ -152,7 +152,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
                 data = await response.json()
         self.assertEqual([(item["name"], item["display"], item["ready"]) for item in data["students"]],
                          [("p", "Pia</script><b>", True), ("q", "Quinn", False)])  # one without a model still walks around
-        self.assertEqual((data["rooms"], [view["name"] for view in data["here"]["views"]]), (["garden.png"], ["Cafe", "MomoChat"]))
+        self.assertEqual((data["rooms"], [view["name"] for view in data["here"]["views"]]), (["garden.png"], ["Cafe", "MomoChat", "Students"]))
         async with self.http.get(f"{self.base}/rooms/garden.png") as response:
             self.assertEqual((response.status, response.headers["Content-Type"]), (200, "image/png"))
         for name in ("notes.txt", "..%2Fsecret.png", "missing.png"):  # only listed pictures are served
@@ -333,6 +333,42 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         gpt = next(item for item in cafe["students"] if item["name"] == "gpt")
         self.assertEqual((gpt["own_ready"], gpt["chats"]), (False, 1))  # the club: a chat naming nobody has everyone
         await ws.close()
+
+    async def test_the_students_page_shows_each_students_work_from_any_modules_facts(self):
+        web = await self.start()
+        facts = self.core.manager.facts
+        facts.write("chimera", "gpt", "record", {"level": 2, "stage": 1, "landed": 3, "discarded": 1, "open": 0})
+        facts.write("chimera", "gpt", "benchmark", [{"setup": "sol", "seats": ["builder"], "points": 550}])
+        async with self.http.get(f"{self.base}/students") as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("<title>Students · ", await response.text())
+        students = {item["name"]: item for item in (await (await self.http.get(f"{self.base}/api/students")).json())["students"]}
+        gpt = students["gpt"]
+        self.assertEqual((gpt["record"]["level"], gpt["benchmark"][0]["points"]), (2, 550))
+        self.assertIsNone(students["claude"]["record"])  # nothing published about her yet
+        self.assertIn("avatar", gpt["pictures"])
+        self.assertIn("student.yml", gpt["folder"])  # her folder's files, by name
+        self.assertEqual(gpt["display"], "GPT")
+        async with self.http.get(f"{self.base}/pictures/gpt/avatar") as response:
+            self.assertEqual((response.status, response.headers["Content-Type"]), (200, "image/png"))
+        for path in ("/pictures/gpt/stage-9", "/pictures/nobody/avatar", "/pictures/gpt/..%2Fstudent.yml"):
+            async with self.http.get(f"{self.base}{path}") as response:
+                self.assertEqual(response.status, 404, path)
+        ws, state = await self.socket()
+        self.assertEqual(next(item for item in state["people"] if item["name"] == "gpt")["level"], 2)  # on her card too
+        self.assertIn({"name": "Students", "icon": "👥", "path": "students", "order": 40}, web.place()["views"])
+        await ws.close()
+
+    async def test_her_card_renames_her_with_your_alias(self):
+        web = await self.start()
+        async with self.http.post(f"{self.base}/api/alias", json={"persona": "gpt", "name": "Luna  the  first"}) as response:
+            answer = await response.json()
+        self.assertTrue(answer["ok"], answer)
+        await settle(self.core)
+        self.assertEqual(next(item for item in web.standing() if item["name"] == "gpt")["alias"], "Luna the first")
+        for body in ({"persona": "nobody", "name": "X"}, {"persona": "gpt", "name": "  "}, {"persona": "gpt", "name": "x" * 41}):
+            async with self.http.post(f"{self.base}/api/alias", json=body) as response:
+                self.assertEqual(response.status, 400, body)
 
     async def test_the_font_comes_from_the_page_itself_even_before_signing_in(self):
         await self.start({"passphrase": "open sesame"})
