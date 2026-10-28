@@ -1,9 +1,12 @@
 "use strict";
 // The architecture page: the code's own structure (data.js, made by tools/architecture.py) as diagrams to click
-// through, from the whole system down to one function, whose code shows in the pane on the right. diagram.js lays the
-// diagrams out and draws them; this file decides what each level shows, and fills the pane, the search and the trail.
+// through, from the whole system down to one function, whose code shows in the pane beside it (on a phone, a tap away).
+// diagram.js lays the diagrams out and draws them; this file decides what each level shows, and fills the pane, the
+// search and the trail. It is the same in every repository with such a page: what one project has of its own (its top
+// map, its guides, how a module looks among the folders) is in site.js (window.SITE).
 (() => {
   const A = window.ARCH;
+  const SITE = window.SITE;
   const $ = (selector) => document.querySelector(selector);
   const make = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -11,7 +14,6 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot" };
   const files = A.files;
 
   // ---- the index: every symbol by file, and who calls it (inside its file) -----------------------------
@@ -53,42 +55,9 @@
   // ---- charts: what each level shows (diagram.js lays them out and draws them) -----------------------------
   const { Chart } = window.Diagram;
   const once = () => { const seen = new Set(); return (key) => (seen.has(key) ? false : (seen.add(key), true)); };
-  const CORE_KIND = { GW: "gateway", MG: "manager", PR: "providers", BOT: "store", TANK: "store", START: "startup" };
   const symbolNode = (chart, path, symbol, current = "") => chart.node(symbol.kind === "class" ? symbol.name : `${symbol.name}()`, {
     kind: symbol.kind, target: link(path, symbol.id), current: symbol.id === current, tip: firstLine(symbol.doc),
     sub: symbol.kind === "class" ? plural(methodsOf(path, symbol.name).length, "method") : "" });
-
-  function topChart() {
-    const chart = new Chart("DOWN", { overview: true });
-    const supervisor = chart.node("Supervisor", { kind: "supervisor", sub: "parent process · heartbeat · restart",
-                                                  target: link("core/supervisor.py"), tip: firstLine(files["core/supervisor.py"]?.doc) });
-    const inSlot = (key) => Object.keys(A.modules).filter((folder) => A.modules[folder].slots.includes(key));
-    const module = (folder) => chart.node(folder.split("/").pop(), { kind: "module", target: link(folder), tip: A.modules[folder].description,
-                                                                    sub: folder.startsWith("plugins/") ? "plugin" : "built-in" });
-    const slots = {};
-    slots.interfaces = chart.group(SLOT.interfaces, () => inSlot("interfaces").forEach(module), { kind: "interfaces", pack: true });
-    const parts = {};
-    const core = chart.group("Core · child process", () => {
-      for (const part of A.core) parts[part.id] = chart.node(part.label, { kind: CORE_KIND[part.id] || "startup", sub: part.note, target: link(part.target) });
-    }, { kind: "core" });
-    slots.engines = chart.group(SLOT.engines, () => inSlot("engines").forEach(module), { kind: "engines", pack: true });
-    slots.capabilities = chart.group(SLOT.capabilities, () => inSlot("capabilities").forEach(module), { kind: "capabilities", pack: true });
-    chart.node("How a mod goes in", { kind: "guide", sub: "add a module of your own", target: link(GUIDE) });
-    chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
-                              tip: firstLine(files["contracts/__init__.py"]?.doc) });
-    for (const root of A.roots.filter((item) => !["contracts", "core", "extensions", "plugins"].includes(item))) {
-      chart.node(`${root}/`, { kind: "folder", sub: plural(filesUnder(root).length, "file"), target: link(root) });
-    }
-    chart.edge(supervisor, core, { dashed: true, label: "runs · watches" });
-    chart.edge(slots.interfaces, parts.GW, { arrow: "both", label: "Request / Reply" });
-    chart.edge(parts.GW, parts.BOT, { arrow: "none" });
-    chart.edge(parts.GW, parts.MG, { arrow: "both" });
-    chart.edge(parts.MG, slots.engines, { arrow: "both", label: "Session" });
-    chart.edge(parts.MG, slots.capabilities, { arrow: "both", label: "ToolContext" });
-    chart.edge(parts.MG, parts.PR, { arrow: "none" });
-    chart.edge(parts.MG, parts.TANK, { arrow: "none" });
-    return chart;
-  }
 
   function folderChart(path) {
     const chart = new Chart("RIGHT");
@@ -97,14 +66,17 @@
     chart.group(`${path}/`, () => {
       for (const child of A.folders[path].children) {
         const short = child.split("/").pop();
-        if (files[child]) {
+        if (files[child]?.data) {
+          ids.set(child, chart.node(short, { kind: "data", target: link(child), tip: firstLine(files[child].doc),
+                                             sub: plural(files[child].lines, "line") }));
+        } else if (files[child]) {
           const items = files[child].symbols.filter((symbol) => !symbol.parent).length;
           ids.set(child, chart.node(short, { kind: "file", target: link(child), tip: firstLine(files[child].doc),
                                              sub: `${plural(items, "item")} · ${plural(files[child].lines, "line")}` }));
         } else {
-          const module = A.modules[child];
-          ids.set(child, chart.node(`${short}/`, { kind: module ? "module" : "folder", target: link(child), tip: module?.description || "",
-            sub: module ? module.slots.map((slot) => slot.replace(/s$/, "")).join(" · ") || "module" : plural(filesUnder(child).length, "file") }));
+          const box = SITE.folderBox?.(helpers, child);
+          ids.set(child, chart.node(`${short}/`, { target: link(child), kind: "folder", tip: "",
+                                                   sub: plural(filesUnder(child).length, "file"), ...(box || {}) }));
         }
       }
     }, { kind: "folder" });
@@ -120,7 +92,7 @@
           if (to && to !== from && fresh(`${from}>${to}`)) chart.edge(from, to);
         } else {
           const parts = item.path.split("/");
-          const key = ["core", "extensions", "plugins"].includes(parts[0]) && parts.length > 2 ? parts.slice(0, 2).join("/") : parts[0];
+          const key = (SITE.deep || []).includes(parts[0]) && parts.length > 2 ? parts.slice(0, 2).join("/") : parts[0];
           if (!outside.has(key)) outside.set(key, chart.node(files[key] ? key : `${key}/`, { kind: "external", target: link(key), sub: "elsewhere" }));
           if (fresh(`${from}>${key}`)) chart.edge(from, outside.get(key), { dashed: true });
         }
@@ -182,94 +154,28 @@
     return chart;
   }
 
-  // ---- the guide: how a mod (a module) goes in ------------------------------------------------------------
-  const GUIDE = "guide/mods";
-  const fileLink = (path) => (files[path] ? link(path) : "");
-  const symbolLink = (path, id) => (symbolOf.has(`${path}::${id}`) ? link(path, id) : fileLink(path));
-  const sizeOf = (folder) => filesUnder(folder).reduce((sum, path) => sum + files[path].lines, 0);
-  const smallest = (slot) => Object.keys(A.modules).filter((folder) => A.modules[folder].slots.includes(slot))
-    .sort((a, b) => sizeOf(a) - sizeOf(b))[0];
-
-  function guideChart() {
-    const chart = new Chart("DOWN", { overview: true });
-    const example = smallest("capabilities");
-    const where = chart.group("Where it goes", () => {
-      chart.node("extensions/", { kind: "folder", sub: "built-in: ships with the bot", target: link("extensions") });
-      chart.node("plugins/", { kind: "folder", sub: "external: drop it in, restart", target: link("plugins") });
-      chart.node("modules.paths", { kind: "folder", sub: "core.yml: a folder anywhere" });
-    }, { kind: "plain", pack: true });
-    const folder = chart.group("Your module: one folder", () => {
-      chart.node("extension.py", { kind: "file", sub: "EXTENSION = Extension(name, setup, contracts=\"1\")",
-                                   target: example ? fileLink(`${example}/extension.py`) : "" });
-      chart.node("your code", { kind: "file", sub: "relative imports: from .engine import …" });
-      chart.node("config.example.yml → config.yml", { kind: "file", sub: "its settings; config.yml stays out of git" });
-    }, { kind: "plain" });
-    const loader = chart.node("Loader", { kind: "startup", sub: "a private package; the contracts version checked",
-                                          target: symbolLink("core/loader.py", "import_extension") });
-    const setup = chart.node("setup(context)", { kind: "function", sub: "name · config · data_dir · log → Contributions",
-                                                 target: symbolLink("core/loader.py", "load_extension") });
-    const slots = chart.group("Contributions, wired in by the core", () => {
-      chart.node("interfaces", { kind: "gateway", sub: "Interface slot: start(port), deliver(reply)", target: fileLink("contracts/interface.py") });
-      chart.node("engines", { kind: "manager", sub: "Engine slot: turns through a Session", target: fileLink("contracts/engine.py") });
-      chart.node("capabilities", { kind: "providers", sub: "Capability slot: one action, a ToolResult", target: fileLink("contracts/capability.py") });
-      chart.node("personas · profiles · providers · prompt parts", { kind: "contracts", sub: "who answers, on which models",
-                                                                     target: symbolLink("contracts/extension.py", "Contributions") });
-      chart.node("assignments · admission · permissions", { kind: "store", sub: "defaults for its own addresses only" });
-    }, { kind: "core", pack: true });
-    const check = chart.node("python -m core --check", { kind: "supervisor", sub: "loads every module, lists what it adds",
-                                                         target: fileLink("core/__main__.py") });
-    chart.edge(where, folder, { label: "put it in" });
-    chart.edge(folder, loader, { label: "at startup" });
-    chart.edge(loader, setup);
-    chart.edge(setup, slots, { label: "returns" });
-    chart.edge(slots, check, { dashed: true, label: "see it" });
+  // A data file (settings, a student's prompt): the files it names, in their order, and the files that name it.
+  const namedBy = (path) => Object.keys(files).filter((other) => other !== path && files[other].imports.some((item) => item.path === path));
+  const near = (path, from) => {  // a path as short as it can be next to another, with its folder: shared/school.md
+    const [a, b] = [path.split("/"), from.split("/")];
+    let shared = 0;
+    while (shared < a.length - 1 && a[shared] === b[shared]) shared += 1;
+    return a.slice(Math.min(shared, a.length - 2)).join("/");
+  };
+  function dataChart(path) {
+    const chart = new Chart("RIGHT");
+    const box = (other, current = false) => chart.node(current ? other.split("/").pop() : near(other, path), {
+      kind: files[other]?.data ? "data" : "file", target: link(other), current, tip: firstLine(files[other]?.doc),
+      sub: plural(files[other]?.lines || 0, "line") });
+    const here = box(path, true);
+    files[path].imports.filter((item) => item.path).forEach((item, index) => chart.edge(here, box(item.path), { label: `${index + 1}` }));
+    for (const other of namedBy(path)) chart.edge(box(other), here);
     return chart;
   }
 
-  function paneGuide() {
-    const pane = [...heading("Guide", "How a mod goes in")];
-    pane.push(make("div", "doc", "A mod is a module: one folder with an extension.py. The core loads every module at " +
-      "startup and wires in what its setup returns, so adding one changes nothing else in the code. The boxes on " +
-      "the left open the real code; the full reference is “Writing modules” (docs/core/EXTENSIONS.md)."));
-    const steps = [
-      ["1. Make a folder", "Built-in modules live in extensions/<name>/ and ship with the bot. Your own go in " +
-        "plugins/<name>/ (git-ignored, apart from the tracked examples), or in any folder listed under modules.paths " +
-        "in core.yml. The name is lowercase letters, digits and _, unique across the modules."],
-      ["2. Declare it in extension.py", "EXTENSION = Extension(\"my_module\", setup, contracts=\"1\", version=\"1\", " +
-        "description=\"…\", settings=(…)). contracts is the major version of the contracts it targets; a mismatch " +
-        "refuses to load. The folder's other files are imported with relative imports (from .engine import MyEngine)."],
-      ["3. Return what it adds from setup(context)", "setup gets context.name, context.config (its config.yml, with " +
-        "core.yml's extension_config over it), context.data_dir (a private folder) and context.log(event, **fields). " +
-        "It returns Contributions(...): interfaces (only they know a platform), engines (a turn loop through Session " +
-        "handles), capabilities (one action each, returning a ToolResult), personas, model profiles and providers, " +
-        "prompt parts, and assignments, admission and permissions for its own addresses. It runs once, at startup: " +
-        "network loops start in Interface.start, not in setup."],
-      ["4. Settings", "Ship a documented config.example.yml; the machine's own copy is config.yml beside it " +
-        "(git-ignored). Declared Settings can be set with python -m core setup, or $setup in a chat. A secret goes " +
-        "to .env only (read it with os.getenv) and is never typed in a chat; only secrets belong in .env."],
-      ["5. Keep to the rules", "A module imports only contracts and its own code (tests/test_core_boundaries.py " +
-        "checks it). Interfaces never call capabilities; engines never start detached work (routines do that); a " +
-        "capability does one action and talks to no one."],
-      ["6. Check it, test it, see it here", "python -m core --config core.yml --check loads every module and lists " +
-        "what each adds, without starting anything. Add tests under tests/. Then run python tools/architecture.py " +
-        "and commit docs/architecture/data.js: the module shows up on this page by itself, in the slots it fills."],
-      ["Turning one off", "In core.yml: modules: {exclude: [whale_chan]} (a folder name or a path ending). An " +
-        "excluded module is never imported."],
-    ];
-    for (const [title, text] of steps) pane.push(make("h3", "", title), make("div", "doc", text));
-    pane.push(make("h3", "", "Examples to copy, smallest first"));
-    const examples = Object.keys(SLOT).map((slot) => [slot, smallest(slot)]).filter(([, folder]) => folder);
-    pane.push(linkList([...examples.map(([slot, folder]) => [folder, link(folder), `${SLOT[slot]} · ${A.modules[folder].description}`]),
-      ...(A.modules["plugins/whale_chan"] ? [["plugins/whale_chan", link("plugins/whale_chan"), "a complete drop-in: her own Discord bot, engine and persona"]] : [])]));
-    pane.push(make("h3", "", "Read more"));
-    pane.push(linkList([["Writing modules: the full reference", `${A.repo}/blob/${A.branch}/docs/core/EXTENSIONS.md`],
-                        ["Core architecture: the rules", `${A.repo}/blob/${A.branch}/docs/core/ARCHITECTURE.md`]]));
-    const example = smallest("capabilities");
-    if (example && files[`${example}/extension.py`]) {
-      pane.push(make("h3", "", `The smallest real module: ${example}/extension.py`), code(`${example}/extension.py`, 1, files[`${example}/extension.py`].lines));
-    }
-    return pane;
-  }
+  const fileLink = (path) => (files[path] ? link(path) : "");
+  const symbolLink = (path, id) => (symbolOf.has(`${path}::${id}`) ? link(path, id) : fileLink(path));
+  const guides = new Map((SITE.guides || []).map((guide) => [guide.path, guide]));
 
   // ---- drawing, with zoom controls -------------------------------------------------------------------------
   let view = null;
@@ -339,11 +245,14 @@
   }
   function code(path, start, end) {
     const lines = files[path].text.split("\n").slice(start - 1, end);
+    const data = files[path].data;
     const block = make("div", "code");
     const numbers = make("pre", "gutter", lines.map((_, index) => start + index).join("\n"));
     const body = make("pre", "source");
     const inner = make("code");
-    inner.innerHTML = highlight(lines.join("\n"));  // escaped above: only our own spans are HTML
+    if (data && path.endsWith(".md")) inner.textContent = lines.join("\n");
+    else if (data) inner.innerHTML = escapeHtml(lines.join("\n")).replace(/(^|\s)(#[^\n]*)/g, '$1<span class="com">$2</span>');
+    else inner.innerHTML = highlight(lines.join("\n"));  // escaped above: only our own spans are HTML
     body.append(inner);
     block.append(numbers, body);
     return block;
@@ -355,32 +264,9 @@
       `${plural(symbols.filter((item) => item.kind !== "class").length, "function")} · ${plural(all.reduce((sum, file) => sum + file.lines, 0), "line")}`;
   };
 
-  function paneTop() {
-    const pane = [...heading("Architecture", "DiscordStudyBot")];
-    pane.push(make("div", "doc", "Every box is a real folder, file, class or function, read from the code by " +
-      "tools/architecture.py. Click a box (or search above) to go deeper: the system, a module, a file (its classes " +
-      "drawn around their methods), and one function, whose code shows here. A click keeps your zoom."));
-    pane.push(make("p", "meta", counts()));
-    pane.push(make("h3", "", "Read first"));
-    pane.push(linkList([["How a mod goes in", link(GUIDE)],
-                        ["Core architecture (the rules)", `${A.repo}/blob/${A.branch}/docs/core/ARCHITECTURE.md`],
-                        ["Writing a module", `${A.repo}/blob/${A.branch}/docs/core/EXTENSIONS.md`]]));
-    for (const slot of Object.keys(SLOT)) {
-      const modules = Object.entries(A.modules).filter(([, module]) => module.slots.includes(slot));
-      pane.push(make("h3", "", SLOT[slot]), linkList(modules.map(([folder, module]) => [folder, link(folder), module.description])));
-    }
-    return pane;
-  }
-
   function paneFolder(path) {
-    const module = A.modules[path];
-    const pane = [...heading(module ? "Module" : "Folder", `${path}/`)];
-    if (module) {
-      pane.push(make("p", "doc", module.description));
-      const chips = make("div", "chips");
-      for (const slot of module.slots) chips.append(make("span", "chip", SLOT[slot]));
-      pane.push(chips);
-    }
+    const own = SITE.folderPane?.(helpers, path);  // (a module: its description, the slots it fills)
+    const pane = [...heading(own?.kind || "Folder", `${path}/`), ...(own?.nodes || [])];
     if (A.folders[path].readme) pane.push(make("div", "doc", reflow(A.folders[path].readme)));
     const folderLink = make("a", "", "Folder on GitHub");
     folderLink.href = `${A.repo}/tree/${A.branch}/${path}`;
@@ -390,7 +276,19 @@
     pane.push(make("h3", "", "Contents"));
     pane.push(linkList(A.folders[path].children.map((child) => files[child]
       ? [child.split("/").pop(), link(child), firstLine(files[child].doc).slice(0, 90)]
-      : [`${child.split("/").pop()}/`, link(child), A.modules[child]?.description || plural(filesUnder(child).length, "file")])));
+      : [`${child.split("/").pop()}/`, link(child), A.modules?.[child]?.description || plural(filesUnder(child).length, "file")])));
+    return pane;
+  }
+
+  function paneData(path) {
+    const file = files[path];
+    const pane = [...heading("Data file", path), make("p", "meta", plural(file.lines, "line")), source(path)];
+    if (file.doc) pane.push(make("div", "doc", file.doc));
+    const named = file.imports.filter((item) => item.path);
+    if (named.length) pane.push(make("h3", "", "Names, in this order"), linkList(named.map((item) => [item.module, link(item.path), item.path])));
+    const by = namedBy(path);
+    if (by.length) pane.push(make("h3", "", "Named by"), linkList(by.map((other) => [near(other, path), link(other), firstLine(files[other].doc).slice(0, 70)])));
+    pane.push(make("h3", "", "Contents"), code(path, 1, file.lines));
     return pane;
   }
 
@@ -457,8 +355,8 @@
   // ---- where you are --------------------------------------------------------------------------------------
   function crumbs(path, symbol) {
     const items = [["Architecture", "#/"]];
-    const parts = path && path !== GUIDE ? path.split("/") : [];
-    if (path === GUIDE) items.push(["How a mod goes in", link(GUIDE)]);
+    const parts = path && !guides.has(path) ? path.split("/") : [];
+    if (guides.has(path)) items.push([guides.get(path).label, link(path)]);
     parts.forEach((part, index) => items.push([part, link(parts.slice(0, index + 1).join("/"))]));
     if (symbol?.parent) items.push([symbol.parent, link(path, symbol.parent)]);
     if (symbol) items.push([symbol.name, link(path, symbol.id)]);
@@ -469,6 +367,7 @@
       if (index === items.length - 1) nav.append(make("span", "here", label));
       else { const anchor = make("a", "", label); anchor.href = href; nav.append(anchor); }
     });
+    nav.scrollLeft = nav.scrollWidth;  // (on a phone the trail scrolls sideways: where you are stays in view)
   }
 
   function show() {
@@ -476,10 +375,13 @@
     hideResults();
     let chart, pane, title, hint, symbol = null;
     if (!path) {
-      [chart, pane, title, hint] = [topChart(), paneTop(), "The whole system", "The core in the middle, the modules in its three slots. Click a box to go in."];
-    } else if (path === GUIDE) {
-      [chart, pane, title, hint] = [guideChart(), paneGuide(), "How a mod goes in",
-                                    "From one folder to the core's slots. Click a box for the real code; the steps are on the right."];
+      [chart, pane, title, hint] = [SITE.top.chart(helpers), SITE.top.pane(helpers), SITE.top.title, SITE.top.hint];
+    } else if (guides.has(path)) {
+      const guide = guides.get(path);
+      [chart, pane, title, hint] = [guide.chart(helpers), guide.pane(helpers), guide.title, guide.hint];
+    } else if (files[path]?.data) {
+      [chart, pane, title, hint] = [dataChart(path), paneData(path), path.split("/").pop(),
+                                    "A data file: the files it names, numbered in their order, and the files that name it."];
     } else if (files[path]) {
       symbol = name ? symbolOf.get(`${path}::${name.split("@")[0]}`) || null : null;  // (an old section link: its class)
       const where = path.split("/").pop();
@@ -487,7 +389,7 @@
       if (symbol?.kind === "class") {
         [pane, title, hint] = [paneClass(path, symbol), `class ${symbol.name}`, `In ${where}, outlined; its methods are inside it.`];
       } else if (symbol) {
-        [pane, title, hint] = [paneFunction(path, symbol), `${symbol.id}()`, `In ${where}, outlined; its code is on the right.`];
+        [pane, title, hint] = [paneFunction(path, symbol), `${symbol.id}()`, `In ${where}, outlined; its code is in the details.`];
       } else {
         [pane, title, hint] = [paneFile(path), where,
                                "Its functions, and each class as a box around its methods; arrows: who calls whom. Hover a box for its calls into other files."];
@@ -496,21 +398,23 @@
       [chart, pane, title, hint] = [folderChart(path), paneFolder(path), `${path}/`,
                                     "Its files and folders, and which import which (dotted: imports from elsewhere). Click one to go in."];
     } else {
-      [chart, pane, title, hint] = [topChart(), [...heading("Not found", path), make("p", "meta", "Nothing here by that name; the chart shows the whole system.")],
+      [chart, pane, title, hint] = [SITE.top.chart(helpers), [...heading("Not found", path), make("p", "meta", "Nothing here by that name; the chart shows the whole system.")],
                                     "Not found", ""];
     }
     $("#chart-title").textContent = title;
     $("#chart-hint").textContent = hint;
-    document.title = `${title} · DiscordStudyBot architecture`;
+    document.title = `${title} · ${SITE.name} architecture`;
     crumbs(path, symbol);
     $("#pane").replaceChildren(...pane);
     $("#pane").scrollTop = 0;
+    showPanel(symbol || files[path]?.data ? "pane" : "chart");  // (on a phone: the code when there is code to read)
     draw(chart);
   }
 
   // ---- search -----------------------------------------------------------------------------------------------
   const entries = [
-    { label: "How a mod goes in", where: "guide: adding a module, plugin or extension", href: link(GUIDE), key: "how a mod goes in module plugin extension guide" },
+    ...[...guides.values()].map((guide) => ({ label: guide.label, where: "guide", href: link(guide.path),
+                                              key: `${guide.label} ${guide.keywords || ""} guide`.toLowerCase() })),
     ...Object.keys(A.folders).map((path) => ({ label: `${path.split("/").pop()}/`, where: path, href: link(path), key: path.toLowerCase() })),
     ...Object.keys(files).map((path) => ({ label: path.split("/").pop(), where: path, href: link(path), key: path.toLowerCase() })),
     ...[...symbolOf.entries()].map(([key, symbol]) => ({ label: symbol.kind === "class" ? `class ${symbol.id}` : `${symbol.id}()`,
@@ -555,7 +459,25 @@
   });
   document.addEventListener("click", (event) => { if (!event.target.closest(".search")) hideResults(); });
 
+  // ---- on a phone: the diagram or the details, one at a time (side by side on a wide screen) ----------------
+  function showPanel(name) {
+    document.body.classList.toggle("show-pane", name === "pane");
+    for (const button of document.querySelectorAll("#views button")) {
+      button.setAttribute("aria-selected", String(button.dataset.view === name));
+    }
+  }
+  for (const button of document.querySelectorAll("#views button")) {
+    button.addEventListener("click", () => showPanel(button.dataset.view));
+  }
+
   // ---- start --------------------------------------------------------------------------------------------------
+  // What site.js may use to draw its own charts and panes.
+  const helpers = { A, files, Chart, link, make, linkList, heading, code, doc, source, plural, firstLine, filesUnder,
+                    symbolOf, fileLink, symbolLink, counts, github: (path, start, end) => github(path, start, end) };
+  $(".brand").replaceChildren(document.createTextNode(`${SITE.name} `), make("span", "", "architecture"));
+  const firstGuide = (SITE.guides || [])[0];
+  if (firstGuide) Object.assign($(".guide-link"), { href: link(firstGuide.path), textContent: firstGuide.label });
+  else $(".guide-link").remove();
   window.addEventListener("hashchange", show);
   show();
 })();

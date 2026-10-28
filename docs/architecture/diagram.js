@@ -1,7 +1,8 @@
 "use strict";
 // Diagrams for the architecture page. A chart is described as nodes, groups and edges (Chart), laid out by ELK (the
 // Eclipse Layout Kernel: layered, with right-angled edges and groups inside groups) and drawn here as SVG, with
-// zooming and panning (wheel, drag, pinch, keys and buttons). Hovering a box lights up what it is connected to.
+// zooming and panning (wheel, drag, pinch, keys and buttons) for a mouse and a finger alike. Hovering a box lights up
+// what it is connected to.
 (() => {
   const ELK_URLS = ["https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js",
                     "https://unpkg.com/elkjs@0.9.3/lib/elk.bundled.js"];
@@ -10,7 +11,7 @@
   // The letter on each kind of box.
   const BADGE = { module: "M", folder: "D", file: "F", class: "C", function: "ƒ", method: "ƒ", section: "§",
                   external: "↗", gateway: "G", manager: "M", providers: "P", store: "DB", startup: "S",
-                  supervisor: "S", contracts: "K", guide: "?" };
+                  supervisor: "S", contracts: "K", guide: "?", data: "≡" };
 
   // ---- describing a chart ---------------------------------------------------------------------------------
   class Chart {
@@ -314,6 +315,7 @@
         if (this.pointers.size === 1) {
           this.origin = this.point(event);
           this.moved = false;
+          this.slack = event.pointerType === "mouse" ? 4 : 10;  // a finger shakes more than a mouse: still a tap
           this.pressed = event.target.closest(".node.link") || (event.target.classList.contains("grp-hit") ? event.target.parentNode : null);
         }
         svg.setPointerCapture(event.pointerId);
@@ -323,7 +325,7 @@
         const before = this.pointers.get(event.pointerId);
         const now = this.point(event);
         if (this.pointers.size === 1) {
-          if (Math.hypot(now[0] - this.origin[0], now[1] - this.origin[1]) > 4) this.moved = true;
+          if (Math.hypot(now[0] - this.origin[0], now[1] - this.origin[1]) > this.slack) this.moved = true;
           if (this.moved) { this.x += now[0] - before[0]; this.y += now[1] - before[1]; this.apply(); svg.classList.add("panning"); }
         } else if (this.pointers.size === 2) {  // pinch: zoom by the change in distance, about the middle
           const [other] = [...this.pointers.entries()].filter(([id]) => id !== event.pointerId).map(([, point]) => point);
@@ -343,6 +345,15 @@
       svg.addEventListener("pointerup", release);
       svg.addEventListener("pointercancel", release);
       svg.addEventListener("dblclick", (event) => { if (!event.target.closest(".node")) this.zoomAt(1.7, ...this.point(event)); });
+      // The frame changes size (a phone turned, its address bar shown or hidden, a window resized): the point that
+      // was in the middle stays in the middle.
+      this.size = null;
+      new ResizeObserver(() => {
+        const box = svg.getBoundingClientRect();
+        if (!box.width || !box.height) return;
+        if (this.size) this.panBy((box.width - this.size.width) / 2, (box.height - this.size.height) / 2);
+        this.size = { width: box.width, height: box.height };
+      }).observe(svg);
       svg.addEventListener("keydown", (event) => {
         const node = event.target.closest?.(".node.link, .grp.link");
         if (node && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); this.go(node); return; }

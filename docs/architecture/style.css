@@ -1,4 +1,5 @@
-/* The architecture page: a flow chart on the left, the details (down to a function's code) on the right. */
+/* The architecture page: a flow chart on the left, the details (down to a function's code) on the right; on a phone,
+   one of the two at a time, with a switch. */
 :root {
   --bg: #f7f5f1; --paper: #ffffff; --panel: #efebe4; --ink: #22201c; --muted: #6a645a; --line: #ddd6ca;
   --accent: #c9681c; --accent-soft: #fbe7d3; --code-bg: #1f1d1a; --code-ink: #ece6dc; --gutter: #7d766c;
@@ -85,11 +86,49 @@ a { color: var(--accent); }
 .code .kw { color: var(--kw); } .code .str { color: var(--str); } .code .com { color: var(--com); font-style: italic; }
 .code .num { color: var(--num); } .code .def { color: var(--def); font-weight: 700; } .code .dec { color: var(--def); }
 
+.views { display: none; }
+.chart-help.touch { display: none; }
+@media (pointer: coarse) {
+  .chart-help { display: none; }
+  .chart-help.touch { display: block; }
+  .zoom button { min-width: 42px; height: 40px; font-size: 1rem; }
+  #zoom-level { min-width: 60px; }
+}
+
+/* A phone (or a narrow window): the page is the screen's height; the diagram and the details share it, one at a time,
+   so a finger on the diagram moves the diagram, and the details scroll on their own. */
 @media (max-width: 860px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .chart { border-right: 0; border-bottom: 1px solid var(--line); min-height: 55vh; }
-  .top { flex-wrap: wrap; }
+  body { height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
+  .top { flex-wrap: wrap; gap: 8px 12px; padding: 8px 12px; }
+  .top-links { gap: 10px; flex-wrap: nowrap; min-width: 0; }
+  .brand { font-size: 1rem; white-space: nowrap; }
+  .chart-help, .chart-help.touch { display: none; }  /* (the hint above the chart says it; the zoom bar needs the room) */
+  .guide-link { padding: 5px 9px; font-size: .9rem; white-space: nowrap; }
   .search { width: 100%; }
+  .search input { font-size: 16px; padding: 8px 12px; }  /* (16px: a phone does not zoom in on it) */
+  .results { max-height: 55dvh; }
+  .results a { padding: 10px 10px; }
+  .crumbs { flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; padding: 6px 12px; scrollbar-width: none; }
+  .crumbs::-webkit-scrollbar { display: none; }
+  .views { display: flex; gap: 4px; padding: 6px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .views button { flex: 1; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper);
+                  color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+  .views button[aria-selected="true"] { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); }
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
+  .chart, .pane { grid-area: 1 / 1; min-height: 0; }  /* the same place; the one not shown keeps its size */
+  .chart { border-right: 0; }
+  body:not(.show-pane) .pane, body.show-pane .chart { visibility: hidden; pointer-events: none; }
+  .chart-head { padding: 8px 12px 4px; }
+  .chart-head h1 { font-size: 1.05rem; word-break: break-word; }
+  .chart-head p { font-size: .82rem; }
+  .chart-frame { margin: 0 8px 8px; }
+  .pane { padding: 12px 14px 40px; }
+  .pane ul.links a { padding: 8px 8px; }
+  .code { font-size: .74rem; }
+}
+@media (max-width: 520px) {
+  .brand span { display: none; }  /* the project's name is enough on a phone */
+  .top-links { justify-content: space-between; width: 100%; }
 }
 
 /* the diagrams (diagram.js): cards with a badge for their kind, tinted groups, right-angled edges */
@@ -112,13 +151,15 @@ a { color: var(--accent); }
 .graph .k-gateway { --b: #3b82c4; } .graph .k-manager { --b: #c9681c; } .graph .k-providers { --b: #3f9a62; }
 .graph .k-store { --b: #6b7280; } .graph .k-startup { --b: #7b8794; } .graph .k-supervisor { --b: #57606a; } .graph .k-contracts { --b: #a35d8f; }
 .graph .k-external .card { fill: transparent; stroke-dasharray: 5 4; }
-.graph .k-external { --b: #9a9184; }
+.graph .k-external { --b: #9a9184; } .graph .k-data { --b: #a07d2e; }
 .graph .k-manager .card { stroke: #c9681c; stroke-width: 1.8; }
 .graph .grp-box { fill: color-mix(in srgb, var(--panel) 45%, transparent); stroke: var(--line); stroke-width: 1.2; }
 .graph .grp-title { font-size: 12px; font-weight: 700; fill: var(--muted); letter-spacing: .02em; }
 .graph .g-interfaces .grp-box { fill: color-mix(in srgb, #3b82c4 9%, transparent); stroke: color-mix(in srgb, #3b82c4 40%, var(--line)); }
 .graph .g-engines .grp-box { fill: color-mix(in srgb, #c9681c 9%, transparent); stroke: color-mix(in srgb, #c9681c 40%, var(--line)); }
 .graph .g-capabilities .grp-box { fill: color-mix(in srgb, #3f9a62 9%, transparent); stroke: color-mix(in srgb, #3f9a62 40%, var(--line)); }
+.graph .g-personas .grp-box { fill: color-mix(in srgb, #b0577a 9%, transparent); stroke: color-mix(in srgb, #b0577a 40%, var(--line)); }
+.graph .g-watchers .grp-box { fill: color-mix(in srgb, #3f8f86 9%, transparent); stroke: color-mix(in srgb, #3f8f86 40%, var(--line)); }
 .graph .g-core .grp-box { fill: color-mix(in srgb, var(--panel) 70%, transparent); stroke: var(--edge); stroke-width: 1.5; }
 .graph .g-class .grp-box { fill: color-mix(in srgb, #8a5cc7 6%, transparent); stroke: color-mix(in srgb, #8a5cc7 35%, var(--line)); }
 .graph .g-section .grp-box { fill: color-mix(in srgb, #5f7d95 7%, transparent); stroke: color-mix(in srgb, #5f7d95 30%, var(--line)); }
@@ -133,7 +174,6 @@ a { color: var(--accent); }
 .graph.focus .node:not(.on), .graph.focus .edge-g:not(.on) { opacity: .22; }
 .graph.focus .edge-g.on .edge { stroke: var(--accent); stroke-width: 2.2; }
 .graph .edge-g.quiet:not(.on) { opacity: 0; }
-@media (max-width: 860px) { .chart-frame { min-height: 52vh; } .chart-help { display: none; } }
 .graph .grp-hit { fill: transparent; cursor: pointer; }
 .graph .grp.link .grp-title { fill: var(--ink); }
 .graph .grp.link:has(.grp-hit:hover) .grp-box, .graph .grp.link:focus .grp-box { stroke: var(--accent); stroke-width: 2; }
