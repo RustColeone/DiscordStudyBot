@@ -2,7 +2,9 @@
 
 `index.html` here is a browsable map of the code, made from the code itself. It starts at the whole system and goes
 in: a module or folder, then a file, where each class is a box around its methods (grouped by the file's
-`# ---- section ----` comments), and finally one function, whose code shows in the pane on the right. **How a mod goes in** (`#/guide/mods`, linked from the header and the top map)
+`# ---- section ----` comments), and finally one function, whose code shows in the pane on the right (on a phone, the
+diagram and the details are one at a time, with a Diagram / Details switch; going into a function or a data file opens
+the details). **How a mod goes in** (`#/guide/mods`, linked from the header and the top map)
 shows the path from a module's folder to the core's slots, the steps to add one, and the smallest real modules to
 copy, all read from the same data. A click inside
 a diagram keeps your zoom and place; going to another diagram keeps your zoom. Every box can be clicked, and the search finds any file, class or function.
@@ -16,12 +18,17 @@ a diagram keeps your zoom and place; going to another diagram keeps your zoom. E
   the top map are named in the tool (`CORE_PARTS`, after [docs/core/ARCHITECTURE.md](../core/ARCHITECTURE.md)).
 - **After every change, run `python tools/architecture.py` and commit `data.js` with the change.**
   `tests/test_architecture.py` fails while the page is out of date.
-- `app.js` decides what each level shows and fills the pane, the search and the trail. `diagram.js` lays the
+- `app.js` decides what each level shows and fills the pane, the search and the trail; `site.js` holds what is this
+  project's own (the top map, the guide, how a module looks among the folders). `app.js`, `diagram.js` and
+  `style.css` are the same viewer in mneme-llm's page: change them in both. `diagram.js` lays the
   diagrams out with [ELK](https://eclipse.dev/elk/) (elkjs 0.9.3, loaded from a CDN: layered, with right-angled edges
   and groups inside groups) and draws them itself as SVG: cards with a badge for their kind (M module, D folder,
   F file, ≡ data file, C class, ƒ function, § section), tinted groups, dotted edges for imports and calls into other files.
 - Diagrams zoom and pan: scroll or pinch to zoom, drag to move, the − / % / + / Fit buttons, or the keys + − 0 and the
-  arrows. Hovering a box lights up its edges and neighbours. `style.css` holds the look, light and dark.
+  arrows. Hovering a box lights up its edges and neighbours. A tap is a tap even if the finger moves a little, and
+  turning a phone keeps the middle of the diagram in the middle. `style.css` holds the look, light and dark, and the
+  phone layout (at 860 px wide and below: the page is the screen's height, so a finger on the diagram moves the
+  diagram and the details scroll on their own; bigger buttons for fingers).
 
 **To read it locally**, open `index.html` in a browser (the diagrams need the internet for ELK), or serve the folder:
 `python -m http.server -d docs/architecture`.

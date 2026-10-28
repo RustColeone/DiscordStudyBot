@@ -4,17 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>DiscordStudyBot · Architecture</title>
+  <title>Architecture</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="data.js"></script>
+  <script defer src="site.js"></script>
   <script defer src="diagram.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
   <header class="top">
     <nav class="top-links" aria-label="Pages">
-      <a class="brand" href="#/">DiscordStudyBot <span>architecture</span></a>
-      <a class="guide-link" href="#/guide/mods">How a mod goes in</a>
+      <a class="brand" href="#/">Architecture</a>
+      <a class="guide-link" href="#/">Guide</a>
     </nav>
     <div class="search">
       <label class="visually-hidden" for="search">Find a file, class or function</label>
@@ -23,6 +24,10 @@
     </div>
   </header>
   <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
+  <div class="views" id="views" role="tablist" aria-label="Show">
+    <button type="button" role="tab" data-view="chart" aria-selected="true">Diagram</button>
+    <button type="button" role="tab" data-view="pane" aria-selected="false">Details</button>
+  </div>
   <main class="layout">
     <section class="chart" aria-label="Flow chart">
       <div class="chart-head">
@@ -37,6 +42,7 @@
           <button type="button" id="zoom-fit" title="Fit the whole diagram (0)">Fit</button>
         </div>
         <p class="chart-help">Drag to move · scroll or pinch to zoom · click a box to go in</p>
+        <p class="chart-help touch">Drag to move · pinch to zoom · tap a box to go in</p>
       </div>
     </section>
     <aside class="pane" id="pane" aria-label="Details"></aside>
