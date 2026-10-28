@@ -539,6 +539,8 @@ owns the task and says its approval was for an older version.
 Security is not the focus yet. What is there:
 
 - The page answers only private networks (and Tailscale's range) and refuses other sites (Host and Origin checks).
+- With a passphrase (the web UI's, `WEBUI_PASSPHRASE`, by default) it asks for it once per browser, so others on
+  your Wi-Fi stay out; club sends it as a header.
 - Everything is creator-only.
 - Paths stay inside the task's folder.
 - Shell lines run without the model keys in their environment, and lines off the allowlist ask.

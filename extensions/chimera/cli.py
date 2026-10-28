@@ -147,6 +147,17 @@ def describe(root: Path, cwd: Path) -> str:
 
 
 # ---- the Classroom --------------------------------------------------------------------------------------------------
+def passphrase() -> str:
+    """The Classroom's passphrase when it asks one (the web UI's: WEBUI_PASSPHRASE, from the environment or .env)."""
+    given = os.getenv("WEBUI_PASSPHRASE", "")
+    env = ROOT / ".env"
+    if not given and env.is_file():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("WEBUI_PASSPHRASE="):
+                given = line.split("=", 1)[1]
+    return given.strip().strip("\"'")
+
+
 def reachable(url: str) -> bool:
     try:
         with urllib.request.urlopen(f"{url}/api/presence", timeout=2) as response:
@@ -203,7 +214,8 @@ class Lab:
 
     async def _connect(self) -> dict:
         import aiohttp
-        self.http = aiohttp.ClientSession()
+        secret = passphrase()
+        self.http = aiohttp.ClientSession(headers={"X-Passphrase": secret} if secret else None)
         self.ws = await self.http.ws_connect(f"{self.url}/ws", headers={"Origin": self.url}, heartbeat=30)
         hello = await self.ws.receive_json(timeout=15)
         self.loop.create_task(self._read())

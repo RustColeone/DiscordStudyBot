@@ -8,20 +8,26 @@ task's steps, its diff, the approval it waits for and what can be done now) come
 the core's directory (contracts 1.7) and reads the other places from there, for the mini map.
 
 Whoever opens it acts as the creator. It answers only private-network clients and refuses other websites
-(Host and Origin checks, as the web UI does). `web: false` keeps the API and drops the page.
+(Host and Origin checks, as the web UI does), and with a passphrase (the web UI's, WEBUI_PASSPHRASE, by default) it
+asks for it once per browser, as the web UI does: others on your Wi-Fi stay out. A client of the API (club) sends it
+as the `X-Passphrase` header instead. `web: false` keeps the API and drops the page.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import ipaddress
 import json
 import mimetypes
 import re
+import secrets
 import shutil
 import socket
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -42,6 +48,10 @@ AVATAR = re.compile(r"^[a-z0-9_-]{1,40}$")
 PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 TASK_ID = re.compile(r"^t-[a-z0-9]{4,40}$")
 LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
+COOKIE = "classroom_session"
+# What a browser may load before it has signed in: the sign-in page and what it uses, and whether a Classroom runs.
+PUBLIC = ("/login", "/favicon.ico", "/api/presence", "/static/style.css", "/static/prefs.js", "/static/i18n.js",
+          "/static/i18n-zh.js", "/static/nunito-latin.woff2", "/static/nunito-latin-ext.woff2")
 OUTBOX_LIMIT = 2000  # messages waiting for one page before it is taken as gone
 
 
@@ -64,6 +74,8 @@ class ClassroomUI(Interface):
         self.port_number = int(config.get("port", 4157))
         self.host = str(config.get("host") or "0.0.0.0")
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or ()}
+        self.passphrase = str(config.get("passphrase") or "").strip()  # (empty: anyone on the local network)
+        self._failures: dict[str, deque] = {}  # wrong passphrases per client, for the last five minutes
         self.static = Path(__file__).resolve().parent / "static"
         self.sockets: set[web.WebSocketResponse] = set()
         self.outboxes: dict[web.WebSocketResponse, asyncio.Queue] = {}  # each page's messages, in order
@@ -90,7 +102,8 @@ class ClassroomUI(Interface):
             web.get("/api/prices", self._prices_api), web.get("/api/presence", self._presence_api),
             web.get("/api/stamina", self._stamina_api), web.get("/api/logbook", self._logbook_api),
             web.get("/api/state", self._state_api), web.get("/ws", self._socket),
-            web.get("/avatars/{key}", self._avatar), web.get("/favicon.ico", self._favicon)])
+            web.get("/avatars/{key}", self._avatar), web.get("/favicon.ico", self._favicon),
+            web.get("/login", self._login_page), web.post("/login", self._login)])
         if self.page:  # the web page, one frontend of the API
             app.add_routes([web.get("/", self._index), web.get("/static/{name}", self._static)])
         else:
@@ -148,6 +161,10 @@ class ClassroomUI(Interface):
                                                           else [])}
         if origin and origin.rstrip("/") not in allowed:
             return web.Response(status=403, text="Requests from other sites are refused.")
+        if self.passphrase and request.path not in PUBLIC and not self._signed_in(request):
+            if request.method == "GET" and request.path == "/":
+                raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path
+            return web.Response(status=401, text="Sign in first.")
         response = await handler(request)
         if isinstance(response, web.StreamResponse) and not isinstance(response, web.WebSocketResponse):
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -156,6 +173,54 @@ class ClassroomUI(Interface):
                                         "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
                                         "connect-src 'self'; frame-ancestors 'none'; object-src 'none'")
         return response
+
+    # ---- signing in (with a passphrase) -------------------------------------------------------------------------
+    def _session_value(self) -> str:
+        key_file = self.data_dir / "session.key"
+        if not key_file.is_file():
+            key_file.parent.mkdir(parents=True, exist_ok=True)
+            key_file.write_bytes(secrets.token_bytes(32))
+            key_file.chmod(0o600)
+        # Changing the passphrase signs every browser out.
+        return hmac.new(key_file.read_bytes(), self.passphrase.encode(), hashlib.sha256).hexdigest()
+
+    def _signed_in(self, request: web.Request) -> bool:
+        given = request.headers.get("X-Passphrase")
+        if given is not None:  # (club, and other clients of the API)
+            return hmac.compare_digest(given.encode(), self.passphrase.encode())
+        return hmac.compare_digest(request.cookies.get(COOKIE, ""), self._session_value())
+
+    async def _login_page(self, request, error: str = ""):
+        if not self.passphrase:
+            raise web.HTTPSeeOther("./")
+        title = str(self.config.get("title") or "Club Room")
+        page = (self.static / "login.html").read_text(encoding="utf-8")
+        page = page.replace("{{title}}", _escape(title)).replace("{{error}}", _escape(error))
+        return web.Response(text=page, content_type="text/html", status=401 if error else 200)
+
+    async def _login(self, request):
+        if not self.passphrase:
+            raise web.HTTPSeeOther("./")
+        peer = (request.transport.get_extra_info("peername") or ("", 0))[0] if request.transport else ""
+        now = time.monotonic()
+        for key in [key for key, tries in self._failures.items() if not tries or now - tries[-1] > 300]:
+            self._failures.pop(key)
+        failures = self._failures.setdefault(peer, deque(maxlen=10))
+        while failures and now - failures[0] > 300:
+            failures.popleft()
+        if len(failures) >= 5:  # five wrong tries in five minutes
+            return await self._login_page(request, "Too many tries; wait a few minutes.")
+        form = await request.post()
+        if not hmac.compare_digest(str(form.get("passphrase", "")).encode(), self.passphrase.encode()):
+            failures.append(now)
+            await asyncio.sleep(1)
+            if self.port is not None:
+                self.port.log("login_failed", remote=peer[:60])
+            return await self._login_page(request, "That passphrase is not right.")
+        response = web.HTTPSeeOther("./")
+        response.set_cookie(COOKIE, self._session_value(), max_age=30 * 86400, httponly=True, samesite="Strict",
+                            path="/", secure=request.scheme == "https")
+        raise response
 
     # ---- places: the Classroom in the core's directory, and the others for the map ------------------------------
     def presence(self) -> dict:

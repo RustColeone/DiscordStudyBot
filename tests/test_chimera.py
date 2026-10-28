@@ -750,6 +750,28 @@ class PageTests(unittest.IsolatedAsyncioTestCase):
         await self.club.stop()
         self._tmp.cleanup()
 
+    async def test_with_a_passphrase_the_page_asks_for_it_once(self):
+        await self.club.stop()
+        self.club = await Club(Path(self._tmp.name), DemoAdapter(), passphrase="open sesame").start()
+        url = f"http://127.0.0.1:{self.club.page.port_number}"
+        async with aiohttp.ClientSession(cookie_jar=aiohttp.CookieJar(unsafe=True)) as http:
+            response = await http.get(url + "/", allow_redirects=False)
+            self.assertEqual((response.status, response.headers["Location"]), (303, "login"))
+            self.assertEqual((await http.get(url + "/api/state")).status, 401)
+            self.assertEqual((await http.get(url + "/api/presence")).status, 200)  # (club: is a Classroom running)
+            self.assertIn("passphrase", await (await http.get(url + "/login")).text())
+            wrong = await http.post(url + "/login", data={"passphrase": "nope"}, allow_redirects=False)
+            self.assertEqual(wrong.status, 401)
+            self.assertIn("not right", await wrong.text())
+            right = await http.post(url + "/login", data={"passphrase": "open sesame"}, allow_redirects=False)
+            self.assertEqual(right.status, 303)
+            self.assertEqual((await http.get(url + "/api/state")).status, 200)  # the browser is in now
+        async with aiohttp.ClientSession(headers={"X-Passphrase": "open sesame"}) as http:  # club's way in
+            async with http.ws_connect(url + "/ws", headers={"Origin": url}) as ws:
+                self.assertIn("state", await ws.receive_json())
+        async with aiohttp.ClientSession(headers={"X-Passphrase": "nope"}) as http:
+            self.assertEqual((await http.get(url + "/api/state")).status, 401)
+
     async def test_other_sites_are_refused_and_the_page_starts_tasks(self):
         async with aiohttp.ClientSession() as http:
             response = await http.get(self.url + "/", headers={"Origin": "http://evil.example"})

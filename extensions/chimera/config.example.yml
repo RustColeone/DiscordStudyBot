@@ -5,6 +5,7 @@
 # port: 4157                    # open http://<this computer>:4157
 # host: 0.0.0.0                 # 127.0.0.1: this computer only
 # title: Club Room
+# passphrase_env: WEBUI_PASSPHRASE   # asked once per browser: the web UI's by default (or `passphrase:`; unset: none)
 # user_name: Leo                # your name on your own messages (default: your login name)
 # hostnames: [pi.home]          # extra names this computer is reached by (IPs, localhost, *.local always work)
 # public_url: http://pi.home:4157   # the address links in Discord messages use (default: the one printed at start)

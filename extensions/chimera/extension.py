@@ -14,6 +14,7 @@ module (and the students).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -48,6 +49,10 @@ def settings(config: Mapping[str, Any]) -> dict:
 def assemble(context) -> tuple[Contributions, dict]:
     """Everything the module is made of (the tests use the parts directly)."""
     config = settings(context.config)
+    # The page's passphrase: the web UI's by default, so one passphrase lets you into the club's pages (none: anyone
+    # on the local network).
+    config["passphrase"] = str(config.get("passphrase") or os.getenv(str(config.get("passphrase_env")
+                                                                          or "WEBUI_PASSPHRASE"), "")).strip()
     # Where the Classroom keeps its board, projects and worktrees: the module's data folder unless `data_dir` names one
     # (the Classroom on its own keeps data/chimera). Absolute: git commands run from inside each project.
     data_dir = Path(config.get("data_dir") or context.data_dir).expanduser().resolve()
@@ -110,6 +115,8 @@ EXTENSION = Extension("chimera", setup, contracts="1", version="2", uses=("stude
                       settings=(
     Setting("port", "Port the Classroom page is served on", "number", 4157),
     Setting("title", "The page's title", "text", "Club Room"),
+    Setting("passphrase", "Passphrase asked once per browser (default: the web UI's; empty: anyone on the local "
+            "network)", "secret", env="WEBUI_PASSPHRASE"),
     Setting("second_approval", "Ask for a checklist check before the final approval to land a change", "boolean",
             True),
     Setting("commands", "Shell lines the club may run without asking: allowlist, ask (always ask) or any", "text",

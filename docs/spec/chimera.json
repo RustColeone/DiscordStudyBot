@@ -30,6 +30,15 @@
    "default": "Club Room"
   },
   {
+   "key": "passphrase",
+   "description": "Passphrase asked once per browser (default: the web UI's; empty: anyone on the local network)",
+   "kind": "secret",
+   "default": null,
+   "env": [
+    "WEBUI_PASSPHRASE"
+   ]
+  },
+  {
    "key": "second_approval",
    "description": "Ask for a checklist check before the final approval to land a change",
    "kind": "boolean",

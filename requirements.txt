@@ -24,4 +24,4 @@ matplotlib>=3.10.0        # discord: rendering $$math$$
 pylatexenc>=2.11          # discord: inline math as Unicode
 cryptography>=41.0.0      # wechat: database and image decryption
 aiohttp>=3.9.0            # webui: the page's server (discord.py also needs it)
-mneme-llm>=0.1.0          # whale_chan: her memory and mood (without it, the core diary); companion: 0.2 or newer
+mneme-llm>=0.2.0          # students: each one's memory and mood (without it, there are no students)

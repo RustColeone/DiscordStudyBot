@@ -17,7 +17,10 @@ The API answers only private-network clients. The `Host` must be an IP address, 
 refused (403), so a website cannot reach the Classroom through a name it controls. Requests from other sites are refused
 too: the `Origin` header must match the address you called, or `public_url` when an HTTPS proxy stands in front.
 Whoever connects acts as the Classroom's creator (the `user_id` setting, default `creator`), so keep the Classroom on
-your own network.
+your own network. With a passphrase (`passphrase`, else the web UI's `WEBUI_PASSPHRASE`) everything but
+`/api/presence` and the sign-in page needs it: a browser signs in once at `/login` (a cookie for 30 days), and a
+client sends it as the `X-Passphrase` header (club does, from `WEBUI_PASSPHRASE` in its environment or `.env`).
+Without it the answer is 401.
 
 ## HTTP
 

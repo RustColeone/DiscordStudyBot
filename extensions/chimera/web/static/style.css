@@ -801,3 +801,19 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
   .report-title { font-size: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .session-card { transition: none; } .session-card:hover { transform: none; } }
+
+/* sign-in (as the web UI's) */
+.login-body { display: grid; place-items: center; align-content: center; gap: 14px; overflow: auto; min-height: 100vh;
+              margin: 0; background: var(--bg); color: var(--ink); }
+.login { background: var(--paper); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow);
+         padding: 34px 30px; width: min(360px, 92vw); text-align: center; display: flex; flex-direction: column; gap: 12px; }
+.login h1 { margin: 0; font-size: 1.4rem; }
+.login p { margin: 0; color: var(--muted); }
+.login-mark { font-size: 2.2rem; }
+.login input { font: inherit; padding: 11px 14px; border-radius: 14px; border: 1px solid var(--line);
+               background: var(--bg); color: var(--ink); }
+.login button { border: 0; background: var(--accent); color: var(--accent-ink); padding: 11px; border-radius: 14px;
+                font: inherit; font-weight: 700; }
+.login-error { color: #b4512d !important; min-height: 1.2em; }
+.login-body .credit { color: var(--muted); font-size: 12px; }
+.login-body .credit a { color: inherit; }
