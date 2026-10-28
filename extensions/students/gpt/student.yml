@@ -4,8 +4,12 @@ display_name: GPT
 aliases: [Luna]             # other names that call on her ("Luna, ..."): she was Luna before Luna and Sol were one
 formerly: [luna]            # her persona name before: what was kept under it is hers (moved on the next start)
 order: 1                    # where she stands in lists (and the room's default rotation)
-models:                     # her own models, preferred in this order (Sol, gpt-6.1-sol, is her strong model in the
-  - {provider: openai, model: gpt-6-luna}    # Classroom; `$model gpt openai/gpt-6.1-sol` picks it for a chat)
+# One line on who she is, for engines that write their own prompts around her (Chimera's work prompts).
+description: "GPT, the white-haired dragon girl and calm, dependable student-council president"
+models:                     # her own models, preferred in this order
+  - {provider: openai, model: gpt-6-luna}
+strong:                     # optional: her strongest models, for heavy work (Chimera's strong seats); `$model gpt
+  - {provider: openai, model: gpt-6.1-sol}   # openai/gpt-6.1-sol` picks Sol for a chat
 fallback: 2                 # her first model is everyone else's 2nd fallback
 pictures:                   # files in this folder, for the pages (kind: avatar, square; card, 3:4)
   avatar: avatar.png

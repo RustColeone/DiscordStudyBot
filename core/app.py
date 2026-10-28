@@ -15,7 +15,7 @@ from core.gateway.gateway import Gateway
 from core.loader import ExtensionError, LoadedExtension, import_extension, load_extension
 from core.manager.manager import Manager
 from core.manager.policy import Permissions, check_extension_permissions
-from core.manager.renames import adopt_former_names
+from core.manager.renames import adopt_engine_names, adopt_former_names
 from core.manager.secrets import Secrets
 from core.providers.registry import Providers
 from core.storage.bottle import Bottle
@@ -29,6 +29,7 @@ class Core:
         self._tick_seconds, self._clock = tick_seconds, clock
         self.extensions: list[LoadedExtension] = []
         self.skipped: dict[str, str] = {}  # module → why it is not loaded (contracts 1.10)
+        self._formerly: dict[str, str] = {}  # a module's former name → the module (contracts 1.11)
         self.set_aside: list[tuple[str, str, str]] = []  # (module or "core", pattern, why): defaults not applied
         self.started = False
         self.exit_code = 0  # 75 asks the supervisor for a restart (core/supervisor.py)
@@ -71,7 +72,9 @@ class Core:
             if extension.name in found:
                 raise ConfigError(f"Two modules are named {extension.name!r}; exclude one (`modules: {{exclude: [...]}}`)")
             found[extension.name] = (path, extension, module)
-        order, cyclic = load_order({name: item[1] for name, item in found.items()})
+        # A module's former names (Extension.formerly): a declaration naming one is given that module.
+        self._formerly = {old: name for name, item in found.items() for old in item[1].formerly if old not in found}
+        order, cyclic = load_order({name: item[1] for name, item in found.items()}, self._formerly)
         for name, why in cyclic.items():
             self._skip(name, why, found[name][0])
         for name in order:
@@ -85,6 +88,7 @@ class Core:
         from core.setup import Setup
         self.manager.setup_desk = Setup(config)
         adopt_former_names(self.manager)  # (Persona.formerly) before the assignments are checked
+        adopt_engine_names(self.manager)  # (EngineSpec.formerly) likewise
         self._set_aside_builtin_defaults()
         problems = self.manager.problems()
         if config.control is not None and config.control.interface not in self.gateway.interfaces:
@@ -99,17 +103,23 @@ class Core:
         self.skipped[name] = why
         self.audit.record("module_skipped", extension=name, path=str(path), reason=why)
 
+    def _module(self, name: str) -> str:
+        """The module a declared name stands for: itself, or the module that had it before (Extension.formerly)."""
+        return self._formerly.get(name, name)
+
     async def _load(self, path: Path, extension: Extension, module: ModuleType) -> None:
         name, config = extension.name, self.config
         loaded_names = {item.extension.name for item in self.extensions}
         why = self._unmet(extension, loaded_names)
         if why:
             return self._skip(name, why, path)
-        present = frozenset(item for item in extension.uses if item in loaded_names)
+        present = frozenset(item for item in extension.uses if self._module(item) in loaded_names)
+        self._adopt_module_names(extension)
         try:
             loaded = await load_extension(path, lambda module_name: config.extension_config.get(module_name, {}),
                                           config.data_dir / "extensions", self.audit.record,
-                                          self.manager.facts.handle, present, (extension, module))
+                                          self.manager.facts.handle, present, (extension, module),
+                                          lambda: self.manager.persona_views(config.profiles))
         except ExtensionError as error:
             return self._skip(name, str(error), path)
         why, aside = self._check_names(loaded, loaded_names)
@@ -144,19 +154,28 @@ class Core:
                 missing = missing_package(item)
                 if missing:
                     return f"it requires {missing}"
-            elif item not in loaded_names:
-                reason = self.skipped.get(item)
+            elif self._module(item) not in loaded_names:
+                reason = self.skipped.get(self._module(item))
                 return (f"it requires the {item} module, which was not loaded ({reason})" if reason
                         else f"it requires the {item} module, which is not installed or is excluded")
         return None
+
+    def _adopt_module_names(self, extension: Extension) -> None:
+        """Extension.formerly: the stores and facts of a module it had the name of are its own (its data folder and
+        settings are the loader's to move and read)."""
+        for old in extension.formerly:
+            moved = {"stores": self.tank.rename_module(old, extension.name),
+                     "facts": self.manager.facts.rename_module(old, extension.name)}
+            if any(moved.values()):
+                self.audit.record("module_renamed", extension=extension.name, old=old, **moved)
 
     def _check_names(self, loaded: LoadedExtension, loaded_names: set[str]) -> tuple[str | None, dict[str, str]]:
         """Every engine and persona the module's suggested assignments name must be its own, the core's, or a
         declared module's. Returns why the module is refused (an undeclared name), and the suggested assignments to
         set aside (they name what a module it uses would add, and that module is not here)."""
         extension, contributions = loaded.extension, loaded.contributions
-        declared = {*extension.requires, *extension.uses}
-        absent = [item for item in extension.uses if item not in loaded_names]
+        declared = {self._module(item) for item in (*extension.requires, *extension.uses)}
+        absent = [item for item in extension.uses if self._module(item) not in loaded_names]
         own = {("engine", engine.spec.name) for engine in contributions.engines}
         own |= {("persona", persona.name) for persona in contributions.personas}
         aside: dict[str, str] = {}
@@ -196,6 +215,8 @@ class Core:
         for engine in contributions.engines:
             self.manager.register_engine(engine, name)
             self._owners[("engine", engine.spec.name)] = name
+            for old in engine.spec.formerly:
+                self._owners.setdefault(("engine", old), name)
         for capability in contributions.capabilities:
             self.manager.register_capability(capability, name)
         for persona in contributions.personas:
@@ -210,7 +231,8 @@ class Core:
         """The registries a module adds to, copied, so a module that fails halfway can be taken out again."""
         gateway, manager = self.gateway, self.manager
         return [(store, type(store)(store)) for store in (
-            gateway.interfaces, gateway._origin, manager.engines, manager._origin, manager.capabilities,
+            gateway.interfaces, gateway._origin, manager.engines, manager.engine_formerly, manager._origin,
+            manager.capabilities,
             manager.personas, manager.prompt_parts, manager._part_origin, manager.watchers, self._owners)]
 
     @staticmethod
@@ -228,7 +250,7 @@ class Core:
             assignment = self.manager.assignments.get(pattern)
             if assignment is None or pattern in self.manager._overrides.keys():
                 continue
-            missing = ([f"the engine {assignment.engine!r}"] if assignment.engine not in self.manager.engines else []) \
+            missing = ([f"the engine {assignment.engine!r}"] if self.manager.engine(assignment.engine) is None else []) \
                 + [f"the persona {item!r}" for item in assignment.personas if item not in self.manager.personas]
             if missing:
                 self.manager._config_assignments.pop(pattern, None)
@@ -287,7 +309,11 @@ class Core:
             self.providers.add_provider(provider, settings)
         for profile, candidates in contributions.profiles.items():
             if profile not in self.config.profiles:
-                self.providers.add_profile(profile, candidates)
+                try:
+                    self.providers.add_profile(profile, candidates)
+                except ValueError as error:  # a provider nobody has (yet): that profile is left out
+                    self.audit.record("profile_unusable", extension=loaded.extension.name, profile=profile,
+                                      reason=str(error))
         for pattern, value in contributions.assignments.items():
             self.manager.default_assignment(pattern, value)
         stored = self.bottle.rules()

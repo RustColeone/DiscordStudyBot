@@ -108,6 +108,9 @@ def make_config(tmp: Path, overrides: dict | None = None) -> CoreConfig:
             "fake": {"interfaces": {"chat": {"quotes": True, "max_upload_mb": 1},
                                     "owner": {"progress": True}}},
             "tools": {"counter": str(tmp / "counter.json")},
+            # The students' memory learns after each message with model calls of its own: off unless a test turns it
+            # on (their scripted answers are for the engines).
+            "students": {"learn": False},
         },
         "owners": {"chat": ["boss"], "owner": ["boss"]},
         "control": "owner:dm",

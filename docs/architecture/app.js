@@ -300,7 +300,7 @@
         "students module reads every such folder at startup; her prompt is the files' lines joined with nothing " +
         "between them. Every page shows her picture (pictures: {avatar: avatar.png}) through the core, and a renamed " +
         "student keeps what was hers (formerly: [old name]). See extensions/students/README.md."],
-      ["Learning from what is said: watchers and facts", "A module that remembers (the companion) adds " +
+      ["Learning from what is said: watchers and facts", "A module that remembers (the students' memory) adds " +
         "Contributions(watchers=[Watcher(name, run)]): run(exchange, context) is awaited after each message a persona " +
         "says, whichever engine she spoke in, one exchange at a time per persona, beside the conversation (a failure " +
         "is only logged). exchange holds the persona, what she said and the message she answered; context gives " +

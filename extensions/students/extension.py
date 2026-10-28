@@ -1,7 +1,10 @@
-"""Students extension: the characters themselves, one folder each (persona prompt, display name, models, pictures).
+"""Students extension: the characters themselves, one folder each (persona prompt, display name, models, pictures),
+and each one's memory of the people she talks with (memory.py, one mneme-llm file per student).
 
-Every folder with a `student.yml` is a student. Engines (the room, the assistant, the workbench) and interfaces use
-them by name; this module only describes who they are, what they look like and which models they prefer.
+An agent is a persona with her models; a student is an agent with her memory, always. Every folder with a
+`student.yml` is a student. Engines (MomoChat, Chimera) and interfaces use them by name; this module describes who they
+are, what they look like and which models they prefer, and keeps what each remembers of you, whichever engine she
+spoke in. It needs mneme-llm 0.2 or newer: without it, it is not loaded (and says why), and so there are no students.
 """
 
 from __future__ import annotations
@@ -58,7 +61,8 @@ def read_students(root: Path = HERE) -> list[dict]:
 def profiles(students: list[dict]) -> dict[str, list[dict]]:
     """Each student prefers her own models, then the others' first models in `fallback` order (candidates without a
     key are skipped, so one key is always enough). `falls_back_to: <name>` puts that student's whole list after her
-    own instead."""
+    own instead. Her tiers (Persona.profiles) are `<name>_own`, her own models only, and `<name>_strong`, her
+    `strong:` models, when she has them."""
     ranked = sorted((data for data in students if data.get("fallback") is not None), key=lambda data: data["fallback"])
     shared = [data["models"][0] for data in ranked]
     result = {}
@@ -69,7 +73,16 @@ def profiles(students: list[dict]) -> dict[str, list[dict]]:
         if data.get("falls_back_to"):
             own = list(data["models"])
             result[data["name"]] = [*own, *(item for item in result[data["falls_back_to"]] if item not in own)]
+    for data in students:
+        result[f"{data['name']}_own"] = list(data["models"])
+        if data.get("strong"):
+            result[f"{data['name']}_strong"] = list(data["strong"])
     return result
+
+
+def tiers(data: dict) -> dict[str, str]:
+    """Her model profiles by tier (contracts.TIERS)."""
+    return {"own": f"{data['name']}_own", **({"strong": f"{data['name']}_strong"} if data.get("strong") else {})}
 
 
 STUDENTS = read_students()
@@ -86,10 +99,12 @@ def key_setting(provider: str, env: str, data: dict) -> Setting:
 
 
 def setup(context) -> Contributions:
+    from . import memory  # (mneme-llm, which `requires` has made sure of)
     config = context.config
     personas = [Persona(data["name"], data["display_name"], data["prompt"], profile=data["name"],
                         aliases=tuple(data.get("aliases") or ()), formerly=tuple(data.get("formerly") or ()),
-                        pictures=data["pictures"]) for data in STUDENTS]
+                        pictures=data["pictures"], description=str(data.get("description") or ""),
+                        profiles=tiers(data)) for data in STUDENTS]
     # The students' own providers and profiles; this module's config.yml `providers:` (key by key) and `profiles:`
     # override them, and core.yml overrides both.
     providers = {}
@@ -98,10 +113,15 @@ def setup(context) -> Contributions:
             providers[name] = dict(settings)
     for name, settings in (config.get("providers") or {}).items():
         providers[name] = {**providers.get(name, {}), **dict(settings)}
+    remembered = memory.contributions(context, {persona.name: {"display_name": persona.display_name,
+                                                               "aliases": list(persona.aliases)}
+                                                for persona in personas})
     return Contributions(personas=personas, providers=providers,
-                         profiles={**profiles(STUDENTS), **dict(config.get("profiles") or {})})
+                         profiles={**profiles(STUDENTS), **dict(config.get("profiles") or {})}, **remembered)
 
 
-EXTENSION = Extension("students", setup, contracts="1", version="1",
-                      description="The students: one folder each with her prompt, models and pictures",
+EXTENSION = Extension("students", setup, contracts="1", version="2", requires=("package:mneme-llm>=0.2",),
+                      formerly=("companion",),
+                      description="The students: one folder each with her prompt, models and pictures, and her memory "
+                                  "of each person (mneme-llm)",
                       settings=tuple(key_setting(*item) for item in KEYS))

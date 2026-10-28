@@ -17,6 +17,22 @@ class ConfigError(ValueError):
     pass
 
 
+def candidates(name: str, models) -> list[dict]:
+    """An agent's `models:`: `provider/model` strings or `{provider, model, ...}` mappings, in order."""
+    if isinstance(models, (str, dict)):
+        models = [models]
+    found = []
+    for item in models:
+        if isinstance(item, str) and "/" in item:
+            provider, _, model = item.partition("/")
+            found.append({"provider": provider.strip(), "model": model.strip()})
+        elif isinstance(item, dict) and item.get("provider") and item.get("model"):
+            found.append(dict(item))
+        else:
+            raise ConfigError(f"agent {name!r}: a model is provider/model or {{provider, model}}, got {item!r}")
+    return found
+
+
 def load_env_file(path: Path) -> None:
     """Set variables from a KEY=VALUE file without overriding the real environment."""
     if not path.is_file():
@@ -71,17 +87,28 @@ class CoreConfig:
         if isinstance(secrets, str) or not all(isinstance(item, str) for item in secrets):
             raise ConfigError("`secrets:` must be a list of file paths or patterns")
         self.secret_paths = list(secrets)
-        # A persona entry with a `prompt` is a persona; one without adds its `parts` to a module's persona.
+        # An agent is a persona with her models (no memory: a student is a module's agent with one). `agents:` (or
+        # `personas:`, its name before; merged, `agents:` winning key by key) defines core.yml's own: an entry with a
+        # `prompt` is an agent, with her models as `models:` (a profile of her name) or a `profile:`; one without
+        # only adds its `parts` to a module's persona (a student's, say).
         self.personas: dict[str, Persona] = {}
         self.persona_parts: dict[str, tuple] = {}
         try:
-            for name, value in (raw.get("personas") or {}).items():
+            from core.defaults import merge
+            for name, value in merge(dict(raw.get("personas") or {}), dict(raw.get("agents") or {})).items():
                 if not isinstance(value, dict):
-                    raise ConfigError(f"persona {name!r} is a mapping (prompt, display_name, profile, parts)")
+                    raise ConfigError(f"agent {name!r} is a mapping (prompt, display_name, models or profile, parts)")
                 parts = parts_from_config(name, value.get("parts"), self.path)
                 if "prompt" in value:
-                    self.personas[name] = Persona(name, value.get("display_name", name), value["prompt"],
-                                                  value.get("profile", "default"), parts)
+                    profile = str(value.get("profile") or ("" if value.get("models") else "default"))
+                    if value.get("models"):
+                        if profile or name in self.profiles:
+                            raise ConfigError(f"agent {name!r}: give her `models` or a `profile`, not both (and no "
+                                              f"profile named {name!r} under `profiles:`)")
+                        profile, self.profiles[name] = name, candidates(name, value["models"])
+                    self.personas[name] = Persona(name, value.get("display_name", name), value["prompt"], profile,
+                                                  parts, aliases=tuple(value.get("aliases") or ()),
+                                                  description=str(value.get("description") or ""))
                 elif set(value) - {"parts"}:
                     raise ConfigError(f"persona {name!r} has no `prompt`: such an entry only adds `parts` to a "
                                       f"module's persona; to change {sorted(set(value) - {'parts'})}, give the "

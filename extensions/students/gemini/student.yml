@@ -2,6 +2,7 @@
 name: gemini
 display_name: Gemini
 order: 2
+description: "Gemini, the purple-haired cat girl, a curious and lively junior from the tech club"
 models:
   - {provider: gemini, model: gemini-3.8-flash}
   - {provider: gemini, model: gemini-3.6-flash}

@@ -24,7 +24,7 @@ build:
 | [`assistant`](../../extensions/assistant/README.md) | Engine | A single-persona turn loop: tools, approvals, resuming after a restart |
 | [`room`](../../extensions/room/README.md) | Engine | Several personas on one work board, parallel jobs |
 | [`students`](../../extensions/students/README.md) | Personas, providers, profiles | Characters as data: one folder each, prompts in plain files, her pictures and other names, a rename that keeps her data (`formerly`), shipping your own model profiles and a provider |
-| [`companion`](../../extensions/companion/README.md) | Prompt part, watcher, capabilities | Working with every persona by name without importing anyone: a computed `turn` part, a watcher that learns from every engine, facts the pages show, typed-only commands, a permission rule for its own capability |
+| [`students`](../../extensions/students/README.md) | Agents, prompt part, watcher, capabilities | Agents described for every engine (prompts, tiers, pictures, descriptions), and their memory without importing any engine: a computed `turn` part, a watcher that learns from every conversation engine, facts the pages show, typed-only commands, a permission rule for its own capability, a required package |
 | [`workbench`](../../extensions/workbench/README.md) | Engine, capabilities, interface, personas | A durable engine written as plain sequential code (replay with a journal), approvals as workflow steps, an engine and its page sharing a store, and running a module on its own without the core |
 | [`cli`](../../extensions/cli/README.md) | Interface | The smallest interface |
 | [`discord`](../../extensions/discord/README.md) | Interface | A full platform interface: commands, buttons, files, approvals |
@@ -128,7 +128,14 @@ them setting by setting. `$permissions` shows what applies in a conversation, an
 The old assignment keys `allow`, `deny` and `preapprove` are refused in configuration with a pointer
 here; runtime assignments saved with them keep their `allow`/`deny` as that pattern's `use` list.
 
-### Personas and model profiles
+### Agents, students and model profiles
+
+An **agent** is a persona (`contracts.Persona`: who speaks, her prompt, names and pictures) with her model profile.
+That is all an agent is: she keeps no memory of anyone. core.yml defines its own under `agents:` (`personas:` before
+2026-10-27, still read and merged under it), and any module may add some in `Contributions.personas`; a configured
+agent of the same name wins. A **student** is a special agent the students module defines
+([`extensions/students`](../../extensions/students)): she always has her memory of each person (her mneme-llm file),
+whichever engine she speaks in, so that module requires mneme-llm. Engines take either by name.
 
 ```yaml
 providers:
@@ -136,8 +143,15 @@ providers:
              schema_mode: json_object, effort_param: true, inline_history: true}
 profiles:
   default: [{provider: deepseek, model: deepseek-flash}, {provider: openai, model: gpt-6-luna}]
-personas:
-  whale: {display_name: 本鲸, profile: default, prompt: "…"}
+agents:
+  helper:                            # an agent of your own: her prompt and her models in one place
+    display_name: Helper
+    prompt: "You are a careful helper. Answer briefly."
+    models: [deepseek/deepseek-flash, openai/gpt-6-luna]   # a profile named `helper`; or `profile: default`
+    description: "Helper, a careful assistant"            # optional: one line, for engines that write their own
+    aliases: [Help]                                         # optional
+  gpt:
+    parts: [{name: personality, file: personas/gpt.md}]   # no prompt: parts for a module's agent (a student)
 ```
 
 A profile is an ordered list of candidates; the next is tried when one fails, or when its answer cannot be
@@ -170,7 +184,7 @@ personas in `Contributions.personas`; a configured persona with the same name wi
 
 A persona may also carry (contracts 1.9):
 
-* `aliases`: other names people call her by. The room counts "Luna, …" as calling GPT, and the companion's
+* `aliases`: other names people call her by. A group chat counts "Luna, …" as calling GPT, and the students'
   `$alias luna Lulu` finds her by it.
 * `formerly`: persona names she had before. On every start, a former name no persona has now is read as hers:
   core.yml's assignments and `personas: <old name>: parts:` apply to her (the audit says
@@ -182,6 +196,21 @@ A persona may also carry (contracts 1.9):
 * `pictures`: kind → image file (`avatar`, square; `card`, 3:4; any kind a page knows). Interfaces get them, as
   absolute paths, from `InterfacePort.personas()` and serve them themselves; a picture dropped in an interface's
   own folder may override one.
+
+And since contracts 1.11:
+
+* `description`: one line on who she is ("GPT, the white-haired dragon girl and calm, dependable student-council
+  president"), for engines that write their own prompts around her instead of placing `prompt` (Chimera's work
+  prompts).
+* `profiles`: her model profiles by tier (`contracts.TIERS`) besides `profile`: `own`, her own models with nobody
+  else's as a fallback (so the model family answering is hers for sure), and `strong`, her strongest models.
+  `persona.tier("strong")` is that profile, else her `own`, else `profile`. Chimera seats a student on her `own`
+  tier for cheap work and her `strong` tier for strong work.
+
+A module sees the agents loaded before it with `context.personas()` (contracts 1.11): the core's and those of every
+module set up earlier (every module it requires or uses that is there), as `InterfacePort.personas()` describes them,
+plus each one's `module`, `description`, `profile`, `profiles` and `models` (`default` and each tier → the
+candidates, core.yml's profiles winning). Chimera builds its seats from it. Called after setup, it lists every agent.
 
 ### Prompt parts
 
@@ -231,7 +260,7 @@ engines place them as above. An engine that never calls it ignores parts.
 
 ### Watchers
 
-A module that learns from what is said (memory, mood, closeness: the companion) adds watchers (contracts 1.9):
+A module that learns from what is said (memory, mood, closeness: the students' memory) adds watchers (contracts 1.9):
 
 ```python
 from contracts import Contributions, Watcher
@@ -246,7 +275,7 @@ async def learn(exchange, context):
     context.facts.set(exchange.persona.name, "mood", {"face": "good"}, person=exchange.person)
 
 def setup(context):
-    return Contributions(watchers=[Watcher("companion", learn, personas=(), timeout_s=120)])
+    return Contributions(watchers=[Watcher("memory", learn, personas=("gpt", "gemini"), timeout_s=120)])
 ```
 
 * `run(exchange, context)` is awaited after each message a persona says, once it is delivered and recorded,
@@ -261,9 +290,9 @@ def setup(context):
   store (`persona=True` is the exchange's persona, `person=True` its person), `context.facts` publishes facts,
   `context.log(event, **fields)` writes to the audit log.
 * `personas` limits a watcher to those personas (none: every persona). `exchange.engine` lets a watcher keep to
-  the engines whose messages are conversation (the companion skips the Classroom's reports).
+  the engines whose messages are conversation (the students' memory skips Chimera's reports).
   `exchange.personas` names every persona taking part in the conversation (the run's), hers included: more than
-  one is a group chat (the companion gives what was said there to every student who heard it).
+  one is a group chat (the students' memory gives what was said there to every student who heard it).
 * A turn a persona starts on her own (Whale-chan speaking up) is submitted by her interface with
   `extra["speak_up"]` holding her motive, which people cannot set; a watcher should read it as her own thought, not
   as something the person said.
@@ -425,7 +454,7 @@ Since contracts 1.10 every module declares, in its `Extension(...)`, the other m
 ```python
 EXTENSION = Extension("webui", setup, uses=("room", "students"))            # its chats need both; the page opens without
 EXTENSION = Extension("whale_chan", setup, requires=("students",))          # her bot is a student's bot
-EXTENSION = Extension("companion", setup, requires=("package:mneme-llm>=0.2",))
+EXTENSION = Extension("students", setup, requires=("package:mneme-llm>=0.2",))  # a student has her memory
 ```
 
 * **Declaring is not optional.** After setup, the core checks every engine and persona your suggested
@@ -448,6 +477,17 @@ EXTENSION = Extension("companion", setup, requires=("package:mneme-llm>=0.2",))
   interface, and a plain message in the owner's own direct chat gets one line saying nothing answers there.
 
 The architecture page shows each module's declarations beside its description.
+
+### Former names
+
+Renaming an engine or a module keeps what was under the old name (contracts 1.11):
+
+| Field | What the core does |
+| --- | --- |
+| `EngineSpec(..., formerly=("room", "assistant"))` | An assignment naming an old name (in core.yml, set at run time, or a module's default) is read as the engine (`engine_renamed_in_config` for core.yml's, until you rename them there; runtime ones are rewritten), and its open runs carry on in it (`engine_runs_moved`), given the state the old engine saved: an engine that cannot read it should end the run quietly. |
+| `Extension(..., formerly=("companion",))` | Its data folder under an old name becomes its own when it has none yet (`module_data_moved`; with data in both, the old one is left and `module_data_kept` says so). Settings written for an old name, `config.yml` in a folder of that name beside its own and `extension_config.<old>` in core.yml, are read under its own, which win (`module_settings_moved` until you move them). Its stores and facts move to it (`module_renamed`). A module declaring an old name in `requires` or `uses` is given this one, and its `context.present` names it as it was declared. |
+
+A module may take in another one this way, as the students module took in the companion.
 
 ## Interfaces
 

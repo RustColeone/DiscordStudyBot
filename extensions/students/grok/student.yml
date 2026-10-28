@@ -2,6 +2,7 @@
 name: grok
 display_name: Grok
 order: 5
+description: "Grok, the blonde vampire, a cocky and mischievous young lady"
 models:
   - {provider: grok, model: grok-4-fast}
 # No `fallback`: her model needs its own key, so it is no one else's fallback. Without the key, GPT's list answers.

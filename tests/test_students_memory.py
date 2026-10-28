@@ -1,4 +1,5 @@
-"""Tests for the companion module (extensions/companion): what every student keeps of each person, by persona."""
+"""Tests for the students' memory (extensions/students/memory.py, the companion module until 2026-10-27): what
+every student keeps of each person. Agents keep nothing."""
 
 import tempfile
 import unittest
@@ -9,6 +10,12 @@ from tests import test_core_room as room
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core
 
 NAMES = ("gpt", "gemini", "claude", "deepseek")
+
+
+def memory_module():
+    import importlib
+    from core.loader import import_extension
+    return importlib.import_module(import_extension(ROOT / "extensions" / "students")[1].__package__ + ".memory")
 
 
 class Mind:
@@ -45,9 +52,9 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
 
     async def start(self, handler, settings=None, assignments=None):
         extensions = [*make_config(self.tmp).raw["modules"]["paths"],
-                      *(str(ROOT / "extensions" / name) for name in ("companion", "room", "students"))]
+                      *(str(ROOT / "extensions" / name) for name in ("room", "students"))]
         self.core = await start_core(self.tmp, {
-            "extensions": extensions, "extension_config": {"companion": settings or {}},
+            "extensions": extensions, "extension_config": {"students": {"learn": True, **(settings or {})}},
             "profiles": {name: [{"provider": "fake", "model": name}] for name in (*NAMES, "grok")},
             "assignments": {**(assignments or {}), "*": {"engine": "room", "personas": list(NAMES)}}},
             FakeAdapter(handler=handler))
@@ -65,15 +72,13 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
 
     def facts(self, persona, sender="alice"):
         return {name: value for name, value in iface(self.core).port.facts(persona, sender).items()
-                if name.startswith("companion.")}
+                if name.startswith("students.")}
 
     async def test_a_name_of_yours_reaches_her_and_only_her(self):
         script = room.Script(GPT=[room.turn("Hi!"), room.turn("Yes?")], Gemini=[room.turn("Hey.")])
         chat = await self.start(script, {"learn": False})
-        self.assertIn("nobody yet", await self.say(chat, "$alias luna Lulu"))  # not met yet
-        await self.say(chat, "hello")  # GPT answers, so the companion knows her names
-        self.assertEqual(await self.say(chat, "$alias luna Lulu"), "You call GPT Lulu now; she will know.")  # (formerly)
-        self.assertEqual(self.facts("gpt"), {"companion.alias": "Lulu"})
+        self.assertEqual(await self.say(chat, "$alias luna Lulu"), "You call GPT Lulu now; she will know.")  # her alias
+        self.assertEqual(self.facts("gpt"), {"students.alias": "Lulu"})
         await self.say(chat, "GPT, are you there?")
         await self.say(chat, "Gemini, hi")
         self.assertIn("(Alice calls you Lulu.)", self.seen(script, "GPT"))
@@ -93,7 +98,7 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.say(chat, "hello")
         self.assertIn("（Alice是创造你的人，你们非常亲近。）", self.seen(script, "GPT"))
         self.assertIn("GPT: creator, closeness 100/100", await self.say(chat, "$bond"))
-        self.assertTrue((self.tmp / "data" / "extensions" / "companion" / "gpt.db").is_file())
+        self.assertTrue((self.tmp / "data" / "extensions" / "students" / "gpt.db").is_file())
 
     async def test_she_learns_from_what_is_said_and_the_pages_see_where_she_stands(self):
         script = room.Script(GPT=[room.turn("Oolong, noted."), room.turn("Oolong tea!")], Gemini=[room.turn("Hm.")])
@@ -102,9 +107,9 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.say(chat, "GPT, I love oolong tea")
         self.assertEqual((mind.judged, mind.written), (1, 1))  # one decision, then the note writer
         facts = self.facts("gpt")
-        self.assertEqual(facts["companion.bond"], {"role": "acquaintance", "closeness": 20})  # someone new
-        self.assertGreater(facts["companion.mood"]["value"], 70)
-        self.assertEqual(facts["companion.mood"]["feelings"][0][0], "happy")
+        self.assertEqual(facts["students.bond"], {"role": "acquaintance", "closeness": 20})  # someone new
+        self.assertGreater(facts["students.mood"]["value"], 70)
+        self.assertEqual(facts["students.mood"]["feelings"][0][0], "happy")
         await self.say(chat, "Luna, which tea do I like?")
         turn = self.seen(script, "GPT")
         self.assertIn("Alice loves oolong tea.", turn)  # her note, for this message (found by its words)
@@ -112,15 +117,15 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.say(chat, "Gemini, which tea do I like?")
         self.assertIn("Alice loves oolong tea.", self.seen(script, "Gemini"))  # a group chat: she heard it too
         self.assertIn("GPT: acquaintance, closeness 20/100, mood", await self.say(chat, "$bond"))
-        self.assertEqual(self.facts("gemini")["companion.bond"]["role"], "acquaintance")  # she talked with Alice too
-        self.assertTrue((self.tmp / "data" / "extensions" / "companion" / "claude.db").is_file())
+        self.assertEqual(self.facts("gemini")["students.bond"]["role"], "acquaintance")  # she talked with Alice too
+        self.assertTrue((self.tmp / "data" / "extensions" / "students" / "claude.db").is_file())
 
     async def test_a_direct_chat_stays_between_the_two(self):
         script = room.Script(GPT=[room.turn("Oolong, noted.")], Gemini=[room.turn("Hm.")])
         chat = await self.start(Mind(script), {"language": "en"},
                                 {"chat:dm": {"engine": "room", "personas": ["gpt"]}})
         await self.say(chat, "GPT, I love oolong tea", conversation="dm")
-        folder = self.tmp / "data" / "extensions" / "companion"
+        folder = self.tmp / "data" / "extensions" / "students"
         self.assertEqual(sorted(path.name for path in folder.glob("*.db")), ["gpt.db"])  # nobody else heard it
         await self.say(chat, "Gemini, which tea do I like?")
         self.assertNotIn("oolong", self.seen(script, "Gemini"))
@@ -135,23 +140,23 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Notes about Ally", turn)  # one name for her, whichever account
         self.assertIn("Alice loves oolong tea.", turn)  # kept from the first account (the note writer's words)
         self.assertIn("(Ally is someone you know", turn)  # her role on the first account
-        self.assertEqual(self.facts("gpt", "al")["companion.bond"], self.facts("gpt")["companion.bond"])
+        self.assertEqual(self.facts("gpt", "al")["students.bond"], self.facts("gpt")["students.bond"])
 
     async def test_it_speaks_and_learns_only_in_the_engines_it_is_told_and_can_be_turned_off(self):
         script = room.Script(GPT=[room.turn("Hi!")])
         mind = Mind(script)
-        chat = await self.start(mind, {"engines": ["assistant"], "personas": ["gpt"]})
+        chat = await self.start(mind, {"engines": ["chimera"], "personas": ["gpt"]})
         await self.say(chat, "$alias gpt Lulu")
         await self.say(chat, "GPT, hello")
-        self.assertEqual(mind.judged, 0)  # the room is not one of its engines here
+        self.assertEqual(mind.judged, 0)  # MomoChat (the room, here) is not one of its engines here
         self.assertNotIn("Lulu", self.seen(script, "GPT"))
-        self.assertEqual(self.facts("gpt"), {"companion.alias": "Lulu"})
+        self.assertEqual(self.facts("gpt"), {"students.alias": "Lulu"})
         await self.core.stop()
         self.core = None
         from core.loader import import_extension
-        _, module = import_extension(ROOT / "extensions" / "companion")
+        memory = memory_module()
         context = SimpleNamespace(config={"learn": False}, data_dir=self.tmp / "off", log=lambda *a, **k: None)
-        self.assertEqual(module.setup(context).watchers, [])
+        self.assertEqual(memory.contributions(context, {"gpt": {"display_name": "GPT"}})["watchers"], [])
 
     async def test_each_student_may_have_settings_of_her_own(self):
         script = room.Script(GPT=[room.turn("Noted.")], Gemini=[room.turn("Noted too.")])
@@ -161,9 +166,9 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.say(chat, "GPT, I love oolong tea")
         await self.say(chat, "Gemini, I love oolong tea")
         self.assertEqual(mind.judged, 1)  # GPT learns; Gemini does not
-        self.assertNotIn("companion.bond", self.facts("gemini"))
+        self.assertNotIn("students.bond", self.facts("gemini"))
         from core.loader import import_extension
-        _, module = import_extension(ROOT / "extensions" / "companion")
+        module = memory_module()
         settings = module.Settings({"decisions": "LUNA", "config": "whale.toml",
                                     "students": {"gpt": {"call_owner": "主人", "personas": ["x"]}}}, self.tmp)
         self.assertEqual((settings.decisions, settings.config_file), ("luna", str(self.tmp / "whale.toml")))
@@ -172,29 +177,27 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_pages_see_what_her_file_already_holds_at_start(self):
         import mneme_llm
-        folder = self.tmp / "data" / "extensions" / "companion"
+        folder = self.tmp / "data" / "extensions" / "students"
         folder.mkdir(parents=True)
         with mneme_llm.Mneme(str(folder / "gpt.db"), "gpt", luna=False, micro=False, embed=False,
                              meaning_micro=False, memory_language=None) as memory:
             memory.alias("chat:alice", "Lulu")
             memory.relate("chat:alice", "friend")
         await self.start(room.Script())
-        self.assertEqual(self.facts("gpt")["companion.alias"], "Lulu")
-        self.assertEqual(self.facts("gpt")["companion.bond"], {"role": "friend", "closeness": 50})
+        self.assertEqual(self.facts("gpt")["students.alias"], "Lulu")
+        self.assertEqual(self.facts("gpt")["students.bond"], {"role": "friend", "closeness": 50})
 
-    async def test_without_mneme_llm_it_adds_nothing(self):
+    async def test_agents_keep_nothing_and_without_mneme_llm_there_are_no_students(self):
+        script = room.Script(Pat=[room.turn("Hi, I'm Pat.")])
+        mind = Mind(script)
+        chat = await self.start(mind, {"language": "en"}, {"chat:pat": {"engine": "room", "personas": ["p"]}})
+        await self.say(chat, "I love oolong tea", conversation="pat")
+        self.assertEqual(mind.judged, 0)  # Pat is an agent (core.yml's): no memory
+        self.assertNotIn("Notes about", self.seen(script, "Pat"))
+        self.assertIn("No student called 'pat'", await self.say(chat, "$alias pat Patty"))
         from core.loader import import_extension
-        _, module = import_extension(ROOT / "extensions" / "companion")
-        logged = []
-        context = SimpleNamespace(config={}, data_dir=self.tmp, log=lambda event, **fields: logged.append(event))
-        saved, module.mneme_llm = module.mneme_llm, None
-        try:
-            contributions = module.setup(context)
-        finally:
-            module.mneme_llm = saved
-        self.assertEqual((contributions.prompt_parts, contributions.capabilities, contributions.watchers),
-                         ((), (), ()))
-        self.assertEqual(logged, ["mneme_llm_missing"])
+        extension, _ = import_extension(ROOT / "extensions" / "students")
+        self.assertEqual((extension.requires, extension.formerly), (("package:mneme-llm>=0.2",), ("companion",)))
 
 
 if __name__ == "__main__":

@@ -361,7 +361,7 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_roster_says_where_each_student_stands_with_you(self):
         await self.start({"personas": ["gpt", "claude"], "places_poll_s": 2})
-        facts = self.core.manager.facts.handle("companion")
+        facts = self.core.manager.facts.handle("students")
         facts.set("gpt", "alias", "Lulu", person=("webui", "creator"))
         facts.set("gpt", "bond", {"role": "friend", "closeness": 55}, person=("webui", "creator"))
         facts.set("gpt", "bond", {"role": "creator", "closeness": 100}, person=("chat", "creator"))  # another page's

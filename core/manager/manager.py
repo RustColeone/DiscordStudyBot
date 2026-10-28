@@ -20,9 +20,9 @@ from typing import Any, Mapping, Protocol
 
 import jsonschema
 
-from contracts import (SHUTDOWN, Action, Address, Capability, Command, Delivery, Display, Engine, Exchange, FileRef,
-                       ModelError, ModelRequest, ModelResult, Operation, Option, PartContext, Persona, PromptPart,
-                       Reply, Request, Risk, RunYield, Sender, ToolResult, Watcher)
+from contracts import (SHUTDOWN, TIERS, Action, Address, Capability, Command, Delivery, Display, Engine, Exchange,
+                       FileRef, ModelError, ModelRequest, ModelResult, Operation, Option, PartContext, Persona,
+                       PromptPart, Reply, Request, Risk, RunYield, Sender, ToolResult, Watcher)
 from core.audit import Audit
 from core.manager.facts import FactsDesk
 from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, WatchContextHandle, local_time
@@ -139,6 +139,7 @@ class Manager:
         self._part_origin: dict[int, str] = {}  # id(part) → the module that contributed it
         self._part_problems: set[tuple] = set()  # (persona, part, place, kind) audited and not yet recovered
         self._config_assignments = dict(assignments)
+        self._module_patterns: set[str] = set()  # those of _config_assignments a module suggested
         self._overrides = tank.store("core:assignments")
         self.admins = tank.store("core:admins")
         self.routines = RoutineDesk(self)
@@ -160,6 +161,7 @@ class Manager:
         self.data_dir = Path(data_dir)
         self.audit = audit or Audit()
         self.engines: dict[str, Engine] = {}
+        self.engine_formerly: dict[str, str] = {}  # an engine's former name → its name now (EngineSpec.formerly)
         self.capabilities: dict[str, Capability] = {}
         self._origin: dict[str, str] = {}
         self._tasks: dict[str, asyncio.Task] = {}
@@ -212,7 +214,9 @@ class Manager:
 
     def default_assignment(self, pattern: str, value: Mapping[str, Any]) -> None:
         """An extension's suggested assignment; configured ones of the same pattern win."""
-        self._config_assignments.setdefault(pattern, Assignment.from_config(pattern, dict(value)))
+        if pattern not in self._config_assignments:
+            self._config_assignments[pattern] = Assignment.from_config(pattern, dict(value))
+            self._module_patterns.add(pattern)
 
     def register_persona(self, persona: Persona, extension: str) -> None:
         # Configuration wins over an extension's default persona of the same name; parts core.yml gives that name
@@ -222,6 +226,7 @@ class Manager:
             named = next((name for name in (persona.name, *persona.formerly) if name in self._persona_parts), None)
             if named is not None:
                 persona = with_parts(persona, self._persona_parts[named])
+            self._origin["persona:" + persona.name] = extension
         self.personas.setdefault(persona.name, persona)
 
     def register_watcher(self, watcher: Watcher, extension: str) -> None:
@@ -274,7 +279,7 @@ class Manager:
         if pattern != "*" and ":" not in pattern:
             raise ValueError("Patterns are '*', 'interface:*' or 'interface:conversation'")
         assignment = Assignment.from_config(pattern, {**dict(value), "since": time.time()})
-        engine = self.engines.get(assignment.engine)
+        engine = self.engine(assignment.engine)
         if engine is None:
             raise ValueError(f"Engine {assignment.engine!r} is not registered")
         missing = [name for name in assignment.personas if name not in self.personas]
@@ -316,6 +321,13 @@ class Manager:
             raise ValueError(f"Engine {name!r} is already registered")
         self.engines[name] = engine
         self._origin["engine:" + name] = extension
+        for old in engine.spec.formerly:
+            self.engine_formerly.setdefault(old, name)
+
+    def engine(self, name: str) -> Engine | None:
+        """The engine of that name, or the one that had it before (EngineSpec.formerly); an engine registered under
+        the name itself wins."""
+        return self.engines.get(name) or self.engines.get(self.engine_formerly.get(name, ""))
 
     def origin_of(self, key: str) -> str:
         """The module that registered an engine (`engine:<name>`), for its stores."""
@@ -396,7 +408,7 @@ class Manager:
     def problems(self) -> list[str]:
         problems = []
         for pattern, assignment in self.assignments.items():
-            engine = self.engines.get(assignment.engine)
+            engine = self.engine(assignment.engine)
             if engine is None:
                 problems.append(f"assignment {pattern!r}: engine {assignment.engine!r} is not registered")
             missing = [name for name in assignment.personas if name not in self.personas]
@@ -621,8 +633,10 @@ class Manager:
         if assignment is None or not assignment.enabled:
             self.audit.record("not_assigned", address=str(request.address), reason="leftover")
             return None
+        engine = self.engine(assignment.engine)
         record = RunRecord(id=uuid.uuid4().hex[:12], address=str(request.address),
-                           lane=assignment.lane_key(request), engine=assignment.engine,
+                           lane=assignment.lane_key(request),
+                           engine=engine.spec.name if engine is not None else assignment.engine,
                            personas=list(assignment.personas), assignment=assignment.to_dict(), status="running",
                            origin=request.origin, trigger=request_to_dict(request),
                            usage={"model_calls": 0, "tool_calls": 0, "seconds": 0.0,
@@ -650,7 +664,7 @@ class Manager:
         record = self.tank.run(run_id)
         if record is None or record.status != "running":
             return
-        engine = self.engines.get(record.engine)
+        engine = self.engine(record.engine)
         failure: tuple[str, str] | None = None
         outcome: Any = None
         started_events = len(self.tank.events(run_id))
@@ -1331,12 +1345,22 @@ class Manager:
                 self.audit.record("watcher_failed", watcher=watcher.name, extension=module, run=exchange.run_id,
                                   persona=exchange.persona.name, error=f"{type(error).__name__}: {error}"[:300])
 
-    def persona_views(self) -> list[dict[str, Any]]:
-        """InterfacePort.personas: every persona, as pages show her."""
+    def persona_views(self, profiles: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        """InterfacePort.personas and ExtensionContext.personas: every agent, as pages and other engines see her.
+        `profiles` are core.yml's, which win over what is registered (during setup they are not registered yet)."""
+        def models(profile: str) -> list[dict]:
+            given = (profiles or {}).get(profile)
+            return [dict(item) for item in given] if given else self.providers.candidates(profile)
+
         return [{"name": persona.name, "display_name": persona.display_name, "aliases": list(persona.aliases),
                  "formerly": list(persona.formerly),
                  "pictures": {kind: str(Path(path).expanduser().resolve()) for kind, path in persona.pictures.items()},
-                 "ready": self.providers.profile_ready(persona.profile)} for persona in self.personas.values()]
+                 "ready": self.providers.profile_ready(persona.profile),
+                 "module": self._origin.get("persona:" + persona.name, "core"), "description": persona.description,
+                 "profile": persona.profile, "profiles": dict(persona.profiles),
+                 "models": {"default": models(persona.profile),
+                            **{tier: models(persona.tier(tier)) for tier in TIERS}}}
+                for persona in self.personas.values()]
 
     async def send_file(self, run_id: str, file: FileRef, caption: str = "") -> Delivery:
         record = self.tank.run(run_id)
@@ -1805,7 +1829,7 @@ class Manager:
 
     async def _tell_stopped(self, record: RunRecord, reason: str) -> None:
         """A waiting run was cancelled: its engine hears it (`Engine.stopped`), so it can put its own records right."""
-        engine = self.engines.get(record.engine)
+        engine = self.engine(record.engine)
         if engine is None:
             return
         session = SessionHandle(self, record, self.tank.events(record.id, ("input", "tool_result", "approval_denied",

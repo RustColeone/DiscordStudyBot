@@ -1,12 +1,13 @@
-"""Companion extension: what each student keeps of each person, in mneme-llm (one file per student).
+"""A student's memory: what she keeps of each person, in mneme-llm (one file per student). It was the companion module
+until 2026-10-27; a student is an agent with this memory, so it is part of what the students module adds.
 
-Every engine that places prompt parts (the room, the assistant, the chat engine) tells her, each turn, who the person
-is to her, what they call her, her notes for the message and her mood's news. After each of her messages a watcher lets her learn
-from it: how it left her feeling, what is worth remembering, and a day of contact for her closeness with the person.
-What was said in a group chat, every student there heard: the notes one keeps of it go into each classmate's file
-too; a direct chat stays between the two. A person with several accounts (`people:`) is one person to every student.
-Pages see where she stands with you as facts (bond, alias, mood, plans). `$alias` names a student your way, `$bond`
-shows where each stands with you. It works for any persona from any module, by name, and imports none of them.
+Every engine that places prompt parts (MomoChat) tells her, each turn, who the person is to her, what they call her,
+her notes for the message and her mood's news. After each of her messages a watcher lets her learn from it: how it
+left her feeling, what is worth remembering, and a day of contact for her closeness with the person. What was said in
+a group chat, every student there heard: the notes one keeps of it go into each classmate's file too; a direct chat
+stays between the two. A person with several accounts (`people:`) is one person to every student. Pages see where she
+stands with you as facts (bond, alias, mood, plans). `$alias` names a student your way, `$bond` shows where each
+stands with you. Agents (personas that are not students) keep nothing.
 """
 
 from __future__ import annotations
@@ -16,26 +17,25 @@ import re
 import time
 from pathlib import Path
 
-from contracts import Capability, Contributions, Extension, ModelRequest, PromptPart, Risk, ToolResult, Watcher
+from contracts import Capability, ModelRequest, PromptPart, Risk, ToolResult, Watcher
 
-try:
-    import mneme_llm
-except ImportError:  # optional: without it the module adds nothing
-    mneme_llm = None
+import mneme_llm
 
 RESET = {"reset", "remove", "clear", "none"}
 DAY = 86400
-# The engines whose messages are conversation (the Classroom's are reports on work, which teach her nothing of you):
-# the room, the assistant and the chat engine (a Discord bot of a student's own).
-ENGINES = ("room", "assistant", "chat")
+# The engines whose messages are conversation (Chimera's are reports on work, which teach her nothing of you), and
+# MomoChat's names before (the room, the assistant, the chat engine of a student's own Discord bot), for settings
+# that still name them.
+ENGINES = ("momochat",)
+FORMER = {"room": "momochat", "assistant": "momochat", "chat": "momochat"}
 # What `students: <persona>:` may set for one student, over the settings for all.
 OWN = ("learn", "notes", "mood", "met_role", "writer_profile", "reflect_after_notes", "language", "memory_language",
        "decisions", "config", "call_owner")
 
 
-def usable() -> bool:
-    """mneme-llm installed, and new enough to keep aliases and one person's accounts (0.2)."""
-    return mneme_llm is not None and hasattr(mneme_llm, "Aliases") and hasattr(mneme_llm, "People")
+def conversation(engine: str, settings: "Settings") -> bool:
+    """Whether messages in this engine are conversation she learns from (an older core names none: yes)."""
+    return not engine or FORMER.get(engine, engine) in settings.engines
 
 
 def key(text: str) -> str:
@@ -52,7 +52,7 @@ class Settings:
     def __init__(self, config, folder: Path | None = None):
         self.raw, self.folder = dict(config), folder
         self.personas = tuple(config.get("personas") or ())
-        self.engines = tuple(config.get("engines") or ENGINES)
+        self.engines = tuple(FORMER.get(str(name), str(name)) for name in config.get("engines") or ENGINES)
         self.learn = flag(config.get("learn"), True)
         self.notes = flag(config.get("notes"), True)
         self.mood = flag(config.get("mood"), True)
@@ -290,7 +290,7 @@ def make_part(book: Book, settings: Settings):
         replied); nothing for a routine run, or a person she has nothing on."""
         persona, trigger = context.persona, context.trigger
         engine = getattr(context, "engine", "")  # (contracts 1.9; an older core gives none)
-        if trigger.origin != "person" or not book.keeps(persona.name) or (engine and engine not in settings.engines):
+        if trigger.origin != "person" or not book.keeps(persona.name) or not conversation(engine, settings):
             return ""
         book.met(persona)
         own = settings.of(persona.name)
@@ -328,7 +328,7 @@ def make_learner(book: Book, settings: Settings):
         Notes from a group chat go to her classmates there too (`share`). A message she started herself (speaking
         up) moves her mood only: notes come from what people tell her."""
         persona, trigger = exchange.persona, exchange.trigger
-        if trigger.origin != "person" or exchange.engine not in settings.engines or not book.keeps(persona.name):
+        if trigger.origin != "person" or not conversation(exchange.engine, settings) or not book.keeps(persona.name):
             return
         own = settings.of(persona.name)
         if not own.learn:
@@ -376,9 +376,7 @@ def make_alias(book: Book, facts=None):
         persona = book.find(who, subject)
         if persona is None:
             shown = ", ".join(book.shown(persona) for persona in book.known()) or "nobody yet"
-            return ToolResult.fail(f"No student called {who!r} here (known: {shown}). A student is known once she has "
-                                   "spoken in a chat, or from `personas:` in the companion's config.yml.",
-                                   "unknown_student")
+            return ToolResult.fail(f"No student called {who!r} here (known: {shown}).", "unknown_student")
         shown, name = book.shown(persona), name.strip()
         memory = book.open(persona, create=True)
         if not name:
@@ -413,32 +411,30 @@ def make_bond(book: Book):
     return bond
 
 
-def setup(context) -> Contributions:
-    if not usable():
-        context.log("mneme_llm_missing", hint="pip install -U mneme-llm (0.2 or newer) for the companion")
-        return Contributions()
+def contributions(context, students: dict[str, dict]) -> dict:
+    """The memory's prompt part, watcher, commands and facts, for these students (persona → display name and other
+    names), or those of them `personas:` names."""
     config = context.config
     settings = Settings(config, Path(context.data_dir))
-    book = Book(context.data_dir, personas=settings.personas, platforms=config.get("platforms"),
-                roles=config.get("roles"), people=config.get("people"), settings=settings)
+    keep = tuple(name for name in settings.personas or students if name in students)
+    settings.personas = keep
+    book = Book(context.data_dir, personas=keep, platforms=config.get("platforms"), roles=config.get("roles"),
+                people=config.get("people"), settings=settings)
+    for name, names in students.items():  # her names, before she has spoken anywhere
+        book.names.setdefault(name, names)
     facts = getattr(context, "facts", None)  # (None when loaded without a core)
     book.publish_all(facts)
-    return Contributions(
-        prompt_parts=[PromptPart("companion", make_part(book, settings), place="turn", order=50,
-                                 personas=settings.personas)],
-        watchers=[Watcher("companion", make_learner(book, settings), personas=settings.personas, timeout_s=180)]
-        if settings.learn or any(flag(own.get("learn"), False) for own in settings.students.values()) else [],
-        capabilities=[
-            Capability("companion.alias", "Show or set what you call a student.", make_alias(book, facts),
+    learns = settings.learn or any(flag(own.get("learn"), False) for own in settings.students.values())
+    return {
+        "prompt_parts": [PromptPart("memory", make_part(book, settings), place="turn", order=50, personas=keep)],
+        "watchers": [Watcher("memory", make_learner(book, settings), personas=keep, timeout_s=180)] if learns else [],
+        "capabilities": [
+            Capability("students.alias", "Show or set what you call a student.", make_alias(book, facts),
                        {"text": {"type": "string", "description": "<student> <name>, <student> reset, or nothing"}},
                        risk=Risk.WRITE, internal=True, command="alias", command_argument="text"),
-            Capability("companion.bond", "Where each student stands with you.", make_bond(book), risk=Risk.READ,
+            Capability("students.bond", "Where each student stands with you.", make_bond(book), risk=Risk.READ,
                        internal=True, command="bond"),
         ],
         # Naming a student changes only your own name for her, and only you can type it (models are not offered it).
-        permissions={"*": {"rules": {"companion.alias": "auto"}}})
-
-
-EXTENSION = Extension("companion", setup, contracts="1", version="2", requires=("package:mneme-llm>=0.2",),
-                      description="What each student keeps of each person (mneme-llm): roles, aliases, notes, mood, "
-                                  "plans; group-chat notes shared, one person's accounts as one")
+        "permissions": {"*": {"rules": {"students.alias": "auto"}}},
+    }

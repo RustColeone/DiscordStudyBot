@@ -43,9 +43,9 @@ async def check_token(token: str) -> str:
 MOVED = {"prompt": "extensions/students/deepseek/ (whale.md, prompt.md)",
          "models": "extensions/students/deepseek/student.yml (models)",
          "display_name": "extensions/students/deepseek/student.yml (display_name, aliases)",
-         "call_owner": "extensions/companion/config.yml (call_owner)",
-         "memory": "extensions/companion/config.yml (memory), or `diary: true` here for the core diary",
-         "mood": "extensions/companion/config.yml (mood)"}
+         "call_owner": "extensions/students/config.yml (call_owner)",
+         "memory": "extensions/students/config.yml (memory), or `diary: true` here for the core diary",
+         "mood": "extensions/students/config.yml (mood)"}
 
 
 def flag(value, default: bool = False) -> bool:

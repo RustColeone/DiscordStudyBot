@@ -60,9 +60,13 @@ class StudentFolderTests(unittest.TestCase):
     def test_profiles_put_her_own_models_first_then_the_others_first_ones_in_fallback_order(self):
         a, b, c, x = ({"provider": name, "model": name} for name in "abcx")
         students = [{"name": "ann", "models": [a], "fallback": 2}, {"name": "bea", "models": [b, x], "fallback": 1},
-                    {"name": "cy", "models": [c]}, {"name": "dot", "models": [x], "falls_back_to": "ann"}]
+                    {"name": "cy", "models": [c], "strong": [x]}, {"name": "dot", "models": [x], "falls_back_to": "ann"}]
         self.assertEqual(self.module.profiles(students), {
-            "ann": [a, b], "bea": [b, x, a], "cy": [c, b, a], "dot": [x, a, b]})
+            "ann": [a, b], "bea": [b, x, a], "cy": [c, b, a], "dot": [x, a, b],
+            # her tiers (Persona.profiles): her own models only, and her strong ones
+            "ann_own": [a], "bea_own": [b, x], "cy_own": [c], "cy_strong": [x], "dot_own": [x]})
+        self.assertEqual(self.module.tiers(students[2]), {"own": "cy_own", "strong": "cy_strong"})
+        self.assertEqual(self.module.tiers(students[0]), {"own": "ann_own"})
 
 
 class ShippedStudentsTests(unittest.TestCase):
@@ -75,6 +79,10 @@ class ShippedStudentsTests(unittest.TestCase):
                          ["gpt", "gemini", "claude", "deepseek", "grok"])
         gpt, claude = contributions.personas[0], contributions.personas[2]
         self.assertEqual((gpt.display_name, gpt.aliases, gpt.formerly), ("GPT", ("Luna",), ("luna",)))
+        self.assertTrue(all(persona.description for persona in contributions.personas))  # for Chimera's prompts
+        self.assertEqual((gpt.tier("strong"), contributions.profiles["gpt_strong"]),
+                         ("gpt_strong", [{"provider": "openai", "model": "gpt-6.1-sol"}]))
+        self.assertEqual(contributions.personas[1].tier("strong"), "gemini_own")  # no strong models: her own
         self.assertEqual(claude.aliases, ("Haiku",))
         for persona in contributions.personas:  # each has her picture in her own folder
             self.assertEqual(Path(persona.pictures["avatar"]), ROOT / "extensions" / "students" / persona.name

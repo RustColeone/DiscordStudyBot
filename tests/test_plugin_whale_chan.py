@@ -12,11 +12,10 @@ from unittest.mock import patch
 from tests.core_support import ROOT, FakeAdapter, FakeToolAdapter, calls, iface, make_config, settle, start_core, turn_context
 
 PLUGIN = ROOT / "plugins" / "whale_chan"
-COMPANION = ROOT / "extensions" / "companion"
-STUDENTS = ROOT / "extensions" / "students"  # she is the DeepSeek student
+STUDENTS = ROOT / "extensions" / "students"  # she is the DeepSeek student, with her memory
 PROFILES = {name: [{"provider": "fake", "model": "pro"}] for name in ("gpt", "claude", "deepseek", "gemini", "grok")}
 QUIET = {"voice": {"enabled": False}}
-# Her memory and mood are the companion module's: one Discord user is one person (`chat` stands for her bot here).
+# Her memory and mood are a student's: one Discord user is one person (`chat` stands for her bot here).
 MEMORY = {"platforms": {"chat": "discord"}}
 
 
@@ -39,14 +38,14 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def start(self, responses, options=None, plugin=None, handler=None, companion=None, owners=None):
-        """Her engine through the real core; with `companion` (its settings), the companion module keeps her
-        memory and mood."""
+        """Her engine through the real core; with `companion` (the students' memory settings), she learns from what
+        is said (her memory and mood)."""
         self.adapter = FakeAdapter(responses, handler)
-        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN), str(STUDENTS),
-                      *([str(COMPANION)] if companion is not None else [])]
+        extensions = [*make_config(self.tmp).raw["modules"]["paths"], str(PLUGIN), str(STUDENTS)]
         self.core = await start_core(self.tmp, {
             "extensions": extensions, "profiles": PROFILES,
-            "extension_config": {"whale_chan": plugin if plugin is not None else QUIET, "companion": companion or {}},
+            "extension_config": {"whale_chan": plugin if plugin is not None else QUIET,
+                                 "students": {"learn": True, **companion} if companion is not None else {}},
             "assignments": {"*": {"engine": "chat", "personas": ["deepseek"], "options": options or {}}},
             **({"owners": owners} if owners else {})}, self.adapter)
         return iface(self.core)
@@ -58,7 +57,7 @@ class ChatEngineTests(unittest.IsolatedAsyncioTestCase):
     def memory(self):
         """Her mneme-llm file, as the companion keeps it."""
         import mneme_llm
-        memory = mneme_llm.Mneme(str(self.tmp / "data" / "extensions" / "companion" / "deepseek.db"), "deepseek",
+        memory = mneme_llm.Mneme(str(self.tmp / "data" / "extensions" / "students" / "deepseek.db"), "deepseek",
                                  luna=False, micro=False, embed=False, meaning_micro=False, memory_language=None)
         self.addCleanup(memory.close)
         return memory
@@ -401,7 +400,7 @@ class CompanionTests(ChatEngineTests):
         await chat.say("周五考数学")
         await self.settled()
         facts = chat.port.facts("deepseek", "alice")
-        plan = facts["companion.plans"][0]
+        plan = facts["students.plans"][0]
         self.assertEqual((plan["text"], datetime.fromtimestamp(plan["at"]).strftime("%Y-%m-%d")), ("数学考试", day))
         speakup, settings = plugin_module(self.core, "speakup"), plugin_module(self.core, "speakup").Settings()
         self.assertIn("数学考试", speakup.motive(facts, "主人", time.time() + 2 * 86400, settings))
@@ -479,7 +478,7 @@ class CompanionTests(ChatEngineTests):
                                                "mood": {"luna": True}})
         moved = [event for event in self.core.audit.events if event.get("detail") == "settings_moved"]
         self.assertEqual(moved[0]["keys"], ["memory", "mood"])
-        self.assertIn("extensions/companion/config.yml (mood)", moved[0]["to"])
+        self.assertIn("extensions/students/config.yml (mood)", moved[0]["to"])
 
     async def test_voice_on_sends_short_replies_as_voice_messages(self):
         chat = await self.start([step("晚安主人～做个好梦"), step("```python\nprint(1)\n```")],
@@ -589,13 +588,13 @@ class SpeakUpRuleTests(unittest.TestCase):
     def test_the_motive_comes_from_plans_then_feelings_then_the_clock(self):
         noon = self.at("2026-10-24T12:00")
         settings = self.settings()
-        facts = {"companion.plans": [{"text": "数学考试在明天", "at": noon + 86400},
+        facts = {"students.plans": [{"text": "数学考试在明天", "at": noon + 86400},
                                      {"text": "下个月的旅行", "at": noon + 20 * 86400}],
-                 "companion.mood": {"value": 60, "face": "worry", "feelings": [["worried", 40]]}}
+                 "students.mood": {"value": 60, "face": "worry", "feelings": [["worried", 40]]}}
         self.assertIn("数学考试在明天", self.s.motive(facts, "主人", noon, settings))
-        self.assertIn("担心", self.s.motive({**facts, "companion.plans": None}, "主人", noon, settings))
+        self.assertIn("担心", self.s.motive({**facts, "students.plans": None}, "主人", noon, settings))
         self.assertIn("中午", self.s.motive({}, "主人", noon, settings))
-        self.assertIn("中午", self.s.motive({"companion.plans": "not a list"}, "主人", noon, settings))
+        self.assertIn("中午", self.s.motive({"students.plans": "not a list"}, "主人", noon, settings))
         self.assertIn("好久没", self.s.motive({}, "主人", noon, settings, silent_h=8))
 
 

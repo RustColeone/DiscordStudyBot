@@ -12,6 +12,7 @@ import importlib.machinery
 import importlib.util
 import inspect
 import re
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,9 +35,13 @@ class ExtensionContextImpl:
     _log: Callable[..., None]
     facts: Any = None  # contracts.Facts for this module (contracts 1.9); None when loaded without a core
     present: frozenset = frozenset()  # the modules it `uses` that are loaded (contracts 1.10)
+    _personas: Callable[[], list] | None = None  # the agents loaded so far (contracts 1.11)
 
     def log(self, event: str, **fields: Any) -> None:
         self._log("extension", extension=self.name, detail=event, **fields)
+
+    def personas(self) -> list[dict]:
+        return list(self._personas()) if self._personas is not None else []
 
 
 @dataclass
@@ -98,19 +103,57 @@ def local_config(path: str | Path) -> dict:
     return value
 
 
+def adopt_data(data_root: Path, extension: Extension, log: Callable[..., None]) -> None:
+    """Extension.formerly: the data folder under an old name becomes the module's own, when it has none yet (or an
+    empty one); one with data of its own is left, and so is the old one."""
+    data_dir = data_root / extension.name
+    for old in extension.formerly:
+        before = data_root / old
+        if not before.is_dir():
+            continue
+        if data_dir.is_dir() and any(data_dir.iterdir()):
+            log("module_data_kept", extension=extension.name, old=old, path=str(before),
+                hint="both folders hold data; the old one is not read (merge them by hand)")
+            continue
+        if data_dir.is_dir():
+            data_dir.rmdir()
+        shutil.move(str(before), str(data_dir))
+        log("module_data_moved", extension=extension.name, old=old, path=str(data_dir))
+
+
+def settings(path: Path, extension: Extension, config_for: Callable[[str], Mapping[str, Any]],
+             log: Callable[..., None]) -> dict:
+    """The module's settings: its folder's config.yml, then core.yml's `extension_config`. Under each, those written
+    for a name it had before (Extension.formerly: the config.yml of a folder of that name beside its own, and
+    `extension_config.<old>`), which its own win over."""
+    from core.defaults import merge
+    config: dict = {}
+    for old in extension.formerly:
+        written, configured = local_config(path.parent / old), dict(config_for(old) or {})
+        if written or configured:
+            log("module_settings_moved", extension=extension.name, old=old, keys=sorted({*written, *configured}),
+                hint=f"settings written for {old} are read as {extension.name}'s (move them)")
+        config = merge(config, written)
+    config = merge(config, local_config(path))
+    for old in extension.formerly:
+        config = merge(config, dict(config_for(old) or {}))
+    return merge(config, dict(config_for(extension.name) or {}))
+
+
 async def load_extension(path: str | Path, config_for: Callable[[str], Mapping[str, Any]], data_root: Path,
                          log: Callable[..., None], facts_for: Callable[[str], Any] | None = None,
-                         present: frozenset = frozenset(), imported: tuple[Extension, ModuleType] | None = None
-                         ) -> LoadedExtension:
+                         present: frozenset = frozenset(), imported: tuple[Extension, ModuleType] | None = None,
+                         personas: Callable[[], list] | None = None) -> LoadedExtension:
     """Imports the module (unless `imported` already has it) and runs its setup; `present` is which of the modules
-    it uses are loaded."""
+    it uses are loaded, `personas` lists the agents loaded so far."""
     extension, module = imported or import_extension(path)
+    adopt_data(data_root, extension, log)
     data_dir = data_root / extension.name
     data_dir.mkdir(parents=True, exist_ok=True)
-    from core.defaults import merge
-    config = merge(local_config(path), dict(config_for(extension.name) or {}))
+    config = settings(Path(path).resolve(), extension, config_for, log)
     context = ExtensionContextImpl(extension.name, config, data_dir, log,
-                                   facts_for(extension.name) if facts_for is not None else None, frozenset(present))
+                                   facts_for(extension.name) if facts_for is not None else None, frozenset(present),
+                                   personas)
     try:
         contributions = extension.setup(context)
         if inspect.isawaitable(contributions):

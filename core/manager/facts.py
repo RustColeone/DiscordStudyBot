@@ -82,6 +82,22 @@ class FactsDesk:
             moved += 1
         return moved
 
+    def rename_module(self, old: str, new: str) -> int:
+        """Extension.formerly: the facts module `old` published are module `new`'s (what `new` has wins). Returns how
+        many entries changed."""
+        moved = 0
+        for where in self.store.keys():
+            facts = dict(self.store.get(where) or {})
+            old_keys = [name for name in facts if name.startswith(old + ".")]
+            if not old_keys:
+                continue
+            for name in old_keys:
+                facts.setdefault(new + name[len(old):], facts[name])
+                facts.pop(name)
+            self.store.set(where, facts)
+            moved += 1
+        return moved
+
     def handle(self, module: str) -> "FactsHandle":
         return FactsHandle(self, module)
 

@@ -34,9 +34,23 @@ SHUTDOWN = "core-shutdown"
 
 @dataclass(frozen=True)
 class EngineSpec:
+    """`formerly` (added in 1.11): engine names it had before. An assignment naming one (in core.yml, set at runtime
+    or suggested by a module) is read as this engine, and its open runs carry on in it (with the state the old engine
+    saved: an engine that cannot read it ends the run)."""
+
     name: str
     description: str = ""
     personas: Literal["one", "many"] = "one"
+    formerly: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        formerly = (self.formerly,) if isinstance(self.formerly, str) else self.formerly
+        if not isinstance(formerly, (tuple, list)) or not all(isinstance(item, str) and item.strip()
+                                                               for item in formerly):
+            raise ValueError(f"engine {self.name!r}: formerly is a list of names")
+        object.__setattr__(self, "formerly", tuple(item.strip() for item in formerly))
+        if self.name in self.formerly:
+            raise ValueError(f"engine {self.name!r}: formerly lists its own name")
 
 
 PART_PLACES = ("stable", "turn")
@@ -85,15 +99,24 @@ class PromptPart:
         object.__setattr__(self, "personas", tuple(personas))
 
 
+# The model tiers a persona may name besides her `profile` (Persona.profiles, added in 1.11).
+TIERS = ("own", "strong")
+
+
 @dataclass(frozen=True)
 class Persona:
-    """Who speaks: data, not behaviour. Any engine can use any persona. `parts` are prompt parts of its own (its
-    personality, say), which engines place beside `prompt` (see PromptPart).
+    """Who speaks: data, not behaviour. A persona with her model profile is an agent; any engine can use any of them.
+    `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart).
 
     Added in 1.9: `aliases`, other names people call her by ("Luna, …" still calls on GPT); `formerly`, persona
     names she had before, so the core moves what it keeps under them to her name and reads core.yml's old name as
     hers (modules that keep their own data by persona name do the same); `pictures`, kind → image file (`avatar`,
-    square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`."""
+    square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`.
+
+    Added in 1.11: `description`, one line on who she is, for engines that write their own prompts around her rather
+    than placing `prompt` (Chimera's work prompts); `profiles`, her model profiles by tier besides `profile`: `own`
+    (her own models only, with nobody else's as a fallback, so the model family answering is hers) and `strong` (her
+    strongest models). An engine asking for a tier she has not named uses `own`, then `profile`."""
 
     name: str
     display_name: str
@@ -103,6 +126,12 @@ class Persona:
     aliases: tuple[str, ...] = ()
     formerly: tuple[str, ...] = ()
     pictures: Mapping[str, str] = field(default_factory=dict)
+    description: str = ""
+    profiles: Mapping[str, str] = field(default_factory=dict)
+
+    def tier(self, name: str) -> str:
+        """The profile for tier `name` (`own`, `strong`): hers, else `own`, else `profile`."""
+        return self.profiles.get(name) or self.profiles.get("own") or self.profile
 
     def __post_init__(self):
         if not isinstance(self.parts, (tuple, list)) or not all(isinstance(part, PromptPart) for part in self.parts):
@@ -124,6 +153,13 @@ class Persona:
                                                              and path for kind, path in self.pictures.items()):
             raise ValueError(f"persona {self.name!r}: pictures maps a kind (avatar, card, …) to an image file")
         object.__setattr__(self, "pictures", dict(self.pictures))
+        if not isinstance(self.description, str):
+            raise ValueError(f"persona {self.name!r}: description is one line of text")
+        object.__setattr__(self, "description", " ".join(self.description.split()))
+        if not isinstance(self.profiles, Mapping) or not all(
+                tier in TIERS and isinstance(profile, str) and profile for tier, profile in self.profiles.items()):
+            raise ValueError(f"persona {self.name!r}: profiles maps a tier ({', '.join(TIERS)}) to a profile name")
+        object.__setattr__(self, "profiles", dict(self.profiles))
 
 
 @dataclass(frozen=True)

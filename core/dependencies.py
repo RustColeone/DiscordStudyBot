@@ -14,11 +14,14 @@ from typing import Mapping
 from contracts import Extension
 
 
-def load_order(extensions: Mapping[str, Extension]) -> tuple[list[str], dict[str, str]]:
+def load_order(extensions: Mapping[str, Extension], formerly: Mapping[str, str] | None = None
+               ) -> tuple[list[str], dict[str, str]]:
     """The module names in load order (each after the modules it requires or uses that are present, otherwise in
-    the given order), and the modules caught in a dependency cycle, each with why."""
-    present = set(extensions)
-    needs = {name: [item for item in (*extension.requires, *extension.uses) if item in present]
+    the given order), and the modules caught in a dependency cycle, each with why. `formerly` maps a module's former
+    name to it (Extension.formerly), so a declaration naming the old name waits for that module."""
+    present, formerly = set(extensions), dict(formerly or {})
+    needs = {name: [formerly.get(item, item) for item in (*extension.requires, *extension.uses)
+                    if formerly.get(item, item) in present and formerly.get(item, item) != name]
              for name, extension in extensions.items()}
     order, state, cyclic = [], {}, {}
 

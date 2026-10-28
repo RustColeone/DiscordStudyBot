@@ -1,9 +1,11 @@
-"""Persona.formerly: a persona renamed keeps what was hers (contracts 1.9).
+"""Former names: a persona renamed keeps what was hers (Persona.formerly, contracts 1.9), and so does an engine
+(EngineSpec.formerly, 1.11).
 
 At start, once every module is loaded, each old name no persona has now is read as hers: core.yml's assignments
 and prompt parts that name it, and everything the core keeps under it (her memory, the modules' stores scoped by
-her, diary notes, `$model` choices, runtime assignments, facts, open runs, her name on what she said). It runs on
-every start and moves only what is still under the old name, so it is done once.
+her, diary notes, `$model` choices, runtime assignments, facts, open runs, her name on what she said). An engine's
+old name is read as the engine in core.yml's assignments and the runtime ones, and its open runs carry on in it. It
+runs on every start and moves only what is still under the old name, so it is done once.
 """
 
 from __future__ import annotations
@@ -54,4 +56,29 @@ def adopt_former_names(manager: "Manager") -> dict[str, str]:
         moved["facts"] = manager.facts.rename(old, new)
         if any(moved.values()):
             manager.audit.record("persona_data_moved", old=old, new=new, **moved)
+    return renames
+
+
+def adopt_engine_names(manager: "Manager") -> dict[str, str]:
+    """Assignments naming an engine by a name it had before (EngineSpec.formerly) name it now; its open runs are its."""
+    renames = {old: new for old, new in manager.engine_formerly.items() if old not in manager.engines}
+    if not renames:
+        return renames
+    for pattern, assignment in list(manager._config_assignments.items()):
+        if assignment.engine in renames:
+            manager._config_assignments[pattern] = dataclasses.replace(assignment, engine=renames[assignment.engine])
+            if pattern not in manager._module_patterns:
+                manager.audit.record("engine_renamed_in_config", pattern=pattern, old=assignment.engine,
+                                     new=renames[assignment.engine],
+                                     hint="core.yml names the engine by its old name; it is read as its new one "
+                                          "(rename it there)")
+    overrides = manager._overrides
+    for pattern in overrides.keys():
+        value = dict(overrides.get(pattern) or {})
+        if value.get("engine") in renames:
+            overrides.set(pattern, {**value, "engine": renames[value["engine"]]})
+    for old, new in renames.items():
+        moved = manager.tank.rename_engine(old, new)
+        if moved:
+            manager.audit.record("engine_runs_moved", old=old, new=new, runs=moved)
     return renames
