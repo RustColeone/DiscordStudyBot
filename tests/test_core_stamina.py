@@ -132,6 +132,23 @@ class StaminaTests(unittest.IsolatedAsyncioTestCase):
         await settle(self.core)
         self.assertEqual(stamina.total(), 3.0)
 
+    async def test_her_own_default_allowance_comes_after_what_you_set(self):
+        self.core = await start_core(self.tmp, {"prices": PRICES, "personas": {"p": {"allowance": 0.04}}},
+                                     adapter=FakeAdapter(handler=lambda messages, schema: "ok"))
+        stamina = self.core.manager.stamina
+        self.assertEqual(self.core.manager.personas["p"].allowance, 0.04)
+        self.assertEqual(stamina.allowance("p"), 0.04)  # hers (a student's `allowance:`, an agent's in core.yml)
+        stamina.settings = {"allowance": 0.5}
+        self.assertEqual(stamina.allowance("p"), 0.5)  # core.yml's for everyone, over hers
+        stamina.settings = {"allowance": 0.5, "personas": {"p": 0.7}}
+        self.assertEqual(stamina.allowance("p"), 0.7)
+        stamina.command("p 0.9")
+        self.assertEqual(stamina.allowance("p"), 0.9)  # `$stamina` (and the pages), over core.yml
+        stamina.settings = {}
+        stamina.command("p reset")
+        self.assertEqual(stamina.allowance("p"), 0.04)
+        self.assertEqual(stamina.allowance("nobody"), 0.5)  # no default of her own: the core's
+
     async def test_spending_by_day_for_the_logbook(self):
         await self.start({"allowance": 0})
         await self.chat.say("spend 2", sender="boss", name="Boss")

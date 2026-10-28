@@ -89,6 +89,8 @@ models:                     # her own models, preferred in this order (her `own`
 strong:                     # optional: her strongest models (her `strong` tier: `gpt_strong`)
   - {provider: openai, model: gpt-6.1-sol}
 fallback: 2                 # optional: her first model is everyone else's 2nd fallback
+allowance: 3.59             # optional: her day's spending by default, in dollars (else the core's $0.50); core.yml
+                            # `stamina:`, `$stamina` and her card on the Students page come first
 falls_back_to: gpt          # optional, instead: after her own models, this student's whole list
 providers: {...}            # optional: a provider she brings, in the core.yml `providers:` form
 pictures:                   # optional: files in her folder, for the pages (avatar: square; card: 3:4; any kind)

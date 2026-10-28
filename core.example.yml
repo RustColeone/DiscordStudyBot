@@ -70,7 +70,8 @@
 # and changes it (`$stamina total 3`, `$stamina claude 1`, `$stamina budget openai 20`), as do the pages.
 # stamina:
 #   total: 2.00                     # everyone's day together (0: no total)
-#   allowance: 0.50                 # each persona's day (0: no daily limit); `personas: {grok: 1.00}` for one
+#   allowance: 0.50                 # each persona's day (0: no daily limit); `personas: {grok: 1.00}` for one;
+#                                   # unset: her own default (a student's `allowance:`, an agent's), else 0.50
 #   step: 0.50                      # what one approval adds
 #   timezone: Asia/Shanghai         # when the day starts (default: this machine's)
 #   accounts:
@@ -93,6 +94,7 @@
 #     prompt: "You are a careful helper. Answer briefly."
 #     models: [deepseek/deepseek-flash, openai/gpt-6-luna]   # a profile of her name (or `profile: default`)
 #     description: "Helper, a careful assistant"            # optional: one line, for engines that write their own
+#     allowance: 1.00                                       # optional: her day's spending by default (`stamina:`)
 #   assistant:       # the core's own agent
 #     display_name: Assistant
 #     profile: default

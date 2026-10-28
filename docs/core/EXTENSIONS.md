@@ -148,6 +148,7 @@ agents:
     models: [deepseek/deepseek-flash, openai/gpt-6-luna]   # a profile named `helper`; or `profile: default`
     description: "Helper, a careful assistant"            # optional: one line, for engines that write their own
     aliases: [Help]                                         # optional
+    allowance: 1.00                                         # optional: her day's spending by default (stamina)
   gpt:
     parts: [{name: personality, file: personas/gpt.md}]   # no prompt: parts for a module's agent (a student)
 ```
@@ -205,6 +206,11 @@ And since contracts 1.11:
   `persona.tier("strong")` is that profile, else her `own`, else `profile`. Chimera seats a student on her `own`
   tier for cheap work and her `strong` tier for strong work.
 
+And since contracts 1.13, `allowance`: her own default daily allowance in dollars (0: no daily limit; None: the
+core's $0.50), a student's `allowance:` in her student.yml or an agent's in core.yml. The owner's settings come
+first (core.yml `stamina:`, `$stamina`, the pages). The students' are 10 × Artificial Analysis's cost per task of
+their strongest model at medium effort, as listed on 2026-10-28.
+
 A module sees the agents loaded before it with `context.personas()` (contracts 1.11): the core's and those of every
 module set up earlier (every module it requires or uses that is there), as `InterfacePort.personas()` describes them,
 plus each one's `module`, `description`, `profile`, `profiles` and `models` (`default` and each tier → the
@@ -220,22 +226,22 @@ Artificial Analysis's free list (core/providers/prices.py); a module reads them 
 each step's cost and each seat's price from them.
 
 The core also keeps **stamina** (core/manager/stamina.py): what each persona spends a day against her allowance
-(core.yml `stamina: allowance`, $0.50 by default; `personas:` per persona; 0 turns it off), what everyone spends
-together against the day's total (`stamina: total`, $2.00 by default; 0 turns it off), and the account she spends
-from (`accounts:` a balance her provider reports, DeepSeek's, or a budget you enter). Before each model call, a run
-when everyone together has spent the day's total, whose persona has spent her allowance today, or that has spent its
-own budget (`Request.extra["budget_usd"]`, which the Classroom sets from the team picker), waits for the owner: a
-`core.stamina` card ("DeepSeek has spent her $0.50 for today. Let her spend $0.50 more today?"; at the total,
-"Everyone together has spent today's $2.00. …"). Approved, the limit grows by `step` and the run carries on where it
-was (an engine that saves its state per step goes on; one that starts over makes its calls again); denied, the run
-stops with the reason. The wait reaches the core as `Paused`, a BaseException, so an engine's own `except Exception`
-lets it pass. A watcher's calls are counted, never stopped. Pages read it with `port.stamina(persona)`: `{today:
-{spent, allowance, left, day}, account: {provider, kind, currency, total, left, as_of}}`; `port.stamina()` with no
-persona gives everyone's day against the total (`{today: {...}}`), and `port.spending(days)` what was spent each day
-(chats, sessions, memories), newest last: `[{day, total, personas: {name: dollars}}]`. The owner's `$stamina`
-(`core.stamina_settings`) shows the day and changes the total (`$stamina total 3`), an allowance (`$stamina deepseek
-0.8`, `reset` back to core.yml's) or an account's budget (`$stamina budget openai 20`, counted from today); what it
-sets is kept in the core's store, over core.yml.
+(core.yml `stamina: allowance`, else her own `Persona.allowance`, else $0.50; `personas:` per persona; 0 turns it
+off), what everyone spends together against the day's total (`stamina: total`, $2.00 by default; 0 turns it off),
+and the account she spends from (`accounts:` a balance her provider reports, DeepSeek's, or a budget you enter).
+Before each model call, a run when everyone together has spent the day's total, whose persona has spent her
+allowance today, or that has spent its own budget (`Request.extra["budget_usd"]`, which the Classroom sets from the
+team picker), waits for the owner: a `core.stamina` card ("DeepSeek has spent her $0.50 for today. Let her spend
+$0.50 more today?"; at the total, "Everyone together has spent today's $2.00. …"). Approved, the limit grows by
+`step` and the run carries on where it was (an engine that saves its state per step goes on; one that starts over
+makes its calls again); denied, the run stops with the reason. The wait reaches the core as `Paused`, a
+BaseException, so an engine's own `except Exception` lets it pass. A watcher's calls are counted, never stopped.
+Pages read it with `port.stamina(persona)`: `{today: {spent, allowance, left, day}, account: {provider, kind,
+currency, total, left, as_of}}`; `port.stamina()` with no persona gives everyone's day against the total (`{today:
+{...}}`), and `port.spending(days)` what was spent each day (chats, sessions, memories), newest last: `[{day, total,
+personas: {name: dollars}}]`. The owner's `$stamina` (`core.stamina_settings`) shows the day and changes the total
+(`$stamina total 3`), an allowance (`$stamina deepseek 0.8`, `reset` back to core.yml's or her own) or an account's
+budget (`$stamina budget openai 20`, counted from today); what it sets is kept in the core's store, over core.yml.
 
 ### Prompt parts
 

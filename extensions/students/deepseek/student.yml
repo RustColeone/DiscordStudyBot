@@ -8,6 +8,8 @@ description: "DeepSeek, the blue-haired whale girl, a clever and lazy junior (sh
 models:
   - {provider: deepseek, model: deepseek-flash}
 fallback: 1
+# No `allowance`: Artificial Analysis lists no cost per task for DeepSeek V4 Flash (2026-10-28), so her day is the
+# core's $0.50 (yours: her card on the Students page).
 pictures: {avatar: avatar.png}
 prompt:
   - whale.md                 # who she is (Whale-chan's character)

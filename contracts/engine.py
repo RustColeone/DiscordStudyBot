@@ -116,7 +116,10 @@ class Persona:
     Added in 1.11: `description`, one line on who she is, for engines that write their own prompts around her rather
     than placing `prompt` (Chimera's work prompts); `profiles`, her model profiles by tier besides `profile`: `own`
     (her own models only, with nobody else's as a fallback, so the model family answering is hers) and `strong` (her
-    strongest models). An engine asking for a tier she has not named uses `own`, then `profile`."""
+    strongest models). An engine asking for a tier she has not named uses `own`, then `profile`.
+
+    Added in 1.13: `allowance`, her own default daily allowance in dollars (0: no daily limit; None: the core's
+    default). The owner's settings come first: core.yml `stamina:` (`personas`, then `allowance`) and `$stamina`."""
 
     name: str
     display_name: str
@@ -128,6 +131,7 @@ class Persona:
     pictures: Mapping[str, str] = field(default_factory=dict)
     description: str = ""
     profiles: Mapping[str, str] = field(default_factory=dict)
+    allowance: float | None = None
 
     def tier(self, name: str) -> str:
         """The profile for tier `name` (`own`, `strong`): hers, else `own`, else `profile`."""
@@ -160,6 +164,10 @@ class Persona:
                 tier in TIERS and isinstance(profile, str) and profile for tier, profile in self.profiles.items()):
             raise ValueError(f"persona {self.name!r}: profiles maps a tier ({', '.join(TIERS)}) to a profile name")
         object.__setattr__(self, "profiles", dict(self.profiles))
+        if self.allowance is not None:
+            if isinstance(self.allowance, bool) or not isinstance(self.allowance, (int, float)) or self.allowance < 0:
+                raise ValueError(f"persona {self.name!r}: allowance is dollars a day (0 or more)")
+            object.__setattr__(self, "allowance", float(self.allowance))
 
 
 @dataclass(frozen=True)

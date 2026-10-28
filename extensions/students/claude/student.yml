@@ -9,6 +9,9 @@ models:
 strong:                     # her strongest models, for heavy work (Chimera's strong seats)
   - {provider: claude, model: claude-sonnet-5-5}
 fallback: 4
+allowance: 7.81             # her day's spending by default, in dollars (yours: her card on the Students page):
+                            # 10 × Artificial Analysis's cost per task of Claude Sonnet 5.5 (Medium), $0.78 on
+                            # 2026-10-28
 pictures: {avatar: avatar.png}
 prompt:
   - prompt.md

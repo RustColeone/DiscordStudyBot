@@ -1,7 +1,7 @@
 {
- "version": "1.12",
+ "version": "1.13",
  "constants": {
-  "CONTRACTS_VERSION": "1.12",
+  "CONTRACTS_VERSION": "1.13",
   "DIARY_KINDS": [
    "fact",
    "episode",
@@ -1016,7 +1016,7 @@
    ]
   },
   "Persona": {
-   "doc": "Who speaks: data, not behaviour. A persona with her model profile is an agent; any engine can use any of them. `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart). Added in 1.9: `aliases`, other names people call her by (\"Luna, …\" still calls on GPT); `formerly`, persona names she had before, so the core moves what it keeps under them to her name and reads core.yml's old name as hers (modules that keep their own data by persona name do the same); `pictures`, kind → image file (`avatar`, square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`. Added in 1.11: `description`, one line on who she is, for engines that write their own prompts around her rather than placing `prompt` (Chimera's work prompts); `profiles`, her model profiles by tier besides `profile`: `own` (her own models only, with nobody else's as a fallback, so the model family answering is hers) and `strong` (her strongest models). An engine asking for a tier she has not named uses `own`, then `profile`.",
+   "doc": "Who speaks: data, not behaviour. A persona with her model profile is an agent; any engine can use any of them. `parts` are prompt parts of its own (its personality, say), which engines place beside `prompt` (see PromptPart). Added in 1.9: `aliases`, other names people call her by (\"Luna, …\" still calls on GPT); `formerly`, persona names she had before, so the core moves what it keeps under them to her name and reads core.yml's old name as hers (modules that keep their own data by persona name do the same); `pictures`, kind → image file (`avatar`, square; `card`, 3:4; any other kind a page knows), which interfaces show from `InterfacePort.personas`. Added in 1.11: `description`, one line on who she is, for engines that write their own prompts around her rather than placing `prompt` (Chimera's work prompts); `profiles`, her model profiles by tier besides `profile`: `own` (her own models only, with nobody else's as a fallback, so the model family answering is hers) and `strong` (her strongest models). An engine asking for a tier she has not named uses `own`, then `profile`. Added in 1.13: `allowance`, her own default daily allowance in dollars (0: no daily limit; None: the core's default). The owner's settings come first: core.yml `stamina:` (`personas`, then `allowance`) and `$stamina`.",
    "fields": [
     {
      "name": "name",
@@ -1064,6 +1064,11 @@
      "name": "profiles",
      "type": "Mapping",
      "default": "{}"
+    },
+    {
+     "name": "allowance",
+     "type": "float | none",
+     "default": null
     }
    ]
   },

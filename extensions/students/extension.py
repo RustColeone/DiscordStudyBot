@@ -134,7 +134,7 @@ def setup(context) -> Contributions:
     personas = [Persona(data["name"], data["display_name"], data["prompt"], profile=data["name"],
                         aliases=tuple(data.get("aliases") or ()), formerly=tuple(data.get("formerly") or ()),
                         pictures=data["pictures"], description=str(data.get("description") or ""),
-                        profiles=tiers(data)) for data in STUDENTS]
+                        profiles=tiers(data), allowance=data.get("allowance")) for data in STUDENTS]
     # The students' own providers and profiles; this module's config.yml `providers:` (key by key) and `profiles:`
     # override them, and core.yml overrides both.
     providers = {}

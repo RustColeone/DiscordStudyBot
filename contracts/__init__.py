@@ -23,7 +23,8 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 # 1.12: 1.11 plus model prices (Prices, ModelResult.price and .cost, ExtensionContext.prices, InterfacePort.prices) and
 #       stamina (a run that reaches a persona's daily allowance, or its Request.extra `budget_usd`, waits for the
 #       owner; InterfacePort.stamina, InterfacePort.spending).
-CONTRACTS_VERSION = "1.12"
+# 1.13: 1.12 plus a persona's own default daily allowance (Persona.allowance).
+CONTRACTS_VERSION = "1.13"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",

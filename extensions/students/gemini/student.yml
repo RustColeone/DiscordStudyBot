@@ -7,6 +7,9 @@ models:
   - {provider: gemini, model: gemini-3.8-flash}
   - {provider: gemini, model: gemini-3.6-flash}
 fallback: 3
+allowance: 62.59            # her day's spending by default, in dollars (yours: her card on the Students page):
+                            # 10 × Artificial Analysis's cost per task of Gemini 3.8 Flash (Medium), $6.26 on
+                            # 2026-10-28 (it spends many tokens on a task)
 pictures: {avatar: avatar.png}
 prompt:
   - prompt.md

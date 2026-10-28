@@ -12,10 +12,11 @@ reached (contracts 1.12).
                   currency, total, left, as_of}}; with no persona, everyone's day against the total
 
 Settings (core.yml `stamina:`): `total` (dollars a day for everyone together, default 2.00; 0: no total),
-`allowance` (dollars a day for each persona, default 0.50; 0: no daily limit), `personas` ({name: allowance}),
-`step` (what one approval adds; default the allowance, else $0.50), `timezone` (default this machine's), `accounts`
-({provider: {balance: true}} for an account its provider reports (DeepSeek's, OpenRouter's), or {provider: {budget:
-10.0, since: "2026-10-27"}} for a budget you enter, counting down from what is spent since), `balance_every_min` (10).
+`allowance` (dollars a day for each persona; 0: no daily limit) and `personas` ({name: allowance}), both over each
+persona's own default (Persona.allowance: a student's `allowance:`, an agent's), else 0.50, `step` (what one approval
+adds; default the allowance, else $0.50), `timezone` (default this machine's), `accounts` ({provider: {balance:
+true}} for an account its provider reports (DeepSeek's, OpenRouter's), or {provider: {budget: 10.0, since:
+"2026-10-27"}} for a budget you enter, counting down from what is spent since), `balance_every_min` (10).
 `$stamina` shows the day and changes the total, an allowance or a budget (kept in the core's store, over core.yml). A
 watcher's calls (a memory learning) are counted, never stopped.
 """
@@ -65,11 +66,12 @@ class Stamina:
         return dt.datetime.fromtimestamp(self.clock(), self.zone).date().isoformat()
 
     def allowance(self, persona: str) -> float:
-        """Her daily allowance in dollars (0: no daily limit): what `$stamina` set, else core.yml's."""
-        own = dict(self.settings.get("personas") or {})
-        value = self.store.get(f"setting:allowance:{persona}")
-        if value is None:
-            value = own.get(persona, self.store.get("setting:allowance", self.settings.get("allowance", DEFAULT_ALLOWANCE)))
+        """Her daily allowance in dollars (0: no daily limit): what `$stamina` set for her, else core.yml's for her,
+        else for everyone, else her own default (Persona.allowance), else $0.50."""
+        found = self.personas().get(persona)
+        given = (self.store.get(f"setting:allowance:{persona}"), dict(self.settings.get("personas") or {}).get(persona),
+                 self.store.get("setting:allowance"), self.settings.get("allowance"), getattr(found, "allowance", None))
+        value = next((item for item in given if item is not None), DEFAULT_ALLOWANCE)
         try:
             return max(0.0, float(value))
         except (TypeError, ValueError):
@@ -279,7 +281,8 @@ class Stamina:
     # ---- $stamina: the day, and what you change -------------------------------------------------------------------
     def command(self, text: str) -> str:
         """`$stamina` (the day), `$stamina total 3` (everyone's day), `$stamina <persona> 0.8` (her day; `reset`
-        goes back to core.yml's), `$stamina budget <provider> 20` (an account's budget, counted from today)."""
+        goes back to core.yml's, else her own), `$stamina budget <provider> 20` (an account's budget, counted from
+        today)."""
         words = str(text or "").split()
         if not words:
             return self.report()

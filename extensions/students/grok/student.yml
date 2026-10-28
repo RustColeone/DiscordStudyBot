@@ -7,6 +7,8 @@ models:
   - {provider: grok, model: grok-4-fast}
 # No `fallback`: her model needs its own key, so it is no one else's fallback. Without the key, GPT's list answers.
 falls_back_to: gpt
+# No `allowance`: Artificial Analysis lists no cost per task for Grok 4 Fast (2026-10-28), so her day is the core's
+# $0.50 (yours: her card on the Students page).
 providers:                   # a provider she brings (the others are built into the core)
   grok:
     kind: openai_compatible  # xAI speaks the OpenAI API
