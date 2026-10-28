@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="static/style.css">
+  <link rel="icon" type="image/png" href="favicon.ico">
+  <script defer src="static/markdown.js"></script>
+  <script defer src="static/places.js"></script>
+  <script defer src="static/app.js"></script>
+</head>
+<body>
+  <div class="app" id="app">
+    <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
+    <!-- The Classroom: every session a strip, as when choosing a stage; who took part, faintly, on its right. -->
+    <section class="sessions" id="sessions" aria-labelledby="sessions-title" hidden>
+      <header class="sessions-head">
+        <div class="sessions-heading">
+          <h1 id="sessions-title">Classroom</h1>
+          <p>Every session is its own strip. A student can sit in as many as you like, all at once.</p>
+        </div>
+        <button class="add-session" id="add-session" type="button"><span aria-hidden="true">＋</span> New session</button>
+      </header>
+      <div class="sessions-tools">
+        <div class="session-tabs" id="session-tabs" role="group" aria-label="Show"></div>
+        <input class="sessions-search" id="sessions-search" type="search" placeholder="Find a session…"
+               aria-label="Find a session">
+      </div>
+      <ol class="strips" id="strips"></ol>
+      <button class="add-fab" id="add-fab" type="button" aria-label="New session" title="New session">＋</button>
+    </section>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <aside class="sidebar" id="sidebar" aria-label="Tasks">
+      <div class="brand">
+        <span class="brand-mark">🏫</span>
+        <span class="brand-name" id="brand">{{title}}</span>
+        <button class="icon-button only-narrow" id="close-sidebar" type="button" aria-label="Close">✕</button>
+      </div>
+      <nav class="map" id="map" aria-label="Where everyone is" hidden></nav>
+      <button class="new-task" id="new-task" type="button">＋ New session</button>
+      <input class="filter" id="filter" type="search" placeholder="Find a session…" aria-label="Find a session">
+      <nav class="tasks" id="tasks"></nav>
+      <div class="sidebar-foot">
+        <button class="foot-button" id="open-projects" type="button">📁 Projects</button>
+        <button class="foot-button" id="open-team" type="button">👥 Students</button>
+      </div>
+      <div class="me" id="me"></div>
+    </aside>
+
+    <main class="room">
+      <header class="topbar">
+        <button class="icon-button back-button" id="back-to-sessions" type="button" aria-label="All sessions"
+                title="All sessions">‹</button>
+        <button class="icon-button" id="toggle-sidebar" type="button" aria-label="Sessions" title="Sessions">☰</button>
+        <div class="heading">
+          <div class="task-title" id="task-title">New task</div>
+          <div class="task-meta" id="task-meta"></div>
+        </div>
+        <div class="connection" id="connection" aria-live="polite"></div>
+        <button class="icon-button inspector-button" id="toggle-inspector" type="button" aria-label="Changes"
+                aria-pressed="false" title="Changes, steps and plan">🧾</button>
+      </header>
+
+      <section class="timeline" id="timeline" aria-live="polite"></section>
+
+      <div class="typing" id="typing"></div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <div class="composer-options" id="composer-options">
+          <label class="select-label">Project
+            <select id="project-select" aria-label="Project"></select>
+          </label>
+          <div class="workflows" id="workflows" role="radiogroup" aria-label="Workflow"></div>
+          <div class="crew" id="crew"></div>
+        </div>
+        <div class="composer-row">
+          <textarea id="input" rows="1" placeholder="Describe a task, or ask about the code…" aria-label="Message"></textarea>
+          <button class="send" id="send" type="submit" aria-label="Send">➤</button>
+        </div>
+        <div class="composer-hint" id="composer-hint"></div>
+      </form>
+    </main>
+
+    <aside class="inspector" id="inspector" aria-label="Changes, steps and plan">
+      <div class="inspector-head">
+        <div class="tabs" role="tablist">
+          <button class="tab" data-tab="changes" role="tab" type="button">Changes</button>
+          <button class="tab" data-tab="steps" role="tab" type="button">Steps &amp; cost</button>
+          <button class="tab" data-tab="plan" role="tab" type="button">Plan</button>
+        </div>
+        <button class="icon-button" id="close-inspector" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="inspector-body" id="inspector-body"></div>
+      <div class="resizer" id="resize-inspector" role="separator" aria-orientation="vertical"
+           title="Drag to resize · double-click to reset"></div>
+    </aside>
+  </div>
+
+  <div class="dialog" id="projects-dialog" role="dialog" aria-modal="true" aria-labelledby="projects-title" hidden>
+    <div class="dialog-card">
+      <div class="dialog-head"><span id="projects-title">Projects</span>
+        <button class="icon-button" data-close type="button" aria-label="Close">✕</button></div>
+      <div class="dialog-hint">Where the club may work. Each task gets its own copy (a git worktree), so your checkout
+        stays as it is until you land a change.</div>
+      <div class="project-list" id="project-list"></div>
+      <details class="dialog-section" open>
+        <summary>Add a project you already have</summary>
+        <form class="dialog-form" id="add-project">
+          <input name="name" placeholder="name (e.g. server-mgmt)" required pattern="[a-z0-9][a-z0-9_.\-]{0,39}">
+          <input name="path" placeholder="folder (a git repository), e.g. ~/Projects/server-mgmt" required>
+          <input name="test" placeholder="test command (optional; guessed when empty)">
+          <button class="action action-primary" type="submit">Add</button>
+        </form>
+      </details>
+      <details class="dialog-section">
+        <summary>Start a new, empty project</summary>
+        <form class="dialog-form" id="create-project">
+          <input name="name" placeholder="name" required pattern="[a-z0-9][a-z0-9_.\-]{0,39}">
+          <input name="path" placeholder="folder (made for you)">
+          <button class="action action-primary" type="submit">Create</button>
+        </form>
+      </details>
+    </div>
+  </div>
+
+  <div class="dialog" id="team-dialog" role="dialog" aria-modal="true" aria-labelledby="team-title" hidden>
+    <div class="dialog-card">
+      <div class="dialog-head"><span id="team-title">Students</span>
+        <button class="icon-button" data-close type="button" aria-label="Close">✕</button></div>
+      <div class="dialog-hint">Who does what. For each role the first classmate who can answer takes it; a reviewer
+        comes from another model family than the drafter when one is here. Change it under <code>team:</code> and
+        <code>roles:</code> in Chimera's config.yml.</div>
+      <div class="team-list" id="team-list"></div>
+      <div id="team-prices"></div>
+      <div class="roles" id="roles"></div>
+    </div>
+  </div>
+
+  <div class="viewer" id="viewer" hidden><img alt=""></div>
+  <div class="toast" id="toast" hidden></div>
+  <script type="application/json" id="state-data">{{state}}</script>
+</body>
+</html>

@@ -69,40 +69,40 @@
    "check": "all"
   },
   {
-   "approve": "workbench.review"
+   "approve": "chimera.review"
   },
   {
-   "approve": "workbench.land"
+   "approve": "chimera.land"
   }
  ],
  "answers": [
   {
-   "schema": "workbench_route",
+   "schema": "chimera_route",
    "text": "{\"kind\": \"change\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"MAIN.md\", \"content\": \"x\\n\"}}]}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"MAIN.md\", \"actions\": []}",
    "truncated": false
   },
   {
-   "schema": "workbench_review",
+   "schema": "chimera_review",
    "text": "{\"verdict\": \"approve\", \"say\": \"\", \"summary\": \"Fine.\", \"issues\": []}",
    "truncated": false
   },
   {
-   "schema": "workbench_route",
+   "schema": "chimera_route",
    "text": "{\"kind\": \"question\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Because it is the main one.\", \"actions\": []}",
    "truncated": false
   }
@@ -203,11 +203,11 @@
    ],
    [
     "",
-    "Approved <approval>: workbench.review → success."
+    "Approved <approval>: chimera.review → success."
    ],
    [
     "",
-    "Approved <approval>: workbench.land → success."
+    "Approved <approval>: chimera.land → success."
    ],
    [
     "Checky",
@@ -215,9 +215,9 @@
    ]
   ],
   "approvals": [
-   "workbench.review",
-   "workbench.review",
-   "workbench.land"
+   "chimera.review",
+   "chimera.review",
+   "chimera.land"
   ],
   "outcomes": [
    "routed",

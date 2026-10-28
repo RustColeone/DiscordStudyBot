@@ -107,7 +107,7 @@ async def run(club_factory, scenario: dict, adapter) -> tuple[dict, str]:
 
 def _waiting_change(kind, system, messages, turns):
     """A change (MAIN.md); a question about it is answered without touching anything."""
-    from tests.test_workbench import route, turn
+    from tests.test_chimera import route, turn
     if kind == "route":
         return route(kind="question") if "Why" in messages[-1]["content"] else route()
     if kind == "review":
@@ -120,7 +120,7 @@ def _waiting_change(kind, system, messages, turns):
 
 def _broken_repair(kind, system, messages, turns):
     """greet() says hi; the tester finds it; the repair breaks the project's tests, so it is undone."""
-    from tests.test_workbench import criteria, route, turn
+    from tests.test_chimera import criteria, route, turn
     if kind == "route":
         return route(size="small")
     if kind == "requirements":
@@ -137,21 +137,21 @@ def _broken_repair(kind, system, messages, turns):
 
 def scenarios() -> dict:
     """The scripted scenarios the files are recorded from: name → (config, inputs, adapter factory)."""
-    from extensions.workbench.demo import DemoAdapter
-    from tests.test_workbench import GREET, TEAM, VERIFY, Scripted
+    from extensions.chimera.demo import DemoAdapter
+    from tests.test_chimera import GREET, TEAM, VERIFY, Scripted
     sunday = "Meetings on Sunday are listed first instead of last. Fix it and add a test."
     verify = {"verify": {"requirements": True, "probe": True, "repairs": 1}}
     return {
         "a_question_keeps_the_waiting_change": (TEAM, [{"new": "Add MAIN.md."}, {"say": "Why is it called MAIN?"},
-                                                       {"check": "all"}, {"approve": "workbench.review"},
-                                                       {"approve": "workbench.land"}],
+                                                       {"check": "all"}, {"approve": "chimera.review"},
+                                                       {"approve": "chimera.land"}],
                                                 lambda: Scripted(_waiting_change)),
         "a_repair_that_breaks_the_tests_is_undone": (VERIFY, [{"new": GREET, "workflow": "single"}],
                                                      lambda: Scripted(_broken_repair)),
-        "cascade_escalates_and_lands": ({}, [{"new": sunday}, {"check": "all"}, {"approve": "workbench.review"},
-                                             {"approve": "workbench.land"}], DemoAdapter),
-        "second_check_is_enforced": ({}, [{"new": sunday}, {"approve": "workbench.review"}, {"check": "1 2"},
-                                          {"check": "all"}, {"approve": "workbench.review"}], DemoAdapter),
+        "cascade_escalates_and_lands": ({}, [{"new": sunday}, {"check": "all"}, {"approve": "chimera.review"},
+                                             {"approve": "chimera.land"}], DemoAdapter),
+        "second_check_is_enforced": ({}, [{"new": sunday}, {"approve": "chimera.review"}, {"check": "1 2"},
+                                          {"check": "all"}, {"approve": "chimera.review"}], DemoAdapter),
         "verified_with_criteria_and_a_tester": (verify, [{"new": sunday}], DemoAdapter),
         "a_question_is_answered_read_only": ({}, [{"new": "What does next_meeting do with an empty schedule?"}],
                                              DemoAdapter),
@@ -160,7 +160,7 @@ def scenarios() -> dict:
 
 async def record_all() -> None:
     import tempfile
-    from tests.test_workbench import Club
+    from tests.test_chimera import Club
     HERE.mkdir(exist_ok=True)
     for name, (config, inputs, adapter_factory) in scenarios().items():
         with tempfile.TemporaryDirectory() as folder:

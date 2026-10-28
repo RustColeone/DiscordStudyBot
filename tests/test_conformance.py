@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from tests.conformance_kit import HERE, Player, run
-from tests.test_workbench import Club
+from tests.test_chimera import Club
 
 
 class ConformanceTests(unittest.IsolatedAsyncioTestCase):

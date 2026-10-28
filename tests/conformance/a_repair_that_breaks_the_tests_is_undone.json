@@ -71,37 +71,37 @@
  ],
  "answers": [
   {
-   "schema": "workbench_route",
+   "schema": "chimera_route",
    "text": "{\"kind\": \"change\", \"size\": \"small\", \"risk\": \"low\", \"title\": \"A task\", \"reason\": \"scripted\"}",
    "truncated": false
   },
   {
-   "schema": "workbench_requirements",
+   "schema": "chimera_requirements",
    "text": "{\"requirements\": [{\"text\": \"greet() returns 'hello'\", \"kind\": \"behavior\"}, {\"text\": \"The list output stays the same\", \"kind\": \"keep\"}]}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"clubnotes/greet.py\", \"content\": \"def greet():\\n    return 'hi'\\n\"}}]}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"greet() added.\", \"actions\": []}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Probed.\", \"actions\": [], \"findings\": [{\"criterion\": \"R1\", \"problem\": \"greet() says hi\", \"evidence\": \"printed hi\"}]}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"continue\", \"summary\": \"\", \"actions\": [{\"tool\": \"write_file\", \"arguments\": {\"path\": \"clubnotes/schedule.py\", \"content\": \"broken(\\n\"}}]}",
    "truncated": false
   },
   {
-   "schema": "workbench_turn",
+   "schema": "chimera_turn",
    "text": "{\"say\": \"\", \"note\": \"working\", \"plan\": [], \"status\": \"done\", \"summary\": \"Fixed it, I think.\", \"actions\": []}",
    "truncated": false
   }
@@ -208,7 +208,7 @@
    ]
   ],
   "approvals": [
-   "workbench.review"
+   "chimera.review"
   ],
   "outcomes": [
    "routed",

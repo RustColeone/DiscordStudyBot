@@ -15,13 +15,13 @@ from types import SimpleNamespace
 
 from contracts import Address, Request, Sender
 from contracts.models import AdapterResult, ToolCall
-from tests.test_workbench import GREET, TEAM, VERIFY, Club, Scripted, criteria, git, route, turn
+from tests.test_chimera import GREET, TEAM, VERIFY, Club, Scripted, criteria, git, route, turn
 
-from extensions.workbench.board import Board
-from extensions.workbench.demo import DemoAdapter
-from extensions.workbench.workspace import tools
-from extensions.workbench.workspace.projects import make_sample, project_from
-from extensions.workbench.workspace.worktree import LandError, Worktrees
+from extensions.chimera.board import Board
+from extensions.chimera.demo import DemoAdapter
+from extensions.chimera.workspace import tools
+from extensions.chimera.workspace.projects import make_sample, project_from
+from extensions.chimera.workspace.worktree import LandError, Worktrees
 
 APPROVE = {"verdict": "approve", "say": "", "summary": "Fine.", "issues": []}
 REVISE = {"verdict": "revise", "say": "", "summary": "Not yet.", "issues": [
@@ -64,8 +64,8 @@ class Lab(unittest.IsolatedAsyncioTestCase):
     async def start(self, club, text, **extra):
         """Submit the first request of a new task without waiting for it (for runs that block on purpose)."""
         task = f"t-held{time.time_ns() % 1000000}"
-        club.board.create_task(task, f"workbench:{task}", "sample", text[:40], request=text)
-        await club.submit(Request(id=f"first-{task}", address=Address("workbench", task), sender=Sender("creator", "Leo"),
+        club.board.create_task(task, f"classroom:{task}", "sample", text[:40], request=text)
+        await club.submit(Request(id=f"first-{task}", address=Address("classroom", task), sender=Sender("creator", "Leo"),
                                   text=text, received_at=time.time(), display=club.page.display,
                                   extra={"task": task, "project": "sample", **extra}))
         return task
@@ -84,8 +84,8 @@ class FlowRegressions(Lab):
         self.assertEqual(state["status"], "review")
         self.assertEqual(state["data"]["change"]["fingerprint"], fingerprint)
         self.assertIn("still waiting for you", club.said(task)[-1][1])
-        await club.decide(task, "workbench.review")
-        await club.decide(task, "workbench.land")
+        await club.decide(task, "chimera.review")
+        await club.decide(task, "chimera.land")
         self.assertEqual(club.task(task)["status"], "landed")
         self.assertTrue((club.sample / "MAIN.md").is_file())
 
@@ -95,14 +95,14 @@ class FlowRegressions(Lab):
 
         class Held(Scripted):
             async def complete(self, model, messages, schema, schema_name, *rest, **kwargs):
-                if schema_name == "workbench_turn" and not started.is_set():
+                if schema_name == "chimera_turn" and not started.is_set():
                     started.set()
                     await release.wait()
                 return await super().complete(model, messages, schema, schema_name, *rest, **kwargs)
         club = await self.club(Held(main_md), **TEAM)
         task = await self.start(club, "Add MAIN.md.")
         await asyncio.wait_for(started.wait(), 10)
-        await club.submit(Request(id="second", address=Address("workbench", task), sender=Sender("creator", "Leo"),
+        await club.submit(Request(id="second", address=Address("classroom", task), sender=Sender("creator", "Leo"),
                                   text="Why is it called MAIN?", received_at=time.time(), display=club.page.display,
                                   extra={"task": task}))
         release.set()
@@ -111,13 +111,13 @@ class FlowRegressions(Lab):
         state = club.task(task)
         self.assertEqual(state["status"], "review")
         self.assertEqual([item["path"] for item in state["data"]["change"]["files"]], ["MAIN.md"])
-        self.assertEqual(len(club.approvals(task, "workbench.review")), 1)
+        self.assertEqual(len(club.approvals(task, "chimera.review")), 1)
 
     async def test_a_denied_second_check_is_recorded(self):
         # Was: `say` and `once` shared the journal key, so `check_denied` never reached outcomes.jsonl.
         club = await self.club(DemoAdapter())
         task = await club.new("Meetings on Sunday are listed first instead of last. Fix it and add a test.")
-        await club.decide(task, "workbench.review", approve=False)
+        await club.decide(task, "chimera.review", approve=False)
         self.assertEqual(outcomes(club)[-1], "check_denied")
 
     async def test_a_replay_takes_the_same_path_when_a_reviewer_recovers(self):
@@ -140,9 +140,9 @@ class FlowRegressions(Lab):
         fingerprint = club.task(task)["data"]["change"]["fingerprint"]
         self.assertEqual({step["id"]: step["status"] for step in club.board.steps(task)}["r1.review"], "failed")
         healthy["now"] = True
-        await club.decide(task, "workbench.review")
+        await club.decide(task, "chimera.review")
         self.assertEqual(club.task(task)["data"]["change"]["fingerprint"], fingerprint)
-        await club.decide(task, "workbench.land")
+        await club.decide(task, "chimera.land")
         self.assertEqual(club.task(task)["status"], "landed")
 
     async def test_a_named_fixer_who_gets_stuck_is_replaced_once_and_stays_replaced(self):
@@ -152,7 +152,7 @@ class FlowRegressions(Lab):
 
             async def complete(self, model, messages, schema, schema_name, *rest, **kwargs):
                 turns = sum("Results of your actions" in message["content"] for message in messages)
-                if model == "a-small" and schema_name == "workbench_turn" and "Revise it once" in \
+                if model == "a-small" and schema_name == "chimera_turn" and "Revise it once" in \
                         messages[0]["content"] and turns >= 1:
                     Flaky.fails += 1
                     raise TimeoutError("too slow")
@@ -173,7 +173,7 @@ class FlowRegressions(Lab):
         stuck = [text for _, text in club.said(task) if "stuck" in text]
         self.assertEqual(len(stuck), 1)
         finished = club.task(task)["data"]["finished_by"]
-        await club.decide(task, "workbench.review")
+        await club.decide(task, "chimera.review")
         self.assertEqual(club.task(task)["data"]["finished_by"], finished)
         self.assertEqual(Flaky.fails, 1)
 
@@ -183,7 +183,7 @@ class FlowRegressions(Lab):
 
         class Hangs(Scripted):
             async def complete(self, model, messages, schema, schema_name, *rest, **kwargs):
-                if schema_name == "workbench_turn" and not started.is_set():
+                if schema_name == "chimera_turn" and not started.is_set():
                     started.set()
                     await asyncio.sleep(3600)
                 return await super().complete(model, messages, schema, schema_name, *rest, **kwargs)
@@ -205,7 +205,7 @@ class FlowRegressions(Lab):
 
         class Hangs(Scripted):
             async def complete(self, model, messages, schema, schema_name, *rest, **kwargs):
-                if schema_name == "workbench_turn":
+                if schema_name == "chimera_turn":
                     started.set()
                     await asyncio.sleep(3600)
                 return await super().complete(model, messages, schema, schema_name, *rest, **kwargs)
@@ -230,7 +230,7 @@ class FlowRegressions(Lab):
         await club.say(task, "Why is it called MAIN?")
         checks = lambda: {step["id"]: step["status"] for step in club.board.steps(task) if step["kind"] == "approval"}
         self.assertEqual(checks(), {"r1.check": "skipped", "r2.check": "running"})
-        await club.decide(task, "workbench.review")
+        await club.decide(task, "chimera.review")
         self.assertEqual(checks(), {"r1.check": "skipped", "r2.check": "done", "r2.land": "running"})
 
     async def test_a_turn_without_the_actions_field_is_a_turn_not_an_unreadable_answer(self):
@@ -294,7 +294,7 @@ class FlowRegressions(Lab):
         class StuckSecondTurn(Scripted):
             async def complete(self, model, messages, schema, schema_name, *rest, **kwargs):
                 turns = sum("Results of your actions" in message["content"] for message in messages)
-                if model == "a-small" and schema_name == "workbench_turn" and turns >= 1:
+                if model == "a-small" and schema_name == "chimera_turn" and turns >= 1:
                     return AdapterResult("not json", 10, 10)
                 return await super().complete(model, messages, schema, schema_name, *rest, **kwargs)
         club = await self.club(StuckSecondTurn(main_md), **{**TEAM, "turn_effort": "max", "team": {
@@ -404,7 +404,7 @@ class FlowRegressions(Lab):
         club = await self.club(Scripted(answer), **{**TEAM, "command_filesystem": "worktree",
                                                      "command_network": False})
         task = await club.new("Add MAIN.md.", workflow="single", crew=["drafty"])
-        await club.decide(task, "workbench.run")  # (`ls /home` asks first: approved, it runs confined all the same)
+        await club.decide(task, "chimera.run")  # (`ls /home` asks first: approved, it runs confined all the same)
         self.assertEqual(club.task(task)["status"], "review")
         ran = [action for step in club.board.steps(task) for action in step["data"].get("actions") or ()
                if action["tool"] == "run"][0]
@@ -430,7 +430,7 @@ class FlowRegressions(Lab):
 
     async def test_a_repair_that_breaks_the_tests_puts_back_the_tested_change(self):
         # Was: a failed repair turned a passing change with one finding into a failed task.
-        original = (Path(__file__).resolve().parents[1] / "extensions/workbench/sample/clubnotes/schedule.py").read_text()
+        original = (Path(__file__).resolve().parents[1] / "extensions/chimera/sample/clubnotes/schedule.py").read_text()
 
         def answer(kind, system, messages, turns):
             if kind == "route":
@@ -481,7 +481,7 @@ class FlowRegressions(Lab):
         club = await self.club(Scripted(answer), **VERIFY)
         task = await club.new(GREET, workflow="single")
         before = club.task(task)["data"]["verification"]["probes"]
-        await club.decide(task, "workbench.review")
+        await club.decide(task, "chimera.review")
         self.assertEqual(club.task(task)["data"]["verification"]["probes"], before)
 
 
@@ -489,9 +489,9 @@ class GateRegressions(Lab):
     async def test_review_land_and_discard_follow_the_task_status(self):
         # Was: `review` passed for a failed or landed task with no checklist; discard ran while a model worked.
         club = await self.club(DemoAdapter())
-        w = club.page.workbench
-        club.board.create_task("t-gate01", "workbench:t-gate01", "sample", "Gate", request="x")
-        context = SimpleNamespace(address=Address("workbench", "t-gate01"))
+        w = club.page.chimera
+        club.board.create_task("t-gate01", "classroom:t-gate01", "sample", "Gate", request="x")
+        context = SimpleNamespace(address=Address("classroom", "t-gate01"))
         for status in ("failed", "landed", "answered", "working"):
             club.board.update_task("t-gate01", status=status, data={"change": {"fingerprint": "f1"}})
             result = await w.review({"task": "t-gate01", "fingerprint": "f1"}, context)
@@ -507,28 +507,28 @@ class GateRegressions(Lab):
         club = await self.club(DemoAdapter())
         task = await club.new("Meetings on Sunday are listed first instead of last. Fix it and add a test.")
         with self.assertRaisesRegex(ValueError, "older version"):  # (the module's own ToolError, loaded by the core)
-            club.page.workbench.tick(club.task(task), ["all"], True, fingerprint="not-this-one")
-        invite = await club.page.workbench.invite({"brief": "   "}, SimpleNamespace(address=Address("webui", "c")))
+            club.page.chimera.tick(club.task(task), ["all"], True, fingerprint="not-this-one")
+        invite = await club.page.chimera.invite({"brief": "   "}, SimpleNamespace(address=Address("webui", "c")))
         self.assertEqual(invite.error_code, "no_brief")
 
     async def test_an_approval_decided_elsewhere_is_not_offered_and_a_report_counts_once_delivered(self):
         # Was: a typed `$approve` never closed its card (the page kept offering it), and `reported` was written when
         # the report was submitted, not when it arrived.
-        from extensions.workbench import views
+        from extensions.chimera import views
         club = await self.club(DemoAdapter())
         page, board = club.page, club.board
         task = await club.new("Meetings on Sunday are listed first instead of last. Fix it and add a test.")
         await club.say(task, f"$check {task} all")
-        review = club.approvals(task, "workbench.review")[-1]["data"]["approval_id"]
+        review = club.approvals(task, "chimera.review")[-1]["data"]["approval_id"]
         await page._event(None, {"type": "send", "task": task, "text": f"$approve {review}", "id": "typed"})
         await asyncio.sleep(0.2)
         await club.idle()
-        land = club.approvals(task, "workbench.land")[-1]["data"]["approval_id"]
+        land = club.approvals(task, "chimera.land")[-1]["data"]["approval_id"]
         await page._event(None, {"type": "send", "task": task, "text": f"$deny {land}", "id": "deny", "action": "Deny"})
         await asyncio.sleep(0.2)
         await club.idle()
         self.assertIsNone(page._task_view(club.task(task))["approval"])  # neither the typed one nor the denied one
-        board.create_task("t-rep001", "workbench:t-rep001", "sample", "Q", request="q",
+        board.create_task("t-rep001", "classroom:t-rep001", "sample", "Q", request="q",
                           origin_address="webui:classroom", answer="42")
         board.update_task("t-rep001", status="answered")
         await page._event(None, {"type": "report", "task": "t-rep001"})
@@ -638,7 +638,7 @@ class WorkspaceRegressions(unittest.IsolatedAsyncioTestCase):
     def test_harmless_lines_from_the_cost_experiment_run_without_asking(self):
         # Was: `2>/dev/null` counted as a path outside the copy, and every heredoc asked, so 4 of 27 runs stopped
         # for a person. A heredoc with a quoted marker is only text for the program; an unquoted one still asks.
-        from extensions.workbench.workspace.commands import allowed
+        from extensions.chimera.workspace.commands import allowed
         self.assertTrue(allowed("python3 -m unittest discover -q 2>&1 | tail -3; git -C . diff --stat 2>/dev/null"))
         self.assertTrue(allowed("python3 - <<'PY'\nimport sys\nprint(sys.argv)\nPY"))
         self.assertTrue(allowed("cat <<'EOF' > notes.txt\n$(whoami)\nEOF"))  # (nothing is expanded in it)
@@ -648,7 +648,7 @@ class WorkspaceRegressions(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(allowed("ls 2>/etc/passwd"))
 
     def test_probes_compare_what_the_code_does_not_where_or_how_fast(self):
-        from extensions.workbench.capabilities import comparable
+        from extensions.chimera.capabilities import comparable
         new, old = Path("/w/t-1"), Path("/w/t-1.base")
         self.assertEqual(comparable("ran /w/t-1/a.py in 0.31s at 0x7f00aa11bb", new),
                          comparable("ran /w/t-1.base/a.py in 0.07s at 0x7f00cc22dd", old))
@@ -661,7 +661,7 @@ class IsolatedCommands(unittest.IsolatedAsyncioTestCase):
     the system, its worktree and its project."""
 
     def setUp(self):
-        from extensions.workbench.workspace import system
+        from extensions.chimera.workspace import system
         self.system = system
 
     async def test_commands_can_run_without_network(self):
@@ -704,7 +704,7 @@ class IsolatedCommands(unittest.IsolatedAsyncioTestCase):
 
 class CliRegressions(unittest.TestCase):
     def session(self, task):
-        from extensions.workbench import cli
+        from extensions.chimera import cli
         lab = SimpleNamespace(state={"team": [], "tasks": [task], "projects": []}, events=queue.Queue(), url="http://x",
                               sent=[])
         lab.send = lab.sent.append
@@ -715,7 +715,7 @@ class CliRegressions(unittest.TestCase):
 
     def test_an_approval_left_for_later_is_asked_again_and_never_hangs(self):
         # Was: Enter put the approval in `asked`, so /resume on a working task looped forever without asking.
-        approval = {"id": "abc123", "capability": "workbench.run", "summary": "run pytest", "command": "pytest"}
+        approval = {"id": "abc123", "capability": "chimera.run", "summary": "run pytest", "command": "pytest"}
         session, _ = self.session({"id": "t-1", "status": "working", "data": {}, "approval": approval, "own": True})
         asked = []
         session.prompt = lambda text: asked.append(text) or ""
@@ -728,7 +728,7 @@ class CliRegressions(unittest.TestCase):
 
     def test_a_typo_at_the_final_approval_is_not_a_denial(self):
         # Was: anything but y/yes denied the landing (`a`, `approve`, `ok` included).
-        approval = {"id": "abc123", "capability": "workbench.land", "summary": "land it"}
+        approval = {"id": "abc123", "capability": "chimera.land", "summary": "land it"}
         session, lab = self.session({"id": "t-1", "status": "approved", "data": {}, "approval": approval, "own": True})
         answers = iter(["yse", "approve"])
         session.prompt = lambda text: next(answers)
@@ -736,7 +736,7 @@ class CliRegressions(unittest.TestCase):
         self.assertEqual(lab.sent[-1]["text"], "$approve abc123")
 
     def test_a_lab_that_closes_the_connection_is_an_error_the_session_handles(self):
-        from extensions.workbench import cli
+        from extensions.chimera import cli
         session, lab = self.session({"id": "t-1", "status": "working", "data": {}, "own": True})
         lab.events.put({"type": "closed"})
         with self.assertRaises(cli.LabClosed):
@@ -750,16 +750,17 @@ class LauncherRegressions(unittest.TestCase):
 
     def test_only_the_keys_you_name_reach_the_core(self):
         # Was: every key exported in the shell went to the core with the named ones.
-        from extensions.workbench.__main__ import handed_environment
+        from extensions.chimera.__main__ import handed_environment
         environment = handed_environment({"DEEPSEEK_API_KEY": "named"}, {"PATH": "/bin", "OPENAI_API_KEY": "shell",
                                                                          "DISCORD_TOKEN": "t", "HOME": "/h"})
         self.assertEqual(environment, {"PATH": "/bin", "HOME": "/h", "DEEPSEEK_API_KEY": "named"})
 
     def test_a_core_file_keeps_the_lab_its_paths_and_its_dates(self):
-        # Was: a --core module list dropped the workbench, its paths were read from <data>/core/, a partial
-        # `assignments` left `*` on the unloaded assistant, and a YAML date crashed json.dumps.
+        # Was: a --core module list dropped the Classroom (the workbench then), its paths were read from <data>/core/,
+        # and a YAML date crashed json.dumps. (A partial `assignments` once left `*` on an engine not loaded: the core's
+        # own defaults are set aside without their engine now, so the launcher fills in nothing.)
         import yaml
-        from extensions.workbench.__main__ import HERE, core_config
+        from extensions.chimera.__main__ import HERE, core_config
         with tempfile.TemporaryDirectory() as folder:
             extra = Path(folder) / "extra.yml"
             extra.write_text("modules: {paths: [mine]}\nassignments: {'webui:*': {engine: room}}\n"
@@ -767,8 +768,9 @@ class LauncherRegressions(unittest.TestCase):
             config, _ = core_config(self.arguments(data=folder, core=[str(extra)]))
         self.assertIn(str(HERE), config["modules"]["paths"])
         self.assertIn(str(Path(folder).resolve() / "mine"), config["modules"]["paths"])
-        self.assertEqual(config["assignments"]["*"]["engine"], "workbench")
+        self.assertNotIn("*", config["assignments"])
         self.assertIn("webui:*", config["assignments"])
+        self.assertIn(str(HERE.parent / "students"), config["modules"]["paths"])  # the seats
         dumped = yaml.safe_load(yaml.safe_dump(config))
         self.assertEqual(str(dumped["extension_config"]["room"]["models_since"]), "2026-06-01")
 
@@ -805,7 +807,7 @@ class CoreRegressions(unittest.TestCase):
         # Found by measuring: both cascade send-backs in the cost experiment were correct drafts (all hidden tests
         # passed) sent back over a minor requirement or scope note. With minor_needs_failing_input, such a note blocks
         # only when it names an input that fails; blockers and major issues always block.
-        from extensions.workbench.kernel.review import Verdict
+        from extensions.chimera.kernel.review import Verdict
         verdict = Verdict(False, "", [
             {"severity": "minor", "category": "scope", "problem": "an unasked capacity check"},
             {"severity": "minor", "category": "correctness", "problem": "off by one", "failing_input": "f([1])"},
@@ -827,7 +829,7 @@ class CoreRegressions(unittest.TestCase):
         # Was: from turn 10, one more old exchange was shortened every turn, which changed the start of the
         # conversation each time: in the polyglot rounds a quarter of turn 10's input and a seventh of turn 11's came
         # from the cache, against over 90% on turns 3 to 9. Now old exchanges are shortened 8 at a time.
-        from extensions.workbench.kernel import agent
+        from extensions.chimera.kernel import agent
         calls = lambda n: [{"id": f"c{n}", "name": "read_file", "arguments": {"path": f"f{n}.py"}}]
         protocols = {
             agent._messages: lambda n: agent.Exchange({"note": f"step {n}", "status": "continue",
@@ -848,8 +850,8 @@ class CoreRegressions(unittest.TestCase):
         # missed the prompt cache: 17% cached and ~32k fresh tokens a call in the cache-layout pilot.
         import asyncio
         from contracts import ToolResult
-        from extensions.workbench.kernel import agent
-        from extensions.workbench.team import Seat
+        from extensions.chimera.kernel import agent
+        from extensions.chimera.team import Seat
         for native in (True, False):
             seat = Seat("flash", "Flash", "deepseek", "Flash", ({"provider": "p", "model": "m"},), (),
                         tool_calls=native)
@@ -897,7 +899,7 @@ class CoreRegressions(unittest.TestCase):
         # Was: the last turn's `actions` was an array without `items`; strict tool mode drops `maxItems`, and DeepSeek
         # refused the bare array (400), so Sol took over the tester's last turn in every run that reached it.
         from core.providers.adapters import strict_tool_schema
-        from extensions.workbench.kernel import prompts
+        from extensions.chimera.kernel import prompts
 
         def bad(schema, path="schema"):
             if not isinstance(schema, dict):
@@ -918,7 +920,7 @@ class CoreRegressions(unittest.TestCase):
             self.assertEqual(bad(strict_tool_schema(schema), name), [])
 
     def test_place_keys_work_for_names_in_any_script(self):
-        from extensions.workbench.places import key
+        from extensions.chimera.places import key
         self.assertEqual((key("Flash-chan"), key("露娜"), key("")), ("flashchan", "露娜", ""))
 
 

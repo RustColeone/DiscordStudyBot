@@ -18,7 +18,7 @@ class SpecTests(unittest.TestCase):
     def test_the_lab_modules_description_matches_the_code(self):
         result = subprocess.run([sys.executable, str(ROOT / "tools" / "describe_module.py"), "--check"],
                                 capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, "docs/spec/workbench.json is out of date: run "
+        self.assertEqual(result.returncode, 0, "docs/spec/chimera.json is out of date: run "
                                                "`venv/bin/python tools/describe_module.py`")
 
     def test_the_contracts_description_covers_every_export(self):
