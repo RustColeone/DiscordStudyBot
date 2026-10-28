@@ -35,7 +35,7 @@ from ..kernel.flow import new_id
 from ..workflows import catalog
 from ..workspace.tools import ToolError, inside
 
-STATIC = re.compile(r"^[a-z0-9_-]+\.(js|css|png|svg)$")
+STATIC = re.compile(r"^[a-z0-9_-]+\.(js|css|png|svg|woff2)$")
 AVATAR = re.compile(r"^[a-z0-9_-]{1,40}$")
 PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 TASK_ID = re.compile(r"^t-[a-z0-9]{4,40}$")
@@ -222,6 +222,8 @@ class ClassroomUI(Interface):
         path = self.static / name
         if not STATIC.match(name) or not path.is_file():
             raise web.HTTPNotFound()
+        if name.endswith(".woff2"):  # the page's font (Nunito, OFL): it never changes
+            return web.FileResponse(path, headers={"Content-Type": "font/woff2", "Cache-Control": "max-age=604800"})
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
     async def _favicon(self, request):

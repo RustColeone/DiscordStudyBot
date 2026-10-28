@@ -296,6 +296,51 @@ class WebUITests(unittest.IsolatedAsyncioTestCase):
         await ws.close()
         await ws2.close()
 
+    # ---- the messenger page: her name on a direct chat's answers, each chat's last line, who each student is ----
+    async def test_a_direct_chats_answers_are_hers_and_the_chat_list_shows_the_last_line(self):
+        web = await self.start()
+        web.store.ensure("dm-whale", "DeepSeek", ["deepseek"])
+        dm = Address("webui", "dm-whale")
+        await web.deliver(Reply(dm, "text", text="Mm-hm.  It's in the Classroom,\nwaiting for your review~",
+                                data={"provider": "fake", "model": "deepseek"}))
+        await web.deliver(Reply(dm, "text", text="Commands: $help, $memory"))  # a command's output: no model wrote it
+        await web.deliver(Reply(dm, "notice", text="Waiting for approval…", code="waiting_approval"))
+        await web.deliver(Reply(dm, "text", text="(my notes)", label="work note", speaker="DeepSeek",
+                                data={"model": "deepseek"}))
+        said = [(item["kind"], item["speaker"]) for item in web.store.messages("dm-whale")]
+        self.assertEqual(said, [("text", "DeepSeek"), ("text", ""), ("notice", ""), ("text", "DeepSeek")])
+        await web.deliver(Reply(Address("webui", "classroom"), "text", text="hi", data={"model": "gpt"}))
+        self.assertEqual(web.store.messages("classroom")[-1]["speaker"], "")  # a group's answers name themselves
+        chats = {chat["id"]: chat for chat in web.store.conversations()}
+        # the newest thing anyone said (not a notice, not a work note), on one line
+        self.assertEqual(chats["dm-whale"]["last"]["text"], "Commands: $help, $memory")
+        web.store.add("dm-whale", {"kind": "user", "text": "Thanks.   Take a nap", "speaker": "", "sender": "Leo"})
+        last = next(chat for chat in web.store.conversations() if chat["id"] == "dm-whale")["last"]
+        self.assertEqual((last["kind"], last["text"]), ("user", "Thanks. Take a nap"))
+
+    async def test_the_page_says_who_each_student_is_and_whether_her_own_key_is_set(self):
+        await self.start()
+        ws, state = await self.socket()
+        people = {item["name"]: item for item in state["people"]}
+        self.assertEqual(list(people), list(STUDENTS))
+        self.assertIn("dragon girl", people["gpt"]["description"])
+        # This core's profiles give each student one fake model and leave her tiers empty: her own tier then shows her
+        # first model, and with nothing callable in it the page says her own key is missing (she answers on a
+        # classmate's model, her fallback).
+        self.assertEqual((people["gpt"]["own"], people["gpt"]["strong"]), (["fake/gpt"], []))
+        self.assertFalse(people["gpt"]["own_ready"])
+        cafe = await (await self.http.get(f"{self.base}/api/cafe")).json()
+        gpt = next(item for item in cafe["students"] if item["name"] == "gpt")
+        self.assertEqual((gpt["own_ready"], gpt["chats"]), (False, 1))  # the club: a chat naming nobody has everyone
+        await ws.close()
+
+    async def test_the_font_comes_from_the_page_itself_even_before_signing_in(self):
+        await self.start({"passphrase": "open sesame"})
+        async with self.http.get(f"{self.base}/static/nunito-latin.woff2") as response:
+            self.assertEqual((response.status, response.headers["Content-Type"]), (200, "font/woff2"))
+        async with self.http.get(f"{self.base}/static/app.js") as response:
+            self.assertEqual(response.status, 401)  # everything else waits for the passphrase
+
     # ---- files ----------------------------------------------------------------------------------
     async def test_files_go_both_ways_and_only_pictures_and_media_open_in_the_page(self):
         await self.start()

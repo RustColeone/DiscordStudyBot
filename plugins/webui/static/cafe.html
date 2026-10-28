@@ -13,7 +13,11 @@
   <script defer src="static/cafe.js"></script>
 </head>
 <body class="cafe-body">
-  <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
+  <header class="site-header">
+    <span class="site-brand"><span class="site-name">ChimeraArchive</span><span class="site-page"></span></span>
+    <nav class="places-nav" id="places-nav" aria-label="Places" hidden></nav>
+    <div class="stamina" id="stamina" role="group" aria-label="Stamina" hidden></div>
+  </header>
   <main class="cafe">
     <section class="cafe-scene" id="scene" aria-label="The cafe">
       <div class="cafe-room" id="room" aria-hidden="true"></div>
@@ -25,7 +29,7 @@
         <h2 id="deco-title">Decorate: pick a room</h2>
         <div class="room-list" id="room-list" role="group" aria-label="Rooms"></div>
         <p class="cafe-hint">Rooms are preset pictures for now: drop more into the web UI's <code>rooms/</code> folder.
-          Tap a student to chat with her in MomoChat.</p>
+          Tap a student to go straight to her chat in MomoChat.</p>
       </section>
       <section class="cafe-panel" aria-labelledby="here-title">
         <h2 id="here-title">Everyone is here, wherever else they are</h2>

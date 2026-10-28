@@ -9,8 +9,16 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  // Each student's colour (her hair, as on MomoChat's page); anyone else gets one from her name.
-  const COLOURS = { gpt: "#7d8898", gemini: "#7a63de", claude: "#c4694a", deepseek: "#3570d2", grok: "#a8801c" };
+  // Each student's colour (her plate, as on MomoChat's page and the Students page); anyone else gets one from her name.
+  const COLOURS = { gpt: "#5a5296", gemini: "#683fa0", claude: "#9a4916", deepseek: "#2f4f9e", grok: "#6f5900" };
+  // What floats over her head: her mood (mneme-llm's face), or zzz at night.
+  const MARKS = { great: "♪", good: "♪", ok: "~", worry: "?", sad: "…" };
+  const markOf = (student) => {
+    const hour = new Date().getHours();
+    if (hour >= 1 && hour < 7) return "zzz";
+    return MARKS[student.mood?.face] || "";
+  };
+  const shown = (student) => student.alias || student.display;
   const keyOf = (name) => String(name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 40);
   const colourOf = (name) => {
     const key = keyOf(name);
@@ -146,12 +154,19 @@
     state.walkers = state.students.map((student, index) => {
       const node = make("button", `chibi${student.ready ? "" : " is-away"}`);
       node.type = "button";
-      node.setAttribute("aria-label", student.ready ? `Chat with ${student.display}` : `${student.display} (needs a model key)`);
+      const name = shown(student);
+      node.setAttribute("aria-label", student.ready ? `Chat with ${name}${student.alias ? ` (${student.display})` : ""}`
+                                                   : `${name} (needs a model key)`);
       const figure = make("span", "chibi-figure");
+      figure.style.animationDuration = `${0.7 + ((index * 0.37) % 0.7)}s`;  // each her own pace
       const torso = make("span", "chibi-torso");
       torso.style.background = colourOf(student.name);
-      figure.append(face(student, "chibi-face"), torso);
-      node.append(figure, make("span", "chibi-shadow"), make("span", "chibi-name", student.display));
+      const mark = markOf(student);
+      const above = make("span", "chibi-mark", mark);
+      above.style.color = colourOf(student.name);
+      above.hidden = !mark;
+      figure.append(above, face(student, "chibi-face"), torso);
+      node.append(figure, make("span", "chibi-shadow"), make("span", "chibi-name", name));
       node.onclick = () => chat(student);
       const walker = { node, x: 0, y: 0, timer: 0 };
       place(walker, 10 + (80 * (index + 0.5)) / count, 6 + ((index * 37) % 22));  // spread out to begin with
@@ -161,8 +176,12 @@
     state.walkers.forEach((walker, index) => { walker.timer = setTimeout(() => wander(walker), 600 + index * 700); });
     $("#people").replaceChildren(...state.students.map((student) => {
       const row = make("li");
-      row.append(face(student, "person-face"), make("strong", "", student.display),
-                 make("span", "person-status", student.ready ? "here, in MomoChat and the Classroom" : "needs a model key"));
+      const elsewhere = [`MomoChat (${student.chats} chat${student.chats === 1 ? "" : "s"})`];
+      if (state.classroom) elsewhere.push(state.classroom.has(student.name) ? "the Classroom (working now)" : "the Classroom");
+      const status = !student.ready ? "needs a model key"
+        : `also in ${elsewhere.join(" and ")}` +
+          (student.own_ready === false ? " · answers on a classmate's model until you add her key" : "");
+      row.append(face(student, "person-face"), make("strong", "", shown(student)), make("span", "person-status", status));
       return row;
     }));
   }
@@ -180,6 +199,9 @@
     state.avatars = new Set(data.avatars || []);
     state.rooms = data.rooms || [];
     window.renderPlaces?.($("#places-nav"), data.places || { here: data.here, others: [] }, "Cafe");
+    // the Classroom next door, when there is one: who is at work in it now
+    const classroom = (data.places?.others || []).find((place) => place.place?.name === "Classroom");
+    state.classroom = classroom ? new Set((classroom.people || []).map((person) => person.key)) : null;
     renderRoom();
     renderStudents();
   }

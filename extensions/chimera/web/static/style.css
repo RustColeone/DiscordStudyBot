@@ -1,4 +1,12 @@
 /* The Classroom page: the web UI's look (plugins/webui/static/style.css), laid out for tasks and change sets. */
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 200 1000; font-display: swap;
+             src: url("nunito-latin.woff2") format("woff2");
+             unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+                            U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Nunito"; font-style: normal; font-weight: 200 1000; font-display: swap;
+             src: url("nunito-latin-ext.woff2") format("woff2");
+             unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F,
+                            U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 :root {
   --bg: #f8f1e7;
   --paper: #fffbf5;
@@ -26,7 +34,8 @@
   --shadow: 0 6px 20px rgba(110, 78, 45, 0.10);
   --radius: 18px;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
-  font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Quicksand", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: "Nunito", ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", "PingFang SC",
+               "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   color: var(--ink);
   background: var(--bg);
 }
@@ -445,20 +454,34 @@ button.place:hover { border-color: color-mix(in srgb, var(--accent) 60%, var(--l
 .excerpt-line { padding: 3px 0 3px 10px; border-left: 2px solid var(--line); margin: 3px 0; overflow-wrap: anywhere; }
 .card.back { border-top: 4px solid var(--accent); }
 
-/* the places bar (places.js, as in the web UI): every place's views across the top, this page's marked */
-.places-nav { grid-column: 1 / -1; grid-row: 1; display: flex; justify-content: center; gap: 4px; padding: 5px 10px;
-              background: var(--paper); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
-.places-nav[hidden] { display: none; }
-.places-tab { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 76px; padding: 5px 10px;
-              border-radius: 14px; color: var(--ink); text-decoration: none; font-size: .78rem; font-weight: 800; }
+/* the header every page shares (as in the web UI): the project, the places bar (places.js), the stamina */
+.site-header { grid-column: 1 / -1; grid-row: 1; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+               gap: 12px; padding: 8px 24px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.site-header > .stamina { justify-self: end; }
+.site-brand { font-weight: 900; font-size: 20px; letter-spacing: -0.01em; }
+.site-page { display: none; }
+.places-nav { display: flex; flex-wrap: wrap; gap: 4px; }
+.places-tab { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; padding: 6px 10px;
+              border-radius: 14px; color: #4f3f33; text-decoration: none; font-size: 13px; font-weight: 800; }
 .places-tab:hover { background: var(--panel); }
-.places-tab.is-current { background: var(--panel); box-shadow: inset 0 -3px 0 var(--accent); }
-.places-tab:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
+.places-tab.is-current { background: #fbe2c2; color: #5a3510; font-weight: 900; }
+.places-tab:focus-visible { outline: 3px solid #3570d2; outline-offset: 2px; }
 .places-tab.is-off { opacity: .45; filter: grayscale(1); }  /* a place whose engine is not loaded: nobody there */
-.places-icon { font-size: 1.15rem; line-height: 1.25; }
+.places-icon { display: block; line-height: 0; font-size: 20px; }
+.stamina { display: flex; align-items: center; gap: 12px; padding: 5px 14px 5px 10px; border-radius: 999px; background: var(--panel); }
+@media (prefers-color-scheme: dark) {
+  .places-tab { color: #e3d4c4; }
+  .places-tab.is-current { background: #4a3622; color: #ffd9a8; }
+}
 @media (max-width: 760px) {
-  .places-nav { justify-content: space-between; padding: 4px 6px; }
-  .places-tab { flex: 1; min-width: 0; padding: 4px 2px; font-size: .68rem; }
+  .site-header { grid-template-columns: 1fr auto; padding: 10px 16px; }
+  .site-name { display: none; }
+  .site-page { display: inline; font-size: 17px; }
+  .places-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; display: grid; grid-auto-flow: column;
+                grid-auto-columns: minmax(0, 1fr); gap: 0; padding: 6px 6px max(10px, env(safe-area-inset-bottom, 0px));
+                background: var(--paper); border-top: 1px solid var(--line); }
+  .places-tab { min-width: 0; padding: 6px 0; font-size: 11px; border-radius: 12px; }
+  body.has-places:not(.keyboard-open) .app { padding-bottom: 68px; }
 }
 body.keyboard-open .places-nav { display: none; }
 

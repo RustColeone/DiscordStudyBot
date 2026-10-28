@@ -7,14 +7,14 @@
     if (text != null) node.textContent = text;
     return node;
   };
-  // accent: rings, the bubble's strip and glows; ink: names and text; border/bubble (optional): override the
-  // strip colour and the bubble's fill.
+  // accent: rings and glows; ink: names and text; plate: the band under her portrait (her card, the Students
+  // page); border/bubble (optional): override the strip colour and the bubble's fill.
   const PEOPLE = {
-    gpt: { accent: "#ffffff", ink: "#7d8898" },
-    gemini: { accent: "#9a86f2", ink: "#7a63de" },
-    claude: { accent: "#e5896a", ink: "#c4694a" },
-    deepseek: { accent: "#4d8ff0", ink: "#3570d2" },
-    grok: { accent: "#e2b545", ink: "#a8801c" },
+    gpt: { accent: "#ffffff", ink: "#5a5296", plate: "#5a5296" },
+    gemini: { accent: "#9a86f2", ink: "#683fa0", plate: "#683fa0" },
+    claude: { accent: "#e5896a", ink: "#9a4916", plate: "#9a4916" },
+    deepseek: { accent: "#4d8ff0", ink: "#2f4f9e", plate: "#2f4f9e" },
+    grok: { accent: "#e2b545", ink: "#6f5900", plate: "#6f5900" },
     you: { accent: "#f0a04b", ink: "#b8741f" },
     bot: { accent: "#b39c8a", ink: "#8c7a6b" },
   };
@@ -33,6 +33,7 @@
     // The model menu: `$model`'s overview for the current chat (each classmate's model and what the providers
     // offer), the model that last answered for each classmate here, and whether `$model` is allowed at all.
     models: null, answered: new Map(), modelsAllowed: true, modelMenuFor: null,
+    people: [], search: "",
   };
   // The places bar from the places the page came with, until the server says more.
   try {
@@ -53,13 +54,14 @@
     if (PEOPLE[key]) return PEOPLE[key];
     let hash = 0;
     for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) % 360;
-    return { accent: `hsl(${hash} 55% 62%)`, ink: `hsl(${hash} 45% 42%)` };
+    return { accent: `hsl(${hash} 55% 62%)`, ink: `hsl(${hash} 45% 42%)`, plate: `hsl(${hash} 40% 36%)` };
   }
   function paint(node, key) {
     const colors = look(key);
     node.style.setProperty("--c", colors.accent);
     node.style.setProperty("--ci", colors.ink);
     node.style.setProperty("--cb", colors.border || colors.accent);
+    node.style.setProperty("--cp", colors.plate || colors.ink);
     if (colors.bubble) node.style.setProperty("--cbg", colors.bubble);
     return node;
   }
@@ -87,6 +89,39 @@
   // Where a student stands with you (the companion's facts, when it runs): your name for her, her bond and mood.
   const standingOf = (display) => state.roster.find((item) => item.display === display) || {};
   const FACES = { great: "😄", good: "🙂", ok: "😐", worry: "😟", sad: "😢" };
+  // Her mood as a word (mneme-llm's face), and the pill's tone.
+  const MOODS = { great: ["happy", "good"], good: ["content", "good"], ok: ["calm", "plain"], worry: ["worried", "warn"],
+                  sad: ["sad", "low"] };
+  const personOf = (display) => {
+    const name = state.roster.find((item) => item.display === display)?.name;
+    return state.people.find((item) => item.name === name) || {};
+  };
+  // Small drawn icons (constants of this file).
+  const ICONS = {
+    heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z" fill="#e0607e" stroke="none"/>',
+  };
+  function icon(name, size = 14) {
+    const holder = make("span", `icon icon-${name}`);
+    holder.setAttribute("aria-hidden", "true");
+    holder.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}">${ICONS[name]}</svg>`;
+    return holder;
+  }
+  function moodPill(display) {
+    const { mood } = standingOf(display);
+    if (!mood) return null;
+    const [word, tone] = MOODS[mood.face] || ["", "plain"];
+    const pill = make("span", `mood-pill mood-${tone}`, word || `mood ${mood.value}`);
+    pill.title = `Mood ${mood.value}/100` + (mood.feelings?.length ? ` · ${mood.feelings.map(([name]) => name).join(", ")}` : "");
+    return pill;
+  }
+  function bondPill(display, big = false) {
+    const { bond } = standingOf(display);
+    if (!bond) return null;
+    const pill = make("span", big ? "bond-pill" : "bond-count");
+    pill.append(icon("heart", big ? 16 : 14), make("span", "", big ? `Bond ${bond.closeness}` : String(bond.closeness)));
+    pill.title = `${bond.role}, closeness ${bond.closeness}/100`;
+    return pill;
+  }
   function bondLine(display) {
     const { bond, mood } = standingOf(display);
     const parts = [], said = [];
@@ -106,7 +141,7 @@
                    narrow: "(max-width: 760px)" };
   const DEFAULTS = { wide: { sidebar: true, members: true }, medium: { sidebar: true, members: false },
                      narrow: { sidebar: false, members: false } };
-  const SIZES = { sidebar: [180, 440, 260], members: [180, 420, 240] };  // min, max, default width
+  const SIZES = { sidebar: [220, 440, 300], members: [220, 420, 280] };  // min, max, default width
   const media = Object.fromEntries(Object.entries(LEVELS).map(([name, query]) => [name, window.matchMedia(query)]));
   const level = () => Object.keys(media).find((name) => media[name].matches) || "wide";
   const isOpen = (name) => document.body.classList.contains(`show-${name}`);
@@ -134,10 +169,16 @@
   const wanted = Object.fromEntries(Object.entries(SIZES).map(([name, [, , fallback]]) =>
     [name, Number(localStorage.getItem(`webui.width.${name}`)) || fallback]));
   const docked = (name) => level() !== "narrow" && isOpen(name);
+  function inside() {  // the page's width inside its margins, less the gaps between the cards
+    const app = $("#app");
+    const style = getComputedStyle(app);
+    const gaps = ["sidebar", "members"].filter(docked).length * (parseFloat(style.getPropertyValue("--gap")) || 0);
+    return app.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0) - gaps;
+  }
   function fitWidths() {
     const shown = { ...wanted };
     const open = Object.keys(shown).filter(docked);
-    const spare = window.innerWidth - CHAT_MIN;
+    const spare = inside() - CHAT_MIN;
     const total = open.reduce((sum, name) => sum + shown[name], 0);
     if (total > spare) {
       for (const name of open) shown[name] = Math.max(SIZES[name][0], Math.floor(shown[name] * spare / total));
@@ -149,7 +190,7 @@
   function setWidth(name, width) {
     const [low, high] = SIZES[name];
     const other = name === "sidebar" ? "members" : "sidebar";
-    const room = window.innerWidth - CHAT_MIN - (docked(other) ? $(`#${other}`).getBoundingClientRect().width : 0);
+    const room = inside() - CHAT_MIN - (docked(other) ? $(`#${other}`).getBoundingClientRect().width : 0);
     wanted[name] = Math.round(Math.max(low, Math.min(high, room, width)));
     fitWidths();
     return wanted[name];
@@ -179,9 +220,55 @@
     });
   }
 
+  // Her card beside a direct chat: her portrait, your bond, what she is, and which model answers.
+  function renderCard(name) {
+    const card = $("#her-card");
+    const person = personOf(name);
+    const { bond, alias } = standingOf(name);
+    const key = keyOf(name);
+    paint(card, key);
+    const portrait = make("div", "card-portrait");
+    if (state.avatars.has(key)) {
+      const image = make("img");
+      image.src = `avatars/${key}`;
+      image.alt = `${name}'s portrait`;
+      portrait.append(image);
+    } else {
+      portrait.append(make("span", "card-initial", initial(name)));
+    }
+    const plate = make("div", "card-plate");
+    plate.append(make("h2", "card-name", alias || name),
+                 make("div", "card-what", [name, ...(person.own || []).slice(0, 1).map(shortModel)].join(" · ")));
+    const body = make("div", "card-body");
+    if (bond) {
+      const meter = make("div", "meter meter-bond");
+      const head = make("div", "meter-head");
+      head.append(make("span", "", "Bond"), make("span", "meter-value", `${bond.closeness} / 100`));
+      const bar = make("div", "meter-bar");
+      const fill = make("div", "meter-fill");
+      fill.style.width = `${Math.max(0, Math.min(100, bond.closeness))}%`;
+      bar.append(fill);
+      meter.append(head, bar, make("div", "meter-note", bond.role));
+      body.append(meter);
+    }
+    if (person.own_ready === false) {
+      body.append(make("p", "card-note is-warn", "Her own company's key isn't set, so she answers on a classmate's model."));
+    }
+    if (person.description) body.append(make("p", "card-note", person.description));
+    body.append(make("p", "card-note", "Bond grows here, in MomoChat, as mneme-llm reads how your talks go."));
+    const model = modelLine(name);
+    if (model) body.append(model);
+    card.replaceChildren(portrait, plate, body);
+  }
+
   function renderMembers() {
     const list = $("#member-list");
     list.replaceChildren();
+    const herChat = chatOf(state.current);
+    const herName = isDirect(herChat) ? membersOf(herChat)[0] : null;
+    $("#her-card").hidden = !herName;
+    $("#members").classList.toggle("is-card", Boolean(herName));
+    if (herName) { renderCard(herName); return; }
     const typing = new Set();
     for (const event of state.progress.values()) {
       if (event.conversation !== state.current) continue;
@@ -328,27 +415,57 @@
   }
 
   // ---- chats ---------------------------------------------------------------------------------------
+  // A chat's faces: hers for a direct chat, else up to three of the class, overlapping.
+  function chatFaces(chat) {
+    const members = membersOf(chat);
+    const holder = make("span", `faces${isDirect(chat) ? " is-one" : ""}`);
+    for (const name of members.slice(0, isDirect(chat) ? 1 : 3)) holder.append(avatar(name));
+    return holder;
+  }
+  const shownName = (display) => standingOf(display).alias || display;
+  function lastLine(chat) {
+    const last = chat.last;
+    if (!last) return isDirect(chat) ? "Say hello" : `${membersOf(chat).length} classmates`;
+    if (last.kind === "user") return `You: ${last.text}`;
+    const who = classmateIn(last.speaker) || last.speaker;
+    return isDirect(chat) || !who ? last.text : `${shownName(who)}: ${last.text}`;
+  }
   function renderChats() {
     const list = $("#chats");
     list.replaceChildren();
+    const query = state.search.trim().toLowerCase();
+    const matches = (chat) => !query || [chat.title, ...membersOf(chat).map((name) => `${name} ${shownName(name)}`),
+                                          chat.last?.text || ""].join(" ").toLowerCase().includes(query);
     // Group chats first, then direct messages, each in the order the user arranged.
-    const direct = state.conversations.filter(isDirect);
-    for (const chat of [...state.conversations.filter((item) => !isDirect(item)), ...direct]) {
+    const direct = state.conversations.filter(isDirect).filter(matches);
+    for (const chat of [...state.conversations.filter((item) => !isDirect(item)).filter(matches), ...direct]) {
       if (chat === direct[0]) list.append(make("div", "chats-subhead", "Direct messages"));
       const item = make("div", "chat" + (chat.id === state.current ? " is-current" : "") + (isDirect(chat) ? " is-direct" : ""));
-      item.draggable = true;
+      item.draggable = !query;
       item.dataset.id = chat.id;
-      const name = make("button", "chat-name", chat.title || chat.id);
-      name.type = "button";
-      name.title = chat.personas ? membersOf(chat).join(", ") : "The whole class";
-      name.onclick = () => { open(chat.id); if (level() === "narrow") setPanel("sidebar", false); };
+      const open_ = make("button", "chat-open");
+      open_.type = "button";
+      open_.title = chat.personas ? membersOf(chat).join(", ") : "The whole class";
+      if (chat.id === state.current) open_.setAttribute("aria-current", "true");
+      open_.onclick = () => { open(chat.id); if (level() === "narrow") setPanel("sidebar", false); };
+      const text = make("span", "chat-text");
+      const top = make("span", "chat-top");
+      const title = make("strong", "chat-name");
+      const right = make("span", "chat-side");
       if (isDirect(chat)) {
         const her = membersOf(chat)[0];
-        name.prepend(avatar(her));
-        const { bond } = standingOf(her);
-        if (bond) name.append(make("span", "chat-bond", `♥${bond.closeness}`));
+        title.textContent = shownName(her);
+        if (standingOf(her).alias) title.append(make("span", "chat-real", ` ${her}`));
+        const bond = bondPill(her);
+        if (bond) right.append(bond);
+      } else {
+        title.textContent = chat.title || chat.id;
+        right.textContent = "group";
       }
-      item.append(name);
+      top.append(title, right);
+      text.append(top, make("span", "chat-last", lastLine(chat)));
+      open_.append(chatFaces(chat), text);
+      item.append(open_);
       if (chat.pinned) item.append(make("span", "chat-pin", "📌"));
       if (state.unread.has(chat.id)) item.append(make("span", "dot"));
       const more = make("button", "chat-more", "⋯");
@@ -381,14 +498,55 @@
       });
       list.append(item);
     }
-    const current = state.conversations.find((chat) => chat.id === state.current);
-    $("#chat-title").textContent = current ? current.title : "New chat";
-    document.title = `${current ? current.title + " · " : ""}${state.title}`;
-    const members = membersOf(current);
-    $("#empty-title").textContent = isDirect(current) ? `Just you and ${members[0]}.`
-      : current?.personas ? `${members.join(", ")} are here.` : "Everyone's here.";
-    input.placeholder = isDirect(current) ? `Message ${members[0]}…` : "Message the club…";
+    if (query && !list.children.length) list.append(make("div", "chats-none", "No chat matches."));
+    // Students without their own company's key still answer, on a classmate's model (their fallback).
+    const borrowing = state.people.filter((item) => item.own_ready === false).map((item) => displayOf(item.name));
+    if (borrowing.length && !query) {
+      const note = make("div", "chats-note");
+      const faces = make("span", "faces is-grey");
+      for (const name of borrowing.slice(0, 3)) faces.append(avatar(name));
+      const names = borrowing.length === 1 ? borrowing[0]
+        : `${borrowing.slice(0, -1).join(", ")} and ${borrowing[borrowing.length - 1]}`;
+      note.append(faces, make("span", "", `${names} answer on a classmate's model until you add ` +
+                                          `${borrowing.length === 1 ? "her key" : "their keys"}`));
+      list.append(note);
+    }
+    renderHeader();
   }
+
+  // The chat's header: who it is with, where else she is, her mood and your bond.
+  function renderHeader() {
+    const current = chatOf(state.current);
+    const members = membersOf(current);
+    const her = isDirect(current) ? members[0] : null;
+    const faces = $("#chat-faces");
+    faces.replaceChildren(current ? chatFaces(current) : make("span"));
+    const title = $("#chat-title");
+    title.replaceChildren(her ? shownName(her) : current ? current.title : "New chat");
+    if (her && standingOf(her).alias) title.append(make("span", "chat-title-real", ` ${her}, as you call her`));
+    title.classList.toggle("can-rename", !her);
+    title.title = her ? "" : "Rename";
+    $("#chat-sub").replaceChildren(...subLine(current, her));
+    $("#chat-standing").replaceChildren(...(her ? [moodPill(her), bondPill(her, true)].filter(Boolean) : []));
+    messages.classList.toggle("is-direct", Boolean(her));
+    document.title = `${current ? (her ? shownName(her) : current.title) + " · " : ""}${state.title}`;
+    $("#empty-title").textContent = her ? `Just you and ${shownName(her)}.`
+      : current?.personas ? `${members.map(shownName).join(", ")} are here.` : "Everyone's here.";
+    input.placeholder = her ? `Message ${shownName(her)}…` : "Message the club…";
+  }
+  function subLine(chat, her) {
+    if (!her) return [make("span", "", chat?.personas ? `${members_(chat)} classmates` : "The whole club · group")];
+    const key = placeKey(her);
+    const ticket = key ? ticketsHere(state.places).get(key) : null;
+    if (ticket) {  // she has an invitation for you, to the Classroom say
+      const go = make("a", "chat-ticket", `Invites you to the ${ticket.place}: “${ticket.title}”`);
+      go.href = ticket.link || "";
+      return [go];
+    }
+    const visiting = (state.places?.others || []).find((place) => (place.away || []).includes(key));
+    return [make("span", "", visiting ? `Also in the ${visiting.place?.name || "Classroom"}` : "Here, in MomoChat")];
+  }
+  const members_ = (chat) => membersOf(chat).length;
 
   function move(id, target, below) {
     const order = state.conversations.map((chat) => chat.id).filter((item) => item !== id);
@@ -754,10 +912,8 @@
                              conversations: s.conversations, avatars: new Set(s.avatars),
                              roster: s.roster || s.classmates.map((name) => ({ name: keyOf(name), display: name })) });
       state.progress = new Map(s.progress.map((item) => [item.run_id, item]));
-      $("#brand").textContent = s.title;
+      state.people = s.people || [];
       renderMembers();
-      const me = $("#me");
-      me.replaceChildren(avatar(s.user.name, "you"), make("span", "", s.user.name));
       for (const pending of state.pending.splice(0)) state.ws.send(JSON.stringify(pending));
       state.places = s.places;
       state.here = s.here;
@@ -794,12 +950,19 @@
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       if (moved) renderMembers();  // "also in the Classroom" in the member list too
     } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed
+      noteBonds(state.roster, event.roster);
       state.roster = event.roster;
       renderMembers();
       renderChats();
     } else if (event.type === "models") {
       receiveModels(event);
     } else if (event.type === "message") {
+      const chat = chatOf(event.item.conversation);
+      const item = event.item;
+      if (chat && ["text", "user"].includes(item.kind) && item.text && !item.label && !item.action) {
+        chat.last = { kind: item.kind, speaker: item.speaker || "", text: String(item.text).split(/\s+/).join(" ").slice(0, 120) };
+        if (event.item.conversation === state.current) renderChats();
+      }
       if (event.item.conversation === state.current) append(event.item, true);
       else { state.unread.add(event.item.conversation); renderChats(); }
     } else if (event.type === "update") {
@@ -831,6 +994,23 @@
         : event.reason === "chat_not_ready" || event.reason === "unknown_chat"
           ? "That chat isn't there (it couldn't be set up, or was deleted), so this wasn't sent."
           : `Not sent (${event.reason}).`);
+    }
+  }
+
+  // A bond that moved, said in the chat with her (or a group she is in) as it happens; it is not kept.
+  function noteBonds(before, after) {
+    const chat = chatOf(state.current);
+    for (const item of after || []) {
+      const old = (before || []).find((entry) => entry.name === item.name)?.bond?.closeness;
+      const now = item.bond?.closeness;
+      if (old == null || now == null || old === now || !membersOf(chat).includes(item.display)) continue;
+      const row = make("div", "row row-pill");
+      const pill = make("div", "pill bond-note");
+      pill.append(icon("heart"), make("span", "", `Bond with ${item.alias || item.display} ${now > old ? "rose" : "fell"}: ${old} → ${now}`));
+      row.append(pill);
+      $("#empty").hidden = true;
+      messages.append(row);
+      if (nearBottom()) scrollDown();
     }
   }
 
@@ -1091,8 +1271,11 @@
   $("#picker").addEventListener("click", (event) => { if (event.target.id === "picker") hidePicker(); });
   $("#new-chat").onclick = showPicker;
   $("#chat-title").onclick = () => {
-    rename(state.conversations.find((chat) => chat.id === state.current) || { id: state.current, title: "" });
+    const chat = chatOf(state.current);
+    if (isDirect(chat)) return;
+    rename(chat || { id: state.current, title: "" });
   };
+  $("#chat-search").addEventListener("input", (event) => { state.search = event.target.value; renderChats(); });
   $("#toggle-sidebar").onclick = () => setPanel("sidebar", !isOpen("sidebar"));
   $("#close-sidebar").onclick = () => setPanel("sidebar", false);
   $("#toggle-members").onclick = () => setPanel("members", !isOpen("members"));

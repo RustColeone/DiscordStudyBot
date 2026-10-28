@@ -75,22 +75,28 @@ with her chats' options in core.yml, for example
 Discord, and the example of an interface plugin. Open `http://<this computer>:4156` (the address is
 printed at startup) from a laptop or phone at home:
 
+* the page is laid out as a messenger: your chats on the left (her picture, your name for her, ♥ your bond
+  and the last line said; search them), the chat in the middle (its header shows her mood and your bond), and on
+  the right her card in a direct chat (her portrait, your bond, which model answers) or the class in a group chat.
+  On a phone the places bar sits along the bottom and the chats and the card slide in;
 * each chat is a MomoChat group chat by default: GPT, Gemini, Claude, DeepSeek and Grok,
   each in their own bubble with their own picture (the students module's; drop `gpt.png` and so on into
   [`webui/avatars/`](webui/avatars/README.md) to use others);
-* the class list on the right (👥; open on a desktop, closed on a phone) shows who is typing or speaking;
-  click someone, or type `@`, to ask them directly (`@GPT …` gets GPT's answer alone); each card also shows your
-  name for her, her bond with you (♥ and her closeness) and her mood, from her memory;
+* the class list on the right (in a group chat) shows who is typing or speaking; click someone, or type `@`, to
+  ask them directly (`@GPT …` gets GPT's answer alone); each card also shows your name for her, her bond with you
+  (♥ and her closeness) and her mood, from her memory; when your bond with her moves, the chat says so;
+* a student whose own company's key is not set still answers, on a classmate's model (her fallback): the chat
+  list and her card say so;
 * under each classmate, the model she answers with in this chat; click it (again to close) to choose
   another of the models the providers offer, or her own again (this is `$model`, for admins, asked in the
   background and kept per chat); each of her messages shows the model that wrote it;
 * work notes fold away; Markdown, code and LaTeX are rendered in the page (KaTeX); files and pictures go
   both ways (drop, paste or 📎);
 * approvals arrive as cards with their tier and buttons; type `$` (or `/`) for the command palette;
-* chats in the sidebar, each a separate conversation (`webui:<chat>`): drag to reorder, or ⋯ to rename,
+* chats on the left, each a separate conversation (`webui:<chat>`): drag to reorder, or ⋯ to rename,
   pin, move or delete (deleting removes its messages and files from the page; the core keeps its history);
-* ＋ New chat asks who is in it: everyone, a few classmates, or one for a direct message (also 💬 on her
-  card); direct messages have their own heading in the sidebar;
+* New chat asks who is in it: everyone, a few classmates, or one for a direct message (also 💬 on her
+  card); direct messages have their own heading in the list;
 * a message naming no one gets an answer from whoever's turn it is, and the others may chime in; a classmate
   may hand part of the work to another ("draw this", "search this"), who answers after her; long chats are
   summarised as they scroll out of view, and the classmates remember you across every web chat;

@@ -11,3 +11,9 @@
 
 `favicon.png` is a resized copy of the artwork and is shared under the same license. Neither image may be used
 commercially.
+
+## Font
+
+`nunito-latin.woff2` and `nunito-latin-ext.woff2` are the Nunito typeface (its Latin subsets, as Google Fonts serves
+them), copyright 2014 The Nunito Project Authors (https://github.com/googlefonts/nunito), under the SIL Open Font
+License 1.1: `NUNITO-OFL.txt`. They are served from here because the page loads fonts from nowhere else.

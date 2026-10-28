@@ -132,6 +132,7 @@ class WebUI(Interface):
         self.classmates: list[str] = []
         self.roster: list[dict] = []
         self.ready: dict[str, bool] = {}
+        self.views: dict[str, dict] = {}  # the core's personas (contracts 1.11), by name: description, models, tiers
         self._standing_shown: list[dict] | None = None  # the roster pages were last sent
         self._meet({})
         self.hostnames = {str(item).lower() for item in config.get("hostnames") or []}
@@ -176,6 +177,7 @@ class WebUI(Interface):
                            for index, name in enumerate(self.personas)]
         self.roster = [{"name": name, "display": display} for name, display in zip(self.personas, self.classmates)]
         self.ready = {name: bool(view.get("ready", True)) for name, view in views.items()}
+        self.views = dict(views)
         self.pictures = {}
         for name in self.personas:
             avatar = (views.get(name, {}).get("pictures") or {}).get("avatar")
@@ -192,6 +194,22 @@ class WebUI(Interface):
             values = facts(item["name"], self.user_id) if callable(facts) else {}
             found.append({**item, **{kind: next((value for key, value in values.items()
                                                  if key.rsplit(".", 1)[-1] == kind), None) for kind in STANDING}})
+        return found
+
+    def people(self) -> list[dict]:
+        """Who each student is, for the page's cards: her one-line description, her own and strong models, and whether
+        her own company's key is set (without it she answers on a classmate's model, her fallback)."""
+        ready = getattr(self.port, "models_ready", None) if self.port is not None else None
+        found = []
+        for name in self.personas:
+            view = self.views.get(name, {})
+            models = view.get("models") or {}
+            listed = lambda tier: [f"{item.get('provider')}/{item.get('model')}" for item in models.get(tier) or ()
+                                   if isinstance(item, dict)]
+            own = (view.get("profiles") or {}).get("own")
+            found.append({"name": name, "description": str(view.get("description") or ""),
+                          "own": listed("own") or listed("default")[:1], "strong": listed("strong"),
+                          "own_ready": bool(ready(own)) if own and callable(ready) else self.ready.get(name, True)})
         return found
 
     async def _watch_standing(self) -> None:
@@ -331,7 +349,8 @@ class WebUI(Interface):
         if origin is not None and origin != f"{scheme}://{request.headers.get('Host')}":
             # Another site in this browser trying to use the page (or its WebSocket) on the user's behalf.
             return self._refuse(request, "origin", "Cross-site requests are refused.")
-        public = request.path in ("/login", "/static/style.css", "/favicon.ico")
+        public = request.path in ("/login", "/static/style.css", "/favicon.ico") or bool(
+            re.fullmatch(r"/static/nunito[a-z-]*\.woff2", request.path))  # the sign-in page uses the font too
         if self.passphrase and not public and not self._signed_in(request):
             if request.method == "GET" and request.path in ("/", "/cafe"):  # the pages: sign in first
                 raise web.HTTPSeeOther("login")  # relative: also right under a proxy's path (/chat/login)
@@ -457,8 +476,10 @@ class WebUI(Interface):
     async def _static(self, request: web.Request) -> web.StreamResponse:
         name = request.match_info["name"]
         path = self.folder / "static" / name
-        if not re.fullmatch(r"[a-z0-9_-]+\.(js|css)", name) or not path.is_file():
+        if not re.fullmatch(r"[a-z0-9_-]+\.(js|css|woff2)", name) or not path.is_file():
             raise web.HTTPNotFound()
+        if name.endswith(".woff2"):  # the page's font (Nunito, OFL): it never changes
+            return web.FileResponse(path, headers={"Content-Type": "font/woff2", "Cache-Control": "max-age=604800"})
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
     async def _favicon(self, request: web.Request) -> web.StreamResponse:
@@ -513,9 +534,16 @@ class WebUI(Interface):
         """Who is in the cafe (every student: she is anywhere at once), whether she can answer yet (her model profile
         is named after her, as the room's are), the rooms, and the places for the places bar."""
         ready = getattr(self.port, "models_ready", None) if self.port is not None else None
+        people = {item["name"]: item for item in self.people()}
+        chats = self.store.conversations() if self.store is not None else []
         students = [{**item, "avatar": avatar_key(item["name"]),
                      "ready": self.ready[item["name"]] if item["name"] in self.ready else
-                     bool(ready(item["name"])) if callable(ready) else True} for item in self.standing()]
+                     bool(ready(item["name"])) if callable(ready) else True,
+                     "own_ready": people.get(item["name"], {}).get("own_ready", True),
+                     "description": people.get(item["name"], {}).get("description", ""),
+                     # the chats she is in here (a chat that names nobody has the whole class)
+                     "chats": sum(1 for chat in chats if not chat.get("personas") or item["name"] in chat["personas"])}
+                    for item in self.standing()]
         return {"title": self.title, "students": students, "avatars": self.avatars(), "rooms": self.rooms(),
                 "here": self.here(), "places": self._places()}
 
@@ -595,7 +623,8 @@ class WebUI(Interface):
                     for command in self.port.commands()]
         self._standing_shown = self.standing()
         return {"title": self.title, "user": {"id": self.user_id, "name": self.user_name},
-                "classmates": self.classmates, "roster": self._standing_shown, "avatars": self.avatars(),
+                "classmates": self.classmates, "roster": self._standing_shown, "people": self.people(),
+                "avatars": self.avatars(),
                 "commands": commands,
                 "conversations": self.store.conversations(), "progress": list(self._progress.values()),
                 "default": DEFAULT_CONVERSATION, "max_upload_mb": self.display.max_upload_mb, "here": self.here(),
@@ -967,6 +996,13 @@ class WebUI(Interface):
                                 "label": reply.label, "run_id": reply.run_id, "code": reply.code,
                                 "data": dict(reply.data), "actions": [action.__dict__ for action in reply.actions],
                                 "origin": reply.data.get("origin_address", ""), "reply_id": reply.id}
+        if not reply.speaker and reply.data.get("model"):
+            # A direct chat's answers carry no name (MomoChat names speakers in groups only): written by a model in a
+            # chat with one student, they are hers. (A command's output has no model and stays the page's.)
+            chat = self.store.conversation(conversation) or {}
+            if len(chat.get("personas") or ()) == 1:
+                item["speaker"] = next((entry["display"] for entry in self.roster
+                                        if entry["name"] == chat["personas"][0]), "")
         if reply.kind == "file" and reply.file is not None:
             source = Path(reply.file.path)
             if not source.is_file():

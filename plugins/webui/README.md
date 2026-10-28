@@ -87,15 +87,17 @@ network (passphrase required).`
 ## Using it
 
 See [plugins/README.md, "The web UI"](../README.md#the-web-ui) for what a person sees: the chat list,
-the class list with presence and the model menu, `@` mentions, the `$`/`/` command palette, work notes,
-files and approval cards. Messages you send are always direct and addressed to the bot
+her card in a direct chat, the class list with presence and the model menu, `@` mentions, the `$`/`/` command
+palette, work notes, files and approval cards. The look follows the design canvas "ChimeraArchive interface"
+(2026-10-26), with the Nunito font served from `static/` (SIL OFL, credited in `static/CREDITS.md`). Messages you send are always direct and addressed to the bot
 (`is_direct=True`, `mentions_me=True`), so every chat behaves like a private conversation with its students.
 
-**Who is in a chat.** `＋ New chat` opens a picker with the classmates (all ticked). Untick some to start
+**Who is in a chat.** `New chat` opens a picker with the classmates (all ticked). Untick some to start
 a smaller chat; leave one for a direct message with her. The 💬 button on a classmate's card in the class
 list also opens your direct message with her (the existing one if there is one). Direct messages are
-listed under their own heading in the sidebar, with her picture, and the class list shows only the
-chat's members.
+listed under their own heading in the chat list, with her picture; a direct chat shows her card on the right
+instead of the class list. MomoChat names the speaker only in group chats, so an answer a model wrote in a
+direct chat is stored as hers (a command's output, which no model wrote, stays the page's).
 
 **How MomoChat behaves here.** The web UI's assignment sets MomoChat's `options`: each classmate reads
 the last 40 messages word for word, older ones are folded into the chat's rolling summary
@@ -131,7 +133,7 @@ With `chime_in`, a message to the whole class can take up to five model calls.
 | `GET /static/{name}` | Only names matching `[a-z0-9_-]+\.(js|css)` in `static/`. |
 | `GET /avatars/{key}` | A picture in `avatars/` whose stem is `key` (png, jpg, jpeg, webp, gif), else the student's own `avatar` picture whose name or display name has that key. |
 | `GET /cafe` | The cafe page, with its data inside (`no-cache`); signed out, it goes to the sign-in page. |
-| `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, alias, bond, mood, avatar, ready}], avatars, rooms, here, places}`. `ready` is the core's (`port.personas()`), else `models_ready` for the profile named after her. |
+| `GET /api/cafe` | The cafe's data again: `{title, students: [{name, display, alias, bond, mood, avatar, ready, own_ready, description, chats}], avatars, rooms, here, places}`. `ready` is the core's (`port.personas()`), else `models_ready` for the profile named after her; `own_ready` whether her own tier can be called (else she answers on a classmate's model); `chats` how many web chats she is in. Over her head the cafe shows her mood (♪, ~, ?, …) or, from 01:00 to 07:00, zzz. |
 | `GET /rooms/{name}` | Only a picture `rooms/` lists (nothing else, and never outside it). |
 | `GET /favicon.ico` | `static/favicon.png`. |
 | `GET /files/{file_id}` | A stored upload or delivered file (below). |
@@ -258,7 +260,7 @@ Server to page (`_broadcast` sends to every open page, so several devices stay i
 
 | `type` | Fields | Meaning |
 | --- | --- | --- |
-| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display, alias, bond, mood}]`; the last three None until a module publishes them), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class), `progress`, `default`, `max_upload_mb` | Sent on connect. |
+| `hello` | `state`: `title`, `user`, `classmates`, `roster` (`[{name, display, alias, bond, mood}]`; the last three None until a module publishes them), `people` (`[{name, description, own, strong, own_ready}]`: her one line, her own and strong models as `provider/model`, and whether a model of her own tier can be called), `avatars`, `commands`, `conversations` (each with `personas`: a list, or null for the whole class; and `last`: `{kind, speaker, text, at}`, the newest thing said, or null), `progress`, `default`, `max_upload_mb` | Sent on connect. |
 | `message` | `item` | A new stored message (yours or the bot's). |
 | `update` | `item` | A stored message changed (an approval card decided). |
 | `conversations` | `items` | The chat list changed. |

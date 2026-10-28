@@ -83,10 +83,26 @@ class Store:
         return value
 
     def conversations(self) -> list[dict[str, Any]]:
+        """Every chat, in the user's order, each with its last line (`last`: who said it, and its start) for the
+        chat list."""
         with self._lock:
             rows = self._db.execute("SELECT * FROM conversations ORDER BY pinned DESC, position, created_at DESC"
                                     ).fetchall()
-        return [self._row(row) for row in rows]
+            found = [self._row(row) for row in rows]
+            for chat in found:
+                chat["last"] = self._last(chat["id"])
+        return found
+
+    def _last(self, conversation: str) -> dict[str, Any] | None:
+        """The newest message someone said in a chat (not a notice or a work note), shortened."""
+        for (item,) in self._db.execute("SELECT item FROM messages WHERE conversation=? ORDER BY id DESC LIMIT 20",
+                                        (conversation,)):
+            data = json.loads(item)
+            if data.get("kind") in ("text", "user") and data.get("text") and not data.get("label") \
+                    and not data.get("action"):
+                return {"kind": data["kind"], "speaker": data.get("speaker") or "",
+                        "text": " ".join(str(data["text"]).split())[:120], "at": data.get("at")}
+        return None
 
     def conversation(self, conversation: str) -> dict[str, Any] | None:
         with self._lock:
