@@ -34,6 +34,8 @@ DEFAULT_ROLES = {
 TIERS = {"router": "cheap", "drafter": "cheap", "judge": "cheap", "strong": "strong", "critic": "strong",
          "planner": "strong"}
 EFFORTS = ("low", "medium", "high", "max")
+# One of a seat's models picked by name on the page: `lv0` her weakest … (`Seat.levels`), besides `cheap` and `strong`.
+LEVEL = re.compile(r"lv(\d{1,2})")
 # The team picker's formations: its workflow and the roles you seat (the tester seat is a switch on top of any).
 FORMATIONS = {"alone": ("single", ("drafter",)), "plan": ("plan", ("planner", "drafter")),
               "cascade": ("cascade", ("drafter", "judge", "strong"))}
@@ -63,8 +65,35 @@ class Seat:
             return self.effort
         return effort
 
+    @property
+    def levels(self) -> tuple[Mapping[str, Any], ...]:
+        """Her models from the weakest to the strongest, each once: her own (cheap) ones, then her strong ones. The page
+        can give a seat any of them (`lv0`, `lv1`, …)."""
+        found: list[Mapping[str, Any]] = []
+        for item in (*self.cheap, *self.strong):
+            if not any((item["provider"], item["model"]) == (seen["provider"], seen["model"]) for seen in found):
+                found.append(item)
+        return tuple(found)
+
+    def tiers(self) -> tuple[str, ...]:
+        """Every tier she has a model profile for: `cheap`, `strong` and each of her levels."""
+        return ("cheap", "strong", *(f"lv{index}" for index in range(len(self.levels))))
+
+    def tier_of(self, tier: str) -> str:
+        """`cheap` or `strong`: the tier itself, or the one a level of hers belongs to (a level she lacks: cheap)."""
+        level = LEVEL.fullmatch(str(tier or ""))
+        if not level:
+            return "strong" if tier == "strong" else "cheap"
+        index = int(level.group(1))
+        return "cheap" if index >= len(self.levels) or self.levels[index] in self.cheap else "strong"
+
     def models(self, tier: str) -> tuple[Mapping[str, Any], ...]:
-        return self.strong if tier == "strong" and self.strong else self.cheap
+        level = LEVEL.fullmatch(str(tier or ""))
+        if level and int(level.group(1)) < len(self.levels):  # that model first, then her others of its tier
+            chosen = self.levels[int(level.group(1))]
+            same = self.cheap if chosen in self.cheap else self.strong
+            return (chosen, *(item for item in same if item != chosen))
+        return self.strong if self.tier_of(tier) == "strong" and self.strong else self.cheap
 
     def label(self, tier: str) -> str:
         models = self.models(tier)
@@ -120,7 +149,7 @@ class Team:
 
     def profiles(self) -> dict[str, list[dict]]:
         return {seat.profile(tier): [dict(item) for item in seat.models(tier)]
-                for seat in self.seats.values() for tier in ("cheap", "strong") if seat.models(tier)}
+                for seat in self.seats.values() for tier in seat.tiers() if seat.models(tier)}
 
     def personas(self) -> list[Persona]:
         """The agents of the seats `team:` adds (a student's seat is hers: she is the students module's)."""

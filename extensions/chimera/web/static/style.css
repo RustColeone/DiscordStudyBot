@@ -623,7 +623,17 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .team-columns, .report-columns { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 20px; align-items: flex-start; }
 .team-main { flex: 999 1 620px; min-width: 0; }
 .team-aside { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 20px; }
-.team-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+/* the formation and the tester switch, always on one line: their writing and padding scale with the row */
+.team-tools { display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px;
+              container-type: inline-size; }
+.team-tools .segmented { flex-wrap: nowrap; min-width: 0; gap: 2px; padding: 3px; }
+.team-tools .segmented button { min-height: 36px; padding: .45em clamp(6px, 2.6cqi, 16px); white-space: nowrap;
+                                font-size: clamp(11px, 3.3cqi, 15px); }
+.team-tools .switch { flex: none; min-height: 36px; gap: clamp(5px, 1.6cqi, 10px); padding: 4px clamp(8px, 2.4cqi, 14px) 4px 6px;
+                      white-space: nowrap; font-size: clamp(11px, 3.3cqi, 15px); }
+.team-tools .switch-track { width: 2.6em; height: 1.55em; }
+.team-tools .switch-track::after { width: 1.15em; height: 1.15em; left: .2em; top: .2em; }
+.team-tools .switch[aria-checked="true"] .switch-track::after { left: 1.25em; }
 .switch { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 14px 6px 8px; border-radius: 999px;
           border: 1px solid var(--line); background: var(--paper); font-weight: 800; font-size: 15px; cursor: pointer; }
 .switch-track { position: relative; display: inline-block; width: 44px; height: 26px; border-radius: 999px; background: var(--line-2); }
@@ -656,11 +666,22 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .seat-plate { position: absolute; left: 0; right: 0; bottom: 0; padding: 7% 7% 22%; color: #ffffff; }
 .seat-name { display: block; font-size: clamp(10px, 11cqi, 19px); font-weight: 900; overflow-wrap: break-word; line-height: 1.15; }
 .seat-model { display: block; font-size: clamp(9px, 7cqi, 12px); font-weight: 600; overflow-wrap: anywhere; }
-.team-seat .segmented { display: flex; }
-.team-seat .segmented button { flex: 1; }
 .seat-does { font-size: clamp(11px, 7.5cqi, 13px); line-height: 1.35; color: var(--ink-2); }
 .seat-rule { font-size: clamp(10px, 7cqi, 12px); font-weight: 700; line-height: 1.35; color: #24714a; }
-.team-seat .segmented button { min-width: 0; padding-left: 4px; padding-right: 4px; font-size: clamp(11px, 8cqi, 14px); }
+/* her model: a menu on her plate, where the model's name was (her picture changes with it) */
+.seat-card { position: relative; }
+.seat-card:has(.seat-menu) .seat-plate { padding-bottom: calc(22% + 2em); }
+.seat-menu { position: absolute; left: 7%; right: 7%; bottom: 9%; min-width: 0; appearance: none; -webkit-appearance: none;
+             padding: .2em 1.5em .2em .6em; border: 1px solid rgba(255, 255, 255, .6); border-radius: 999px; cursor: pointer;
+             background: rgba(255, 255, 255, .16) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='white' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right .5em center / .7em;
+             color: #ffffff; font: inherit; font-size: clamp(10px, 7.5cqi, 13px); font-weight: 800; text-overflow: ellipsis; }
+.seat-menu:hover { background-color: rgba(255, 255, 255, .26); }
+.seat-menu:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.seat-menu option { color: #3d3129; background: #fffbf5; }
+/* her chibi (her weakest model's picture) whole, above the plate; an empty seat: stripes and a question mark */
+.bookmark-inner img.is-chibi { object-fit: contain; object-position: 50% 28%; background: var(--paper); }
+.bookmark.is-empty .bookmark-inner { background: repeating-linear-gradient(135deg, var(--panel) 0 8px, var(--paper) 8px 16px); }
+.bookmark.is-empty .bookmark-initial { padding-bottom: 35%; color: #a88d73; font-size: 2.4rem; }
 .seat-rule.is-warn { color: #865610; }
 /* a seat's panel: every student to pick from, as many columns as fit at 104px or more, sharing the row evenly; each
    card grows with its column up to 150px and sits in the middle of it, so the gaps stay even at any width */

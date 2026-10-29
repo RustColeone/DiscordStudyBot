@@ -342,7 +342,7 @@ class Round:
                     ctx, "takeover_mid" if started else "substitute", me=seat, missing=gone.name, reason=reason,
                     other=seat.name))
             try:
-                return await self.attempt(key, seat, tier, work)
+                return await self.attempt(key, seat, ctx.tier_for(role, seat, tier), work)
             except SeatUnavailable as error:
                 missing.append((seat, error.reason, error.stuck))
         raise Stopped(f"nobody can take the {role} role ({'; '.join(f'{seat.name}: {why}' for seat, why, _ in missing)})"

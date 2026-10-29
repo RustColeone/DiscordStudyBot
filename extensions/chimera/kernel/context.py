@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 from contracts import ModelError, ModelRequest, Session, ToolResult
 
-from ..team import Seat, Team, family_of
+from ..team import LEVEL, Seat, Team, family_of
 
 
 class Suspend(Exception):
@@ -204,7 +204,7 @@ class Context:
                 "cost": getattr(result, "cost", None)}
 
     def _call_row(self, answer: dict, seat: Seat, tier: str, role: str, effort: str) -> dict:
-        return {"seat": seat.persona, "role": role, "tier": tier, "effort": effort, "provider": answer["provider"],
+        return {"seat": seat.persona, "role": role, "tier": seat.tier_of(tier), "effort": effort, "provider": answer["provider"],
                 "model": answer["model"], "family": self.family(answer["provider"]),
                 "input_tokens": answer["input_tokens"], "output_tokens": answer["output_tokens"],
                 "cached_input_tokens": answer.get("cached_input_tokens", 0), "seconds": answer["seconds"], "cost": self.cost(answer), "price": answer.get("price"),
@@ -233,9 +233,20 @@ class Context:
         return seat if seat is not None and seat.persona in self.present else None
 
     def pinned_tier(self, role: str) -> str | None:
-        """The model you picked for `role` (her own, `cheap`, or her `strong` one)."""
+        """The model you picked for `role`: her own (`cheap`), her `strong` one, or one of her levels (`lv1`)."""
         tier = (self.picked().get("tiers") or {}).get(role)
-        return tier if tier in ("cheap", "strong") else None
+        return tier if tier in ("cheap", "strong") or LEVEL.fullmatch(str(tier or "")) else None
+
+    def tier_for(self, role: str, seat: Seat, tier: str) -> str:
+        """`tier` as `seat` works it: a level picked on the page is the picked student's own model; anyone standing in
+        for her takes the tier that level belongs to (her cheap or her strong models)."""
+        if not LEVEL.fullmatch(str(tier or "")):
+            return tier
+        name = (self.picked().get("seats") or {}).get(role)
+        picked = self.team.seats.get(name) if isinstance(name, str) else None
+        if picked is not None and picked.persona == seat.persona:
+            return tier
+        return picked.tier_of(tier) if picked is not None else "cheap"
 
     def candidates(self, role: str) -> list[Seat]:
         """The seats for `role` in order, the crew who came along first."""

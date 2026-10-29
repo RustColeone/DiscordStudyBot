@@ -357,15 +357,33 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_the_team_picker_refuses_a_team_that_does_not_hold(self):
         club = await self.club(DemoAdapter())
-        for given in ({"formation": "plan", "seats": {"planner": "gemini"}},  # the builder's seat is empty
-                      {"formation": "alone", "seats": {"drafter": "nobody"}},
+        for given in ({"formation": "alone", "seats": {"drafter": "nobody"}},
                       {"formation": "relay", "seats": {"drafter": "grok"}},
-                      {"formation": "alone", "seats": {"drafter": "grok"}, "tester": True},  # a tester, but no seat for her
                       "alone"):
             self.assertIs(club.page._picked(given), False, given)
         tested = club.page._picked({"formation": "alone", "seats": {"drafter": "grok", "tester": "gemini"}, "tester": True,
                                     "budget": 1e9})
         self.assertEqual((tested["seats"], tested["budget"]), ({"drafter": "grok", "tester": "gemini"}, 100.0))
+        # A seat left empty is the club's to staff: the builder here, the tester there.
+        self.assertEqual(club.page._picked({"formation": "plan", "seats": {"planner": "gemini", "drafter": ""}})["seats"],
+                         {"planner": "gemini"})
+        self.assertEqual(club.page._picked({"formation": "alone", "seats": {"drafter": "grok"}, "tester": True})["seats"],
+                         {"drafter": "grok"})
+
+    async def test_a_seat_runs_on_the_model_level_picked_for_it(self):
+        club = await self.club(DemoAdapter())
+        gemini = club.page.team.seats["gemini"]
+        self.assertGreaterEqual(len(gemini.levels), 2)
+        strongest = f"lv{len(gemini.levels) - 1}"
+        self.assertEqual(gemini.models(strongest)[0], gemini.levels[-1])
+        self.assertEqual(gemini.tier_of("lv0"), "cheap")
+        self.assertIn(gemini.profile(strongest), club.page.team.profiles())  # each level has its profile
+        team = club.page._picked({"formation": "plan", "seats": {"planner": "gemini", "drafter": "grok"},
+                                  "tiers": {"planner": strongest, "drafter": "lv9", "tester": "lv0"}})
+        self.assertEqual(team["tiers"], {"planner": strongest})  # a level she lacks, or of an empty seat, is dropped
+        levels = {seat["persona"]: seat["levels"] for seat in club.page._team()}
+        self.assertEqual([level["tier"] for level in levels["gemini"]], [f"lv{index}" for index in range(len(gemini.levels))])
+        self.assertEqual(levels["gemini"][0]["label"], f"{gemini.levels[0]['provider']}/{gemini.levels[0]['model']}")
 
     async def test_the_projects_own_agent_instructions_reach_the_drafter_and_the_judge(self):
         class Recording(DemoAdapter):

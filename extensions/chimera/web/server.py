@@ -39,12 +39,13 @@ from contracts import Address, Delivery, Display, Interface, Reply, Request, Sen
 from .. import places, views
 from ..kernel.flow import new_id
 from ..record import benchmark_rows, benchmarks, level_of, records
-from ..team import FORMATIONS
+from ..team import FORMATIONS, LEVEL
 from ..workflows import catalog
 from ..workspace.tools import ToolError, inside
 
 STATIC = re.compile(r"^[a-z0-9_-]+\.(js|css|png|svg|woff2)$")
 AVATAR = re.compile(r"^[a-z0-9_-]{1,40}$")
+KIND = re.compile(r"^[a-z0-9_-]{1,80}$")  # a picture of a student's (`ladder-2-koukousei-gpt-6-1-sol`)
 PICTURES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 TASK_ID = re.compile(r"^t-[a-z0-9]{4,40}$")
 LOCAL_SUFFIXES = (".local", ".lan", ".home.arpa", ".internal")
@@ -102,7 +103,8 @@ class ClassroomUI(Interface):
             web.get("/api/prices", self._prices_api), web.get("/api/presence", self._presence_api),
             web.get("/api/stamina", self._stamina_api), web.get("/api/logbook", self._logbook_api),
             web.get("/api/state", self._state_api), web.get("/ws", self._socket),
-            web.get("/avatars/{key}", self._avatar), web.get("/favicon.ico", self._favicon),
+            web.get("/avatars/{key}", self._avatar), web.get("/pictures/{name}/{kind}", self._picture),
+            web.get("/favicon.ico", self._favicon),
             web.get("/login", self._login_page), web.post("/login", self._login)])
         if self.page:  # the web page, one frontend of the API
             app.add_routes([web.get("/", self._index), web.get("/static/{name}", self._static)])
@@ -312,6 +314,34 @@ class ClassroomUI(Interface):
                     key = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
                     if key:
                         found.setdefault(key, Path(avatar))
+        return found
+
+    def _student_pictures(self) -> dict[str, dict[str, Path]]:
+        """Every picture of each student (Persona.pictures: her card, her ladder of models…), by persona."""
+        personas = getattr(self.port, "personas", None) if self.port is not None else None
+        found: dict[str, dict[str, Path]] = {}
+        for view in personas() if callable(personas) else ():
+            for kind, value in dict(view.get("pictures") or {}).items():
+                if KIND.match(str(kind)) and Path(value).suffix.lower() in PICTURES and Path(value).is_file():
+                    found.setdefault(str(view.get("name")), {})[str(kind)] = Path(value)
+        return found
+
+    async def _picture(self, request):
+        name, kind = request.match_info["name"], request.match_info["kind"]
+        path = self._student_pictures().get(name, {}).get(kind) if AVATAR.match(name) and KIND.match(kind) else None
+        if path is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "max-age=3600"})
+
+    def _levels(self, seat, pictures: dict[str, Path]) -> list[dict]:
+        """Her models from the weakest to the strongest, as the seat's menu shows them: the tier the page sends back
+        (`lv0` …), the model, and her picture for it (her ladder, art.yml `ladders:`), when drawn."""
+        found = []
+        for index, item in enumerate(seat.levels):
+            slug = re.sub(r"[^a-z0-9_-]", "-", str(item["model"]).lower())
+            kind = next((kind for kind in sorted(pictures) if re.fullmatch(rf"ladder-\d+-[a-z]+-{re.escape(slug)}", kind)), "")
+            found.append({"tier": f"lv{index}", "label": f"{item['provider']}/{item['model']}",
+                          "of": seat.tier_of(f"lv{index}"), "picture": kind})
         return found
 
     async def _avatar(self, request):
@@ -551,22 +581,33 @@ class ClassroomUI(Interface):
         return {item["name"] for item in catalog()}
 
     def _picked(self, given) -> dict | bool:
-        """A team from the team picker: `{formation, seats: {role: persona}, tiers: {role: cheap|strong}, tester,
-        budget}`, checked against the formation's roles and the club's seats; False when it does not hold."""
+        """A team from the team picker: `{formation, seats: {role: persona}, tiers: {role: cheap|strong|lv<n>},
+        tester, budget}`, checked against the formation's roles and the club's seats; False when it does not hold. A
+        role left empty is staffed by the club (the first in `roles:` who can); a level is one of that seat's own."""
         if not isinstance(given, dict) or given.get("formation") not in FORMATIONS:
             return False
         roles = FORMATIONS[given["formation"]][1] + (("tester",) if given.get("tester") else ())
         seats = given.get("seats") if isinstance(given.get("seats"), dict) else {}
-        picked = {role: str(seats.get(role)) for role in roles if str(seats.get(role)) in self.team.seats}
-        if set(picked) != set(roles):
-            return False
-        tiers = given.get("tiers") if isinstance(given.get("tiers"), dict) else {}
+        picked = {}
+        for role in roles:
+            if seats.get(role) in (None, ""):
+                continue
+            if str(seats[role]) not in self.team.seats:
+                return False
+            picked[role] = str(seats[role])
+        given_tiers = given.get("tiers") if isinstance(given.get("tiers"), dict) else {}
+        tiers = {}
+        for role, tier in given_tiers.items():
+            level = LEVEL.fullmatch(str(tier or ""))
+            if tier in ("cheap", "strong") or (level and role in picked and
+                                               int(level.group(1)) < len(self.team.seats[picked[role]].levels)):
+                tiers[role] = tier
         try:
             budget = round(max(0.0, min(100.0, float(given.get("budget") or 0))), 4)
         except (TypeError, ValueError):
             budget = 0.0
         return {"formation": given["formation"], "seats": picked, "tester": bool(given.get("tester")),
-                "tiers": {role: tiers[role] for role in roles if tiers.get(role) in ("cheap", "strong")},
+                "tiers": {role: tiers[role] for role in roles if role in tiers},
                 **({"budget": budget} if budget else {})}
 
     def _crew(self, names) -> list[str]:
@@ -727,6 +768,7 @@ class ClassroomUI(Interface):
         summaries = benchmarks()
         facts = getattr(self.port, "facts", None) if self.port is not None else None
         team = []
+        pictures = self._student_pictures()
         for seat in self.team.seats.values():
             values = facts(seat.persona, self.user_id) if callable(facts) else {}
             alias = next((value for key, value in values.items() if key.rsplit(".", 1)[-1] == "alias"), None)
@@ -736,6 +778,7 @@ class ClassroomUI(Interface):
                          "avatar": seat.avatar or seat.persona, "cheap": seat.label("cheap"),
                          # (a seat without strong models of her own falls back to her cheap ones: then she has none)
                          "strong": seat.label("strong") if seat.label("strong") != seat.label("cheap") else "",
+                         "levels": self._levels(seat, pictures.get(seat.persona, {})),
                          "ready": self._ready(seat),
                          "alias": alias if isinstance(alias, str) else None, "stamina": self._stamina(seat.persona),
                          "level": (found.get(seat.persona) or level_of(0))["level"], "alone": alone})

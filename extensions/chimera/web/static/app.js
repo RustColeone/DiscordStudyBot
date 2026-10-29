@@ -315,19 +315,22 @@
     return state.avatars.has(key) ? `avatars/${key}` : "";
   }
   // A bookmark: her portrait in a tall frame with a notch at the bottom, the frame in her colour (or another).
-  function bookmark(persona, className, { frame = "", grey = false } = {}) {
-    const outer = make("span", `bookmark ${className}`);
+  // `drawn` is another picture of hers to show (her model level's); her chibi is shown whole, not cropped. No persona:
+  // an empty seat.
+  function bookmark(persona, className, { frame = "", grey = false, drawn = "" } = {}) {
+    const outer = make("span", `bookmark ${className}${persona ? "" : " is-empty"}`);
     outer.style.setProperty("--plate", frame || plateOf(persona));
     const inner = make("span", "bookmark-inner");
-    const source = picture(persona);
+    const source = persona ? drawn || picture(persona) : "";
     if (source) {
       const image = make("img");
       image.src = source;
       image.alt = "";
       if (grey) image.classList.add("is-grey");
+      if (/-chibi-/.test(drawn)) image.classList.add("is-chibi");
       inner.append(image);
     } else {
-      inner.append(make("span", "bookmark-initial", called(persona).charAt(0).toUpperCase() || "?"));
+      inner.append(make("span", "bookmark-initial", persona ? called(persona).charAt(0).toUpperCase() || "?" : "?"));
     }
     outer.append(inner);
     return outer;
@@ -451,18 +454,25 @@
     }
     const chosen = state.pick;
     for (const seatName of Object.keys(SEATS)) {
-      if (!state.seats.has(chosen.seats[seatName])) chosen.seats[seatName] = usual(seatName);
+      const holder = chosen.seats[seatName];  // "": left empty for the club to staff
+      if (holder === undefined || (holder && !state.seats.has(holder))) chosen.seats[seatName] = usual(seatName);
     }
     return chosen;
   }
   const seatList = (chosen) => [...FORMATIONS[chosen.formation], ...(chosen.tester ? ["tester"] : [])];
+  // Her models from the weakest to the strongest (the server's `levels`: `lv0` …, each with her picture for it). A
+  // seat's tier is a level, or the role's usual `cheap` or `strong`: her first model of that tier.
+  const levelsOf = (persona) => state.seats.get(persona)?.levels || [];
+  const hasLevels = (persona) => levelsOf(persona).length > 1;
+  function levelOf(persona, tier) {
+    const seat = state.seats.get(persona), levels = levelsOf(persona);
+    if (!seat || !levels.length) return null;
+    const label = tier === "strong" ? seat.strong || seat.cheap : tier === "cheap" ? seat.cheap : "";
+    return levels.find((level) => (label ? level.label === label : level.tier === tier)) || levels[0];
+  }
   const tierOf = (chosen, seatName) => chosen.tiers[seatName] || SEATS[seatName].tier;
-  const hasStrong = (persona) => Boolean(state.seats.get(persona)?.strong);
-  const modelFor = (chosen, seatName) => {
-    const seat = state.seats.get(chosen.seats[seatName]);
-    if (!seat) return "";
-    return modelOf(tierOf(chosen, seatName) === "strong" && seat.strong ? seat.strong : seat.cheap);
-  };
+  const levelFor = (chosen, seatName) => levelOf(chosen.seats[seatName], tierOf(chosen, seatName));
+  const modelFor = (chosen, seatName) => modelOf(levelFor(chosen, seatName)?.label || state.seats.get(chosen.seats[seatName])?.cheap || "");
   // The money a session costs, in dollars or in stamina points (1,000 points to the dollar).
   const priced = (chosen, dollars) => dollars == null ? "—" : chosen.unit === "pts" ? `${Math.round(dollars * 1000)} pts`
     : `$${dollars < 1 ? dollars.toFixed(3) : dollars.toFixed(2)}`;
@@ -477,9 +487,9 @@
         if (Object.keys(seats).length !== list.length) continue;
         const same = list.every((seatName) => {
           const holder = chosen.seats[seatName];
-          if (seats[seatName] !== holder) return false;
-          if (!hasStrong(holder)) return true;
-          return (team.tiers?.[holder] || "cheap") === tierOf(chosen, seatName);
+          if (!holder || seats[seatName] !== holder) return false;
+          if (!hasLevels(holder)) return true;
+          return levelOf(holder, team.tiers?.[holder] || "cheap")?.label === levelFor(chosen, seatName)?.label;
         });
         if (same) return { ...team, summary };
       }
@@ -500,15 +510,16 @@
     chosen.tester = Boolean(team.seats?.tester);
     for (const [seatName, persona] of Object.entries(team.seats || {})) {
       chosen.seats[seatName] = persona;
-      if (hasStrong(persona)) chosen.tiers[seatName] = team.tiers?.[persona] || "cheap";
+      if (hasLevels(persona)) chosen.tiers[seatName] = levelOf(persona, team.tiers?.[persona] || "cheap")?.tier;
     }
     chosen.choosing = "";
     renderTeamPage();
   }
   const teamLine = (chosen) => seatList(chosen).map((seatName) => {
     const persona = chosen.seats[seatName];
-    const strong = hasStrong(persona) ? ` (${nick(tierOf(chosen, seatName) === "strong" ? state.seats.get(persona).strong : state.seats.get(persona).cheap)})` : "";
-    return `${called(persona)}${strong} ${SEATS[seatName].verb}`;
+    if (!persona) return `anyone ${SEATS[seatName].verb}`;
+    const model = hasLevels(persona) ? ` (${nick(modelFor(chosen, seatName))})` : "";
+    return `${called(persona)}${model} ${SEATS[seatName].verb}`;
   }).join(", ");
 
   // The stamina pill in the header (places.js): everyone's day against the total, asked again every 20 s; a click goes
@@ -566,7 +577,17 @@
     $("#seat-title").textContent = `${info.title}: who sits here?`;
     $("#seat-hint").textContent = `${info.does} Nobody is ever busy: a student can sit in many sessions at once.`;
     const people = $("#seat-students");
-    people.replaceChildren(...state.team.map((seat) => {
+    const close = () => { $("#seat-dialog").hidden = true; };  // (the watch below clears the choice and draws the seats)
+    const empty = make("button", "student-pick is-anyone");
+    empty.type = "button";
+    empty.setAttribute("aria-pressed", String(!chosen.seats[seatName]));
+    empty.setAttribute("aria-label", `Leave the ${info.title.toLowerCase()} empty: the club picks`);
+    empty.append(bookmark(null, "is-pick", { frame: chosen.seats[seatName] ? "#e4d4c0" : "#d97a1e" }),
+                 make("span", "pick-stat", "Anyone: the club picks the first classmate who can"),
+                 make("span", "pick-seated", chosen.seats[seatName] ? "" : "Empty now"));
+    empty.querySelector(".bookmark-inner").append(make("span", "pick-plate", "Anyone"));
+    empty.onclick = () => { chosen.seats[seatName] = ""; delete chosen.tiers[seatName]; close(); };
+    people.replaceChildren(empty, ...state.team.map((seat) => {
       const keyless = seat.ready === false;
       const here = chosen.seats[seatName] === seat.persona;
       const seatedIn = list.filter((name) => name !== seatName && chosen.seats[name] === seat.persona).map((name) => SEATS[name].title);
@@ -591,8 +612,9 @@
                     make("span", "pick-seated", own || (here ? "Sits here now" : seatedIn.length ? `Also ${seatedIn.join(", ")}` : "")));
       button.onclick = () => {
         if (keyless) return;
+        if (chosen.seats[seatName] !== seat.persona) delete chosen.tiers[seatName];  // on the role's usual model
         chosen.seats[seatName] = seat.persona;
-        $("#seat-dialog").hidden = true;  // (the watch below clears the choice and draws the seats again)
+        close();
       };
       return button;
     }));
@@ -676,30 +698,46 @@
       const seat = state.seats.get(persona);
       const info = SEATS[seatName];
       const column = make("div", "team-seat");
+      const card = make("div", "seat-card");
       const button = make("button", "seat-button");
       button.type = "button";
       button.setAttribute("aria-haspopup", "dialog");
-      button.setAttribute("aria-label", `${info.title}: ${called(persona)}. Choose who sits here`);
+      button.setAttribute("aria-label", `${info.title}: ${persona ? called(persona) : "empty, the club picks"}. Choose who sits here`);
       button.onclick = () => openSeat(seatName);
-      const frame = bookmark(persona, "is-seat", { frame: chosen.choosing === seatName ? "#d97a1e" : "#e4d4c0" });
+      const level = persona ? levelFor(chosen, seatName) : null;
+      const drawn = level?.picture ? `pictures/${encodeURIComponent(persona)}/${encodeURIComponent(level.picture)}` : "";
+      const frame = bookmark(persona, "is-seat", { frame: chosen.choosing === seatName ? "#d97a1e" : "#e4d4c0", drawn });
       const inner = frame.querySelector(".bookmark-inner");
-      inner.append(make("span", "seat-tag", info.title), make("span", "seat-level", `Lv ${seat?.level || 1}`));
+      inner.append(make("span", "seat-tag", info.title));
+      if (persona) inner.append(make("span", "seat-level", `Lv ${seat?.level || 1}`));
       const plate = make("span", "seat-plate");
-      plate.style.background = plateOf(persona);
-      plate.append(make("span", "seat-name", called(persona)),
-                   make("span", "seat-model", `${seat?.alias ? `${seat.name} · ` : ""}${modelFor(chosen, seatName)}`));
+      plate.style.background = persona ? plateOf(persona) : "#8a7866";
+      plate.append(make("span", "seat-name", persona ? called(persona) : "Anyone"));
+      const menu = persona && hasLevels(persona);
+      if (!menu) {
+        plate.append(make("span", "seat-model", persona ? `${seat?.alias ? `${seat.name} · ` : ""}${modelFor(chosen, seatName)}`
+                                                        : "the club picks"));
+      }
       inner.append(plate);
       button.append(frame);
-      column.append(button);
-      if (hasStrong(persona)) {
-        const tier = tierOf(chosen, seatName);
-        column.append(segmented(`${seat.name}'s model for the ${info.title.toLowerCase()}`,
-                                [["cheap", nick(seat.cheap)], ["strong", nick(seat.strong)]], tier,
-                                (value) => { chosen.tiers[seatName] = value; renderTeamPage(); }, true));
+      card.append(button);
+      if (menu) {  // her model: a menu on her plate (as many levels as she has), her picture changing with it
+        const select = make("select", "seat-menu");
+        select.setAttribute("aria-label", `${called(persona)}'s model as ${info.title.toLowerCase()}`);
+        for (const option of levelsOf(persona)) {
+          const item = make("option", "", nick(option.label));
+          item.value = option.tier;
+          item.title = modelOf(option.label);
+          item.selected = option.tier === level?.tier;
+          select.append(item);
+        }
+        select.onchange = () => { chosen.tiers[seatName] = select.value; renderTeamPage(); };
+        card.append(select);
       }
+      column.append(card);
       column.append(make("span", "seat-does", info.does));
       const checks = seatName === "judge" ? "drafter" : seatName === "tester" ? maker : "";
-      if (checks) {
+      if (checks && persona && chosen.seats[checks]) {  // (an empty seat: the club keeps the rule itself)
         const other = state.seats.get(chosen.seats[checks]);
         const same = other && seat && other.persona === seat.persona;
         const family = other && seat && !same && other.family === seat.family;
@@ -777,7 +815,7 @@
                                                    "the session stops and asks before she spends more."));
     const tanks = make("ul", "tanks");
     const split = team?.share || {};
-    for (const persona of [...new Set(list.map((seatName) => chosen.seats[seatName]))]) {
+    for (const persona of [...new Set(list.map((seatName) => chosen.seats[seatName]).filter(Boolean))]) {
       const view = window.staminaOf?.(state.seats.get(persona)?.stamina);
       const share = estimate != null && (split[persona] != null || list.length === 1) ? estimate * (split[persona] ?? 1) : null;
       const item = make("li", "tank");
@@ -836,8 +874,10 @@
     const seats = {}, tiers = {};
     for (const seatName of list) {
       const role = SEATS[seatName].role;
-      seats[role] = chosen.seats[seatName];
-      if (hasStrong(chosen.seats[seatName])) tiers[role] = tierOf(chosen, seatName);
+      const persona = chosen.seats[seatName];
+      if (!persona) continue;  // left empty: the club staffs it
+      seats[role] = persona;
+      if (hasLevels(persona)) tiers[role] = levelFor(chosen, seatName)?.tier;
     }
     const id = uid();
     state.sent.set(id, { text });
