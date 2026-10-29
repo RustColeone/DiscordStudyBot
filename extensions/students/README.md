@@ -229,11 +229,12 @@ false` turns all of it off; `notes: false` or `mood: false` keeps half.
 which detail you will ask about later; so every exchange is kept as it was said, too, and comes back two ways. Her
 **first look**, in the prompt part: the exchanges that best match your message (words, and meaning with `embed`),
 up to `said` characters (6,000), dated and in the order they were said, leaving out the newest `said_skip`
-exchanges of this chat (MomoChat still shows them); a faded exchange counts less here (a forgetting curve: it
-fades over about a month unless it comes up again). And **her search**, the two tools, when the first look does
-not have it: by relevance alone, however long ago. The look asks her to check that what she found is about you
-and the same thing before she says she remembers, and otherwise to search, then to say she doesn't remember rather
-than guess. Measured on the LoCoMo benchmark, this answers as well as the whole conversation in the prompt with a
+exchanges of this chat (MomoChat still shows them). Only what is close enough to your message comes to mind, and
+the more an exchange has faded, the closer it must be (a forgetting curve: it fades over about a month unless it
+comes up again), so small talk usually brings nothing back and costs nothing. And **her search**, the two tools,
+when the first look does not have it: by relevance alone, however long ago. The look asks her to check that what
+she found is about you and the same thing before she says she remembers, and otherwise to search, then to say she
+doesn't remember rather than guess; when nothing came to mind, it tells her only that she can search. Measured on the LoCoMo benchmark, this answers as well as the whole conversation in the prompt with a
 sixth of the text, and keeps working when the history no longer fits. It costs one embedding of each exchange and
 of each message (about $0.004 a thousand) and the space of the words (about 6 KB an exchange); `episodes: false`
 keeps nothing, `said: 0` turns the first look off, `search: false` the tools.
