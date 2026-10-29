@@ -157,6 +157,15 @@
     </div>
   </div>
 
+  <div class="dialog" id="seat-dialog" role="dialog" aria-modal="true" aria-labelledby="seat-title" hidden>
+    <div class="dialog-card seat-card">
+      <div class="dialog-head"><span id="seat-title">Who sits here?</span>
+        <button class="icon-button" data-close type="button" aria-label="Close">✕</button></div>
+      <div class="dialog-hint" id="seat-hint"></div>
+      <div class="student-row" id="seat-students"></div>
+    </div>
+  </div>
+
   <div class="viewer" id="viewer" hidden><img alt=""></div>
   <div class="toast" id="toast" hidden></div>
   <script type="application/json" id="state-data">{{state}}</script>

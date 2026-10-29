@@ -557,12 +557,63 @@
     return group;
   }
 
+  // A seat's panel: who sits there, picked from every student with what she scored alone; a pick closes it.
+  function openSeat(seatName) {
+    const chosen = pick();
+    const list = seatList(chosen);
+    const info = SEATS[seatName];
+    const maker = chosen.formation === "cascade" ? "drafter" : "builder";
+    chosen.choosing = seatName;
+    $("#seat-title").textContent = `${info.title}: who sits here?`;
+    $("#seat-hint").textContent = `${info.does} Nobody is ever busy: a student can sit in many sessions at once.`;
+    const people = $("#seat-students");
+    people.replaceChildren(...state.team.map((seat) => {
+      const keyless = seat.ready === false;
+      const here = chosen.seats[seatName] === seat.persona;
+      const seatedIn = list.filter((name) => name !== seatName && chosen.seats[name] === seat.persona).map((name) => SEATS[name].title);
+      const button = make("button", `student-pick${keyless ? " is-keyless" : ""}`);
+      button.type = "button";
+      button.disabled = keyless;
+      button.setAttribute("aria-pressed", String(here));
+      button.setAttribute("aria-label", keyless ? `${seat.name} has no model key here` : `Seat ${called(seat.persona)} as ${info.title}`);
+      const frame = bookmark(seat.persona, "is-pick", { frame: here ? "#d97a1e" : "#e4d4c0", grey: keyless });
+      const inner = frame.querySelector(".bookmark-inner");
+      inner.append(make("span", "pick-level", keyless ? "key?" : `Lv ${seat.level || 1}`));
+      const plate = make("span", "pick-plate", called(seat.persona));
+      plate.style.background = keyless ? "#6b5847" : plateOf(seat.persona);
+      inner.append(plate);
+      const alone = seat.alone;
+      const stat = keyless ? `Needs a ${COMPANIES[seat.family] || seat.family} key`
+        : alone ? `Alone${alone.model ? ` (${nick(alone.model)})` : ""}: ${(100 * alone.points / Math.max(1, alone.total)).toFixed(1)}%, ${priced(chosen, chosen.peak ? alone.session_peak : alone.session_offpeak)}`
+        : "Not measured yet";
+      const checks = seatName === "judge" ? "drafter" : seatName === "tester" ? maker : "";
+      const own = checks && chosen.seats[checks] === seat.persona ? `Can't check her own ${SEATS[checks].title.toLowerCase()} work` : "";
+      button.append(frame, make("span", "pick-stat", stat),
+                    make("span", "pick-seated", own || (here ? "Sits here now" : seatedIn.length ? `Also ${seatedIn.join(", ")}` : "")));
+      button.onclick = () => {
+        if (keyless) return;
+        chosen.seats[seatName] = seat.persona;
+        $("#seat-dialog").hidden = true;  // (the watch below clears the choice and draws the seats again)
+      };
+      return button;
+    }));
+    $("#seat-dialog").hidden = false;
+    renderTeamPage();
+    (people.querySelector('[aria-pressed="true"]:not(:disabled)') || people.querySelector("button:not(:disabled)"))?.focus();
+  }
+  // However the panel closes (a pick, ✕, a click beside it, Escape), no seat is being chosen any more.
+  new MutationObserver(() => {
+    if (!$("#seat-dialog").hidden || !state.pick?.choosing) return;
+    state.pick.choosing = "";
+    renderTeamPage();
+  }).observe($("#seat-dialog"), { attributes: true, attributeFilter: ["hidden"] });
+
   function renderTeamPage() {
     if (state.view !== "new") return;
     const chosen = pick();
     const page = $("#team-page");
     const list = seatList(chosen);
-    if (!list.includes(chosen.choosing)) chosen.choosing = list.includes("builder") ? "builder" : list[0];
+    if (!list.includes(chosen.choosing)) chosen.choosing = "";
     const back = make("a", "back-link", "‹ Classroom");
     back.href = "#";
     back.onclick = (event) => { event.preventDefault(); showList(); };
@@ -625,18 +676,12 @@
       const persona = chosen.seats[seatName];
       const seat = state.seats.get(persona);
       const info = SEATS[seatName];
-      if (index > 0) {
-        const arrow = make("span", "seat-arrow");
-        arrow.setAttribute("aria-hidden", "true");
-        arrow.textContent = "→";
-        seatsRow.append(arrow);
-      }
       const column = make("div", "team-seat");
       const button = make("button", "seat-button");
       button.type = "button";
-      button.setAttribute("aria-pressed", String(chosen.choosing === seatName));
-      button.setAttribute("aria-label", `${info.title}: ${called(persona)}${chosen.choosing === seatName ? " (choosing)" : ""}`);
-      button.onclick = () => { chosen.choosing = seatName; renderTeamPage(); };
+      button.setAttribute("aria-haspopup", "dialog");
+      button.setAttribute("aria-label", `${info.title}: ${called(persona)}. Choose who sits here`);
+      button.onclick = () => openSeat(seatName);
       const frame = bookmark(persona, "is-seat", { frame: chosen.choosing === seatName ? "#d97a1e" : "#e4d4c0" });
       const inner = frame.querySelector(".bookmark-inner");
       inner.append(make("span", "seat-tag", info.title), make("span", "seat-level", `Lv ${seat?.level || 1}`));
@@ -667,32 +712,7 @@
       }
       seatsRow.append(column);
     });
-    const people = make("div", "student-row");
-    for (const seat of state.team) {
-      const keyless = seat.ready === false;
-      const seatedIn = list.filter((seatName) => chosen.seats[seatName] === seat.persona).map((seatName) => SEATS[seatName].title);
-      const button = make("button", `student-pick${keyless ? " is-keyless" : ""}`);
-      button.type = "button";
-      button.disabled = keyless;
-      button.setAttribute("aria-label", keyless ? `${seat.name} has no model key here`
-        : `Seat ${called(seat.persona)} as ${SEATS[chosen.choosing].title}`);
-      const frame = bookmark(seat.persona, "is-pick", { frame: seatedIn.length ? "#d97a1e" : "#e4d4c0", grey: keyless });
-      const inner = frame.querySelector(".bookmark-inner");
-      inner.append(make("span", "pick-level", keyless ? "key?" : `Lv ${seat.level || 1}`));
-      const plate = make("span", "pick-plate", called(seat.persona));
-      plate.style.background = keyless ? "#6b5847" : plateOf(seat.persona);
-      inner.append(plate);
-      const alone = seat.alone;
-      const stat = keyless ? `Needs a ${COMPANIES[seat.family] || seat.family} key`
-        : alone ? `Alone${alone.model ? ` (${nick(alone.model)})` : ""}: ${(100 * alone.points / Math.max(1, alone.total)).toFixed(1)}%, ${priced(chosen, chosen.peak ? alone.session_peak : alone.session_offpeak)}`
-        : "Not measured yet";
-      button.append(frame, make("span", "pick-stat", stat), make("span", "pick-seated", seatedIn.join(", ")));
-      button.onclick = () => { if (!keyless) { chosen.seats[chosen.choosing] = seat.persona; renderTeamPage(); } };
-      people.append(button);
-    }
-    main.append(tools, seatsRow, make("h2", "row-title", "Students"),
-                make("p", "row-note", `Choose a seat above, then a student for it. Now choosing: ${SEATS[chosen.choosing].title}. ` +
-                                      "Nobody is ever busy: a student can sit in many sessions at once."), people);
+    main.append(tools, seatsRow);
 
     // the estimate, the budget and the start
     const aside = make("aside", "panel team-aside");

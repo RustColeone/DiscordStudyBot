@@ -616,7 +616,7 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .bookmark.is-small { width: 46px; height: 112px; }
 .bookmark.is-seat, .bookmark.is-seat .bookmark-inner, .bookmark.is-pick, .bookmark.is-pick .bookmark-inner {
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 94%, 0 100%); }
-.bookmark.is-seat { width: 176px; height: 440px; padding: 4px; }
+.bookmark.is-seat { width: 100%; height: auto; aspect-ratio: 2 / 5; padding: 4px; }
 .bookmark.is-pick { width: 100%; height: auto; aspect-ratio: 2 / 5; }
 .back-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #8a4a12; font-weight: 800; text-decoration: none; }
 .back-link:hover { color: #5a3510; }
@@ -624,7 +624,6 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .panel h2 { margin: 0 0 10px; font-size: 18px; font-weight: 900; }
 .eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #6b5847; }
 .task-panel .eyebrow { font-size: 13px; letter-spacing: .08em; color: #8a4a12; }
-.row-title { margin: 28px 0 4px; font-size: 20px; font-weight: 900; }
 .row-note { margin: 0; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
 .muted { color: var(--ink-2); }
 
@@ -650,24 +649,40 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
                        background: #ffffff; transition: left .15s; }
 .switch[aria-checked="true"] .switch-track { background: #e08a2e; }
 .switch[aria-checked="true"] .switch-track::after { left: 21px; }
-.seat-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
-.team-seat { display: flex; flex-direction: column; gap: 8px; width: 176px; }
-.seat-arrow { margin-top: 196px; color: #a88d73; font-size: 24px; font-weight: 900; }
+/* the seats, always on one line: they share the row (176px at most each) and their writing scales with them; a seat
+   opens a panel to pick who sits there; the arrow to the next seat sits in the gap, halfway down the card */
+.seat-row { display: flex; align-items: flex-start; gap: 20px; }
+.team-seat { flex: 1 1 0; min-width: 0; max-width: 176px; display: flex; flex-direction: column; gap: 8px;
+             container-type: inline-size; }
+.seat-button { position: relative; display: block; width: 100%; }
+.team-seat + .team-seat .seat-button::before { content: "→"; position: absolute; left: -10px; top: 50%;
+             transform: translate(-50%, -50%); color: #a88d73; font-size: 20px; font-weight: 900; }
+.seat-button:hover .bookmark-inner img { filter: brightness(1.05); }
 .seat-button, .student-pick { padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; }
-.seat-tag { position: absolute; left: 0; top: 10px; padding: 4px 10px 4px 8px; border-radius: 0 999px 999px 0; background: #3d3129;
-            color: #fffbf5; font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
-.seat-level { position: absolute; right: 8px; top: 10px; padding: 2px 8px; border-radius: 999px; background: rgba(255, 251, 245, .95);
-              color: #3d3129; font-size: 12px; font-weight: 900; }
-.seat-plate { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 12px 34px; color: #ffffff; }
-.seat-name { display: block; font-size: 19px; font-weight: 900; }
-.seat-model { display: block; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.seat-tag { position: absolute; left: 0; top: 6%; max-width: 78%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            padding: .3em .8em .3em .6em; border-radius: 0 999px 999px 0; background: #3d3129; color: #fffbf5;
+            font-size: clamp(9px, 7cqi, 12px); font-weight: 900; letter-spacing: .06em; text-transform: uppercase; }
+.seat-level { position: absolute; right: 5%; top: 6%; padding: .15em .6em; border-radius: 999px; background: rgba(255, 251, 245, .95);
+              color: #3d3129; font-size: clamp(9px, 7cqi, 12px); font-weight: 900; }
+/* a narrow seat: the role's name as a band across the top (it fits whole), and no level */
+@container (max-width: 110px) {
+  .seat-level { display: none; }
+  .seat-tag { top: 0; right: 0; max-width: none; padding: .45em .2em; border-radius: 0; text-align: center;
+             font-size: clamp(8px, 9.5cqi, 12px); letter-spacing: 0; }
+  .seat-plate { padding-left: 5%; padding-right: 5%; }
+}
+.seat-plate { position: absolute; left: 0; right: 0; bottom: 0; padding: 7% 7% 22%; color: #ffffff; }
+.seat-name { display: block; font-size: clamp(10px, 11cqi, 19px); font-weight: 900; overflow-wrap: break-word; line-height: 1.15; }
+.seat-model { display: block; font-size: clamp(9px, 7cqi, 12px); font-weight: 600; overflow-wrap: anywhere; }
 .team-seat .segmented { display: flex; }
 .team-seat .segmented button { flex: 1; }
-.seat-does { font-size: 13px; line-height: 1.35; color: var(--ink-2); }
-.seat-rule { font-size: 12px; font-weight: 700; line-height: 1.35; color: #24714a; }
+.seat-does { font-size: clamp(11px, 7.5cqi, 13px); line-height: 1.35; color: var(--ink-2); }
+.seat-rule { font-size: clamp(10px, 7cqi, 12px); font-weight: 700; line-height: 1.35; color: #24714a; }
+.team-seat .segmented button { min-width: 0; padding-left: 4px; padding-right: 4px; font-size: clamp(11px, 8cqi, 14px); }
 .seat-rule.is-warn { color: #865610; }
-/* the students to pick from: as many columns as fit at 104px or more, sharing the row evenly; each card grows with
-   its column up to 150px and sits in the middle of it, so the gaps stay even at any width */
+/* a seat's panel: every student to pick from, as many columns as fit at 104px or more, sharing the row evenly; each
+   card grows with its column up to 150px and sits in the middle of it, so the gaps stay even at any width */
+.seat-card { width: min(760px, 100%); }
 .student-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 16px 12px; margin-top: 14px; }
 .student-pick { display: flex; flex-direction: column; align-items: center; justify-self: center; width: 100%; max-width: 150px; }
 .student-pick:disabled { cursor: not-allowed; opacity: .65; }
@@ -676,6 +691,7 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .pick-plate { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px 22px; color: #ffffff; font-weight: 900; font-size: 14px; }
 .pick-stat { display: block; margin-top: 6px; font-size: 12px; font-weight: 700; line-height: 1.3; color: var(--ink-2); text-align: center; }
 .pick-seated { display: block; min-height: 16px; font-size: 12px; font-weight: 800; color: #8a4a12; text-align: center; }
+.student-pick[aria-pressed="true"] .pick-stat { color: var(--ink); }
 .aside-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .aside-head h2 { margin: 0; font-size: 20px; }
 .team-line { font-size: 16px; font-weight: 800; line-height: 1.35; }
@@ -812,9 +828,8 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
   .session-tabs { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; }
   .session-tab { white-space: nowrap; }
   .sessions-search { width: 100%; }
-  .seat-arrow { display: none; }
-  .team-seat, .bookmark.is-seat { width: 150px; }
-  .bookmark.is-seat { height: 360px; }
+  .seat-row { gap: 14px; }
+  .team-seat + .team-seat .seat-button::before { left: -7px; font-size: 15px; }
   .report-title { font-size: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .session-card { transition: none; } .session-card:hover { transform: none; } }
