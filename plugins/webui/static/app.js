@@ -890,50 +890,11 @@
     $("#connection").classList.toggle("is-off", Boolean(text));
   }
 
-  // The mini map: MomoChat (here) and the Classroom next door, who is in each, and who waits at the Classroom's door
-  // with an invitation. The Classroom says who is there (the server asks it); without a Classroom there is no map.
-  // The places other interfaces publish in the core's directory (contracts 1.7), and this classroom.
+  // The places other interfaces publish in the core's directory (contracts 1.7): who is also in the Classroom, and the
+  // invitations to it that classmates here hold (the members panel and the chat's header say so).
   const awayKeys = (places) => new Set((places?.others || []).flatMap((place) => place.away || []));
   const ticketsHere = (places) => new Map((places?.others || []).flatMap((place) => (place.tickets || [])
     .filter((ticket) => ticket.key).map((ticket) => [ticket.key, { ...ticket, place: place.place?.name || "there" }])));
-
-  function renderMap() {
-    const map = $("#map");
-    const places = state.places;
-    if (!map) return;
-    map.hidden = !places;
-    if (!places) return;
-    const tickets = ticketsHere(places); // invitations to another place, held by classmates here
-    const tile = (place, here) => {
-      const node = make(here ? "div" : "a", `place${here ? " is-here" : ""}`);
-      if (!here && place.link) { node.href = place.link; node.title = `Go to ${place.place.name}`; }
-      node.append(make("span", "place-name", `${place.place.icon || "📍"} ${place.place.name}`));
-      const faces = make("span", "place-faces");
-      const people = place.people || [];  // a student is in every place at once: here, and wherever she works
-      for (const person of people.slice(0, 6)) {
-        const face = avatar(person.name, person.avatar || keyOf(person.name));
-        face.title = person.title ? `${person.name} · ${person.doing || "working"} on “${person.title}”` : person.name;
-        const ticket = here ? tickets.get(person.key) : null;
-        if (ticket) {  // she has an invitation for you
-          face.classList.add("has-ticket");
-          face.title = `${person.name} invites you to the ${ticket.place.toLowerCase()}: “${ticket.title}”`;
-        }
-        faces.append(face);
-      }
-      const note = place.place.note || "";
-      node.append(faces, make("span", "place-note", here ? `You are here${note ? ` · ${note}` : ""}` : note));
-      return node;
-    };
-    const corridor = make("div", "corridor");
-    for (const ticket of [...tickets.values()].slice(0, 3)) {
-      const door = make("a", "door");
-      door.href = ticket.link || "";
-      door.title = `Follow ${ticket.by || "a classmate"} to the ${ticket.place.toLowerCase()}: “${ticket.title}”`;
-      door.append(make("span", "", "🎟️"), make("span", "", "🚪"));
-      corridor.append(door);
-    }
-    map.replaceChildren(tile(places.here, true), corridor, ...(places.others || []).slice(0, 1).map((place) => tile(place, false)));
-  }
 
   // MomoChat not loaded here (no momochat engine, or no students): the page stays readable, greyed, and says why
   // instead of taking messages nobody answers.
@@ -965,7 +926,6 @@
       state.places = s.places;
       state.here = s.here;
       offline(s.momochat === false);
-      renderMap();
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       // A link to a chat (#<chat>, from the Classroom's "open the chat", say) opens it; #dm=<student>, from the
       // cafe, opens the direct chat with her (started if there is none yet).
@@ -993,7 +953,6 @@
       const where = (places) => JSON.stringify([[...awayKeys(places)], [...ticketsHere(places).keys()]]);
       const moved = where(state.places) !== where(event.places);
       state.places = event.places;
-      renderMap();
       window.renderPlaces?.($("#places-nav"), state.places || { here: state.here, others: [] }, "MomoChat");
       if (moved) renderMembers();  // "also in the Classroom" in the member list too
     } else if (event.type === "roster") {  // a new alias, a bond grown, a mood changed, stamina spent

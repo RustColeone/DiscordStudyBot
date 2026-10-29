@@ -155,7 +155,7 @@
         return;
       }
       case "task": return taskChanged(event.task);
-      case "places": state.places = event.places; state.links = event.links || {}; renderMap(); renderPlaces(); return;
+      case "places": state.places = event.places; state.links = event.links || {}; renderPlaces(); return;
       case "step": {
         const step = event.step;
         if (!state.loaded.has(step.task)) return;
@@ -234,7 +234,6 @@
     state.places = data.places;
     state.links = data.links || {};
     if (data.workflows) WORKFLOWS = data.workflows.map((item) => [item.name, item.title, item.text]);
-    renderMap();
     renderPlaces();
     state.tasks = new Map(data.tasks.map((task) => [task.id, task]));
     state.progress = new Map(Object.entries(data.progress || {}).map(([task, runs]) =>
@@ -1344,57 +1343,6 @@
     const [interfaceName, ...rest] = String(address || "").split(":");
     const link = (state.links || {})[interfaceName];
     return link ? `${link.replace(/\/$/, "")}/#${encodeURIComponent(rest.join(":"))}` : "";
-  }
-
-  // The mini map: the places, who is in each (a student is in every place at once), and the corridor
-  // with the invitations waiting for you.
-  function personFace(person) {
-    if (state.seats.has(person.key)) return avatar(person.key, true);
-    if (person.avatar && state.avatars.has(person.avatar)) {
-      const face = paint(make("div", "avatar small"), person.avatar);
-      const image = make("img");
-      image.src = `avatars/${person.avatar}`;
-      image.alt = "";
-      face.append(image);
-      return face;
-    }
-    return avatar(person.name || person.key, true);
-  }
-  function renderMap() {
-    const map = $("#map");
-    const places = state.places;
-    if (!map || !places) return;
-    map.hidden = false;
-    const tickets = new Map((places.here.tickets || []).filter((ticket) => ticket.key).map((ticket) => [ticket.key, ticket]));
-    const tile = (place, here) => {
-      const node = make(here ? "div" : "button", `place${here ? " is-here" : ""}`);
-      if (!here) { node.type = "button"; node.title = `Go to ${place.place.name}`; node.onclick = () => { if (place.link) location.href = place.link; }; }
-      node.append(make("span", "place-name", `${place.place.icon || "📍"} ${place.place.name}`));
-      const faces = make("span", "place-faces");
-      const people = place.people || [];  // a student is in every place at once
-      for (const person of people.slice(0, 6)) {
-        const face = personFace(person);
-        face.title = person.title ? `${person.name} · ${person.doing || "working"} on “${person.title}”` : person.name;
-        const ticket = here ? null : tickets.get(person.key);
-        if (ticket) { face.classList.add("has-ticket"); face.title = `${person.name} has an invitation for you: “${ticket.title}”`; }
-        faces.append(face);
-      }
-      const note = place.place.note || "";
-      node.append(faces, make("span", "place-note", here ? `You are here${note && note !== "quiet" ? ` · ${note}` : ""}` : note));
-      return node;
-    };
-    const corridor = make("div", "corridor");
-    for (const ticket of (places.here.tickets || []).slice(0, 3)) {  // invitations not followed yet: she waits there
-      const door = make("button", "door");
-      door.type = "button";
-      door.title = `${ticket.by || "A classmate"} invites you: “${ticket.title}”`;
-      door.append(make("span", "", "🎟️"), make("span", "", "🚪"));
-      door.onclick = () => open(ticket.task);
-      corridor.append(door);
-    }
-    const others = (places.others || []).slice(0, 1).map((place) => tile(place, false));
-    map.replaceChildren(...(others.length ? [...others, corridor] : []), tile(places.here, true));
-    map.classList.toggle("is-alone", !others.length);
   }
 
   // ---- the timeline -------------------------------------------------------------------------------

@@ -164,8 +164,9 @@ class WebUI(Interface):
         self._stopping = False
         self._runner: web.AppRunner | None = None
         self.address_shown = ""
-        # The mini map: MomoChat and the other places interfaces publish in the core's directory (the Classroom next
-        # door, say; contracts 1.7). `map: false` turns it off; with no other place there is simply no map.
+        # The places in the core's directory (contracts 1.7): MomoChat publishes itself, and reads the others (the
+        # Classroom next door, say) for the places bar, who is also there and the invitations. `map: false` (its name
+        # from when a mini map drew them) turns it off.
         self.map = config.get("map", True) is not False
         self.momochat = True  # whether MomoChat (and the students) are loaded, so anyone answers here: the module says
         self.places_poll_s = max(2.0, float(config.get("places_poll_s", 5)))

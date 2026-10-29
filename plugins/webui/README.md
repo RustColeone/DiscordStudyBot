@@ -59,7 +59,7 @@ It loads by default. To change anything, copy [`config.example.yml`](config.exam
 | `classmates` | the personas' own display names | Names of your own for those personas, in the same order (one the core does not know is the persona's name, capitalised). They should match the personas' display names: the page finds a classmate's model row by exact display name and a speaker by prefix. |
 | `assignment` | | Merged over the default assignment (top-level keys replace, so `budget` replaces the whole budget; `options` are merged key by key over the web UI's). |
 | `max_upload_mb` | 50 | Largest upload and largest file the core sends here; also sizes the server's request limit. |
-| `map` | true | The mini map: MomoChat and the places other interfaces publish in the core's directory (contracts 1.7), such as the Classroom, read every `places_poll_s` (5) seconds while a page is open. MomoChat publishes itself too (its link and the students), so other interfaces can draw it. A student visiting another place shows there too (a student is in every place at once); one holding an invitation for you has a pulsing ring, its ticket in the corridor. No other place: no map. `false` turns it off. |
+| `map` | true | The places in the core's directory (contracts 1.7): the places other interfaces publish, such as the Classroom, read every `places_poll_s` (5) seconds while a page is open, for the places bar, who is also in the Classroom (a student is in every place at once) and the invitations classmates hold for you; MomoChat publishes itself too (its link and the students). (The name is from when a mini map drew them.) `false` turns it off. |
 
 A link to a chat (`http://<page>/#<chat>`, as the Classroom's "open MomoChat" makes) opens that chat.
 

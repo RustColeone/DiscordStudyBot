@@ -412,7 +412,7 @@ sequenceDiagram
     C->>C: DeepSeek checks the task log (chimera.tasks)
     C->>Y: "I think we need to go to the lab for this, want to come with me?"
     C->>L: chimera.invite: her brief, her notes on how you like it,<br/>the latest part of this chat (nothing starts)
-    C->>Y: a link · on the map she has a ticket for you (still in class)
+    C->>Y: a link · her chat and the members panel show the invitation
     Y->>L: follow it: the arrival card (the brief to edit, project, workflow, who comes along)
     Y->>L: Start the session
     L->>Y: "Here we are in the lab. I brought what we talked about." · the work · two approvals · landed
@@ -430,12 +430,12 @@ sequenceDiagram
 | Classroom → MomoChat | **Report back** (on the page, or `club`, once the session is done): a session report (title, outcome, commit, tests, who did it, who was in the Classroom and who was asked along but not there, the summary, a link to the visit) goes into the chat it came from, sent with `core.send_message` as your own command. It joins that chat's history, so the students there know it, and it can go into their diaries like anything said there. |
 | MomoChat → Classroom, later | The **task log** (`chimera.tasks`, `$tasks <words>`; not the Logbook page): the students look up what happened in the Classroom; DeepSeek does before she writes a new brief. |
 
-**The mini map**, in both places: MomoChat and the Classroom side by side, and who is in each. A **visit** lasts from
-the start of a session until you report back or it is closed (or `visit_minutes`, 30, after it last moved once
-nothing runs): the student who brought you, her crew and everyone who worked on it are in the Classroom meanwhile,
-at work or "waiting for your check"; they stay in MomoChat too. An invitation you have not followed yet keeps her
-in class with a pulsing ring, and its ticket waits in the corridor (🎟️🚪); click a place (or the ticket) to go
-there.
+**Who is where**: a student is in every place at once, so nobody moves between MomoChat and the Classroom (the mini
+map that drew the two side by side went on 2026-10-28). A **visit** lasts from the start of a session until you
+report back or it is closed (or `visit_minutes`, 30, after it last moved once nothing runs): the student who brought
+you, her crew and everyone who worked on it are in the Classroom meanwhile, at work or "waiting for your check", and
+MomoChat's members say she is also there; an invitation you have not followed yet shows in her chat and in the
+members panel, a link to the session.
 The Classroom serves it at `/api/presence`; the web UI's server asks for it on this machine every few seconds while
 a page is open (web UI setting `lab_presence`), so neither page reaches across sites.
 
@@ -595,7 +595,7 @@ core (the Classroom alone, as `python -m extensions.chimera` runs it):
 - a task surviving a restart, with nothing said twice, and a guest getting chat only
 - the page refusing other sites and starting a task
 - the module inside the real core, from its page and from another interface (diff file, link, approvals there)
-- the MomoChat → Classroom trip: an invitation with companions, the visit on the map, report back, the logbook
+- the MomoChat → Classroom trip: an invitation with companions, the visit, report back, the logbook
 - the crew taking roles first; the narrator speaking of her own part in the first person; `AGENTS.md` reaching
   the drafter and the judge
 - an answer cut off at the length limit asked again with twice the room; seats without a key skipped quietly

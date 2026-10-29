@@ -427,7 +427,6 @@ window.I18N_ZH = {
  "What {name} calls you": "{name} 对你的称呼",
  "When today's allowance is spent, her work stops and asks you before she spends more.": "当今日额度用尽时，她的工作会停止，并在继续花费前询问你。",
  "Where": "位置",
- "Where everyone is": "大家在哪儿",
  "Where the club may work. Each task gets its own copy (a git worktree), so your checkout stays as it is until you land a change.": "社团可以工作的地方。每个任务获得自己的副本（一个 git 工作树），因此你的检出保持不变，直到你采纳一个变更。",
  "Who": "谁",
  "Who comes along": "同行者",
