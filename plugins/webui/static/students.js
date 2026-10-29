@@ -67,8 +67,6 @@
     initial.style.color = plateOf(student);
     return initial;
   }
-  // Her run alone on a benchmark (one seat, hers), if she has one.
-  const aloneRun = (student) => (student.benchmark || []).find((row) => row.formation === "alone" && row.seats.length === 1);
   const pointsOf = (row) => `${(100 * row.points / Math.max(1, row.total)).toFixed(1)}%`;
   function seatLabel(student, row) {  // what she did in that team, and who else did what
     const verbs = (seats) => seats.map((seat) => VERBS[seat] || seat).join(" and ");
@@ -113,7 +111,7 @@
     for (const student of shownList) grid.append(studentCard(student));
     if (state.filter === "all") {
       const add = make("article", "student-add");
-      add.append(icon("plus", 48), make("h2", "", "Add a student"),
+      add.append(icon("plus", 32), make("h2", "", "Add a student"),
                  make("p", "", "A student is one folder in extensions/students/: her student.yml (name, models, " +
                                "description), her prompt, her pictures; her memory comes with her."));
       grid.append(add);
@@ -122,69 +120,39 @@
     document.title = `Students · ${state.title || ""}`;
   }
 
+  // A card in the grid: her portrait, level, bond and name; a tap opens her page (all the rest is there).
   function studentCard(student) {
     const lacking = student.own_ready === false;
-    const card = make("article", `student-card${lacking ? " is-lacking" : ""}`);
+    const card = make("a", `student-card${lacking ? " is-lacking" : ""}`);
+    card.href = `#${encodeURIComponent(student.name)}`;
     card.style.setProperty("--plate", plateOf(student));
     const top = make("div", "student-portrait");
     top.append(portrait(student, "portrait-image"));
-    const record = level(student);
-    top.append(make("span", "badge badge-level", `Lv ${record.level}`));
+    top.append(make("span", "badge badge-level", `Lv ${level(student).level}`));
     if (student.bond) {
       const bond = make("span", "badge badge-bond");
       bond.append(icon("heart"), make("span", "", String(student.bond.closeness)));
       bond.title = `${student.bond.role}, closeness ${student.bond.closeness}/100`;
       top.append(bond);
     }
-    top.append(make("span", "badge badge-stage", `Stage ${record.stage} of ${record.stages}`));
+    const working = classroomNow(student);
     if (lacking) top.append(make("span", "badge badge-key", `No ${companyOf(student) || "own"} key`));
+    else if (working) top.append(make("span", "badge badge-work", working));
     const plate = make("div", "student-plate");
-    const nameRow = make("div", "plate-row");
-    nameRow.append(make("span", "plate-name", shown(student)));
-    if (student.alias) nameRow.append(make("span", "plate-note", "your name for her"));
-    const models = [...new Set([student.own?.[0], student.strong?.[0]].filter(Boolean).map(modelName))];  // her first of each
-    plate.append(nameRow, make("div", "plate-line", [student.alias ? student.display : "", companyOf(student),
-      models.join(" and ")].filter(Boolean).join(" · ")));
-    const body = make("div", "student-body");
-    if (student.description) body.append(make("p", "student-line student-description", student.description));
+    plate.append(make("span", "plate-name", shown(student)),
+                 make("span", "plate-line", student.alias ? student.display : companyOf(student)));
+    card.append(top, plate);
+    card.setAttribute("aria-label", `${shown(student)}, level ${level(student).level}` +
+                                    (student.bond ? `, bond ${student.bond.closeness}` : "") + (lacking ? ", needs a key" : ""));
+    return card;
+  }
+  // Where she is: the cafe always, her chats in MomoChat, and the Classroom when she is working there.
+  function whereChips(student) {
     const chips = make("div", "chips");
     chips.append(make("span", "chip chip-cafe", "Cafe"), make("span", "chip chip-momo", `MomoChat · ${student.chats}`));
     const working = classroomNow(student);
     if (working) chips.append(make("span", "chip chip-class", `Classroom · ${working}`));
-    body.append(chips);
-    if (lacking) body.append(make("p", "student-warn", "Answers on a classmate's model until you add her key."));
-    else body.append(...staminaRows(student));
-    const run = aloneRun(student);
-    if (run) {
-      const box = make("div", "bench-box");
-      box.append(make("div", "bench-label", `Alone on the benchmark${run.model ? ` (${run.model})` : ""}`),
-                 make("div", "bench-main", `${pointsOf(run)} points · ${run.solved} of ${run.exercises} solved`),
-                 make("div", "bench-note", `${money(run.session_offpeak)} a session · ${minutes(run.median_min)}`));
-      body.append(box);
-    }
-    const open = make("a", "card-link", "Open her card");
-    open.href = `#${encodeURIComponent(student.name)}`;
-    body.append(open);
-    card.append(top, plate, body);
-    return card;
-  }
-  // Her stamina on her card: her account (the thick bar) and what is left of today (the thin bar, in her colour).
-  function staminaRows(student) {
-    const view = window.staminaOf?.(student.stamina);
-    if (!view || (view.account == null && view.today == null && !view.accountText)) return [];
-    const rows = make("div", "stamina-rows");
-    const line = (label, text, fraction, kind) => {
-      const head = make("div", "stamina-line");
-      head.append(make("span", "", label), make("span", "", text));
-      const bar = make("div", `stamina-meter is-${kind}`);
-      const fill = make("div", "meter-fill");
-      fill.style.width = `${Math.round((fraction ?? 0) * 100)}%`;
-      bar.append(fill);
-      rows.append(head, bar);
-    };
-    if (view.accountText) line("Stamina", view.accountText, view.account, "account");
-    if (view.today != null) line("Today", view.todayText, view.today, "today");
-    return [rows];
+    return chips;
   }
   function classroomNow(student) {  // what she is doing in the Classroom now, from the places it publishes
     const classroom = (state.places?.others || []).find((place) => place.place?.name === "Classroom");
@@ -231,6 +199,9 @@
                                                                       : `${student.display} · give her a name of your own`));
     if (student.description) plate.append(make("div", "plate-line student-description", student.description));
     hero.append(picture, plate);
+    const where = make("div", "hero-where");
+    where.append(whereChips(student));
+    hero.append(where);
 
     const stages = section("Art stages");
     stages.append(make("p", "panel-note", "Each stage is a new, better illustration. You can show any stage she has unlocked."));

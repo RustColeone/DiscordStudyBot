@@ -617,7 +617,7 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .bookmark.is-seat, .bookmark.is-seat .bookmark-inner, .bookmark.is-pick, .bookmark.is-pick .bookmark-inner {
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 94%, 0 100%); }
 .bookmark.is-seat { width: 176px; height: 440px; padding: 4px; }
-.bookmark.is-pick { width: 104px; height: 260px; }
+.bookmark.is-pick { width: 100%; height: auto; aspect-ratio: 2 / 5; }
 .back-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #8a4a12; font-weight: 800; text-decoration: none; }
 .back-link:hover { color: #5a3510; }
 .panel { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 16px 22px; }
@@ -666,8 +666,10 @@ body.view-list .sidebar, body.view-list .room, body.view-list .inspector { displ
 .seat-does { font-size: 13px; line-height: 1.35; color: var(--ink-2); }
 .seat-rule { font-size: 12px; font-weight: 700; line-height: 1.35; color: #24714a; }
 .seat-rule.is-warn { color: #865610; }
-.student-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
-.student-pick { display: flex; flex-direction: column; align-items: center; width: 116px; }
+/* the students to pick from: as many columns as fit at 104px or more, sharing the row evenly; each card grows with
+   its column up to 150px and sits in the middle of it, so the gaps stay even at any width */
+.student-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 16px 12px; margin-top: 14px; }
+.student-pick { display: flex; flex-direction: column; align-items: center; justify-self: center; width: 100%; max-width: 150px; }
 .student-pick:disabled { cursor: not-allowed; opacity: .65; }
 .pick-level { position: absolute; right: 6px; top: 6px; padding: 1px 6px; border-radius: 999px; background: rgba(255, 251, 245, .95);
               color: #3d3129; font-size: 11px; font-weight: 900; }

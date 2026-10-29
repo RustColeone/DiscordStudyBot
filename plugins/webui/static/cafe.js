@@ -129,12 +129,28 @@
     }
     location.href = `./#dm=${encodeURIComponent(student.name)}`;
   }
+  // Nearer the front (lower on the floor), drawn in front: a depth from how high she stands, in % of the floor.
+  const depth = (y) => String(1000 - Math.round(y * 10));
   function place(walker, x, y) {
     walker.x = x;
     walker.y = y;
     walker.node.style.left = `${x}%`;
     walker.node.style.bottom = `${y}%`;
-    walker.node.style.zIndex = String(100 - Math.round(y));  // nearer the front, in front
+    if (!walker.node.classList.contains("is-walking")) walker.node.style.zIndex = depth(y);
+  }
+  // While anyone walks, her depth follows where she is on the way (the transition moves her), not where she is going;
+  // nobody walking, no frames.
+  let following = 0;
+  function follow() {
+    following = 0;
+    let walking = false;
+    for (const walker of state.walkers) {
+      const node = walker.node;
+      if (!node.classList.contains("is-walking") || !node.parentElement) continue;
+      walking = true;
+      node.style.zIndex = depth(100 * parseFloat(getComputedStyle(node).bottom) / node.parentElement.clientHeight);
+    }
+    if (walking) following = requestAnimationFrame(follow);
   }
   function wander(walker) {
     if (reduced || document.hidden) return;
@@ -144,8 +160,10 @@
     walker.node.classList.add("is-walking");
     walker.node.style.transition = `left ${seconds}s linear, bottom ${seconds}s linear`;
     place(walker, x, y);
+    if (!following) following = requestAnimationFrame(follow);
     walker.timer = setTimeout(() => {
       walker.node.classList.remove("is-walking");
+      walker.node.style.zIndex = depth(walker.y);
       walker.timer = setTimeout(() => wander(walker), 1500 + Math.random() * 5000);
     }, seconds * 1000);
   }
@@ -198,6 +216,7 @@
     for (const walker of state.walkers) {
       clearTimeout(walker.timer);
       walker.node.classList.remove("is-walking");
+      walker.node.style.zIndex = depth(walker.y);
       if (!document.hidden) walker.timer = setTimeout(() => wander(walker), 400 + Math.random() * 1500);
     }
   });

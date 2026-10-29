@@ -14,9 +14,13 @@
                     color: var(--ink-2); font-size: 15px; font-weight: 800; }
 .segmented button[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 2px 8px rgba(110, 78, 45, .15); }
 .segmented .count { font-weight: 900; }
-.student-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-.student-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 18px;
-                background: var(--paper); box-shadow: var(--shadow); }
+/* a grid of small cards, two across on a phone; a card is a link to her page */
+.student-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.student-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 16px;
+                background: var(--paper); box-shadow: var(--shadow); color: inherit; text-decoration: none;
+                transition: transform .12s, box-shadow .12s; }
+.student-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(110, 78, 45, .18); }
+.student-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .student-card.is-lacking { border-style: dashed; border-color: var(--line-2); box-shadow: none; }
 .student-portrait, .hero-portrait { position: relative; }
 .portrait-image { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; object-position: 50% 10%; }
@@ -28,13 +32,12 @@
 .badge-level { left: 10px; top: 10px; background: #3d3129; color: #fffbf5; }
 .badge-level.big { left: 12px; top: 12px; padding: 5px 12px; font-size: 15px; }
 .badge-bond { right: 10px; top: 10px; background: rgba(255, 251, 245, .95); color: #9c2f4c; }
-.badge-stage { left: 10px; bottom: 10px; padding: 3px 10px; background: rgba(255, 251, 245, .95); color: #3d3129;
-               font-size: 12px; font-weight: 800; }
-.badge-key { right: 10px; bottom: 10px; padding: 4px 10px; background: #3d3129; color: #fffbf5; font-size: 12px; font-weight: 800; }
-.student-plate { padding: 10px 16px; background: var(--plate); color: #ffffff; }
+.badge-key, .badge-work { left: 8px; bottom: 8px; padding: 3px 9px; background: #3d3129; color: #fffbf5; font-size: 11px; font-weight: 800; }
+.badge-work { background: rgba(255, 251, 245, .95); color: var(--low-ink); }
+.student-plate { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px 10px; background: var(--plate); color: #ffffff; }
 .student-card.is-lacking .student-plate { background: #6b5847; }
 .plate-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.plate-name { font-size: 22px; font-weight: 900; }
+.plate-name { font-size: 18px; font-weight: 900; line-height: 1.15; overflow-wrap: anywhere; }
 .plate-name.big { font-size: 30px; line-height: 1.1; }
 .plate-note { font-size: 12px; font-weight: 700; }
 .plate-line { font-size: 13px; font-weight: 600; }
@@ -42,8 +45,6 @@
 .plate-button { align-self: center; min-height: 36px; padding: 0 12px; border: 1px solid rgba(255, 255, 255, .7);
                 border-radius: 10px; background: transparent; color: #ffffff; font-weight: 800; }
 .plate-button:hover { background: rgba(255, 255, 255, .12); }
-.student-body { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 16px; }
-.student-line { margin: 0; font-size: 14px; line-height: 1.4; color: var(--ink-2); }
 .student-warn { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-ink);
                 font-size: 13px; font-weight: 700; line-height: 1.4; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; font-weight: 800; }
@@ -51,17 +52,11 @@
 .chip-cafe { background: var(--panel); color: var(--ink-2); }
 .chip-momo { background: var(--heart-bg); color: var(--heart-ink); }
 .chip-class { background: var(--low-bg); color: var(--low-ink); }
-.bench-box, .soft-box { padding: 10px 12px; border-radius: 12px; background: var(--bg); font-size: 14px; line-height: 1.45; }
-.bench-label { font-size: 12px; font-weight: 800; color: var(--muted); }
-.bench-main { font-weight: 800; }
-.bench-note { color: var(--ink-2); }
-.card-link { margin-top: auto; display: flex; align-items: center; justify-content: center; min-height: 44px;
-             border-radius: 12px; background: var(--panel); color: var(--tab-ink); font-weight: 800; text-decoration: none; }
-.card-link:hover { background: var(--tab); }
-.student-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px;
-               min-height: 420px; border: 2px dashed var(--line-2); border-radius: 18px; text-align: center; color: #a88d73; }
-.student-add h2 { margin: 0; font-size: 20px; font-weight: 900; color: var(--ink); }
-.student-add p { margin: 0; max-width: 240px; font-size: 14px; line-height: 1.45; color: var(--ink-2); }
+.soft-box { padding: 10px 12px; border-radius: 12px; background: var(--bg); font-size: 14px; line-height: 1.45; }
+.student-add { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 14px;
+               min-height: 200px; border: 2px dashed var(--line-2); border-radius: 16px; text-align: center; color: #a88d73; }
+.student-add h2 { margin: 0; font-size: 16px; font-weight: 900; color: var(--ink); }
+.student-add p { margin: 0; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
 
 /* ---- one student ---- */
 .back-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #8a4a12; font-weight: 800;
@@ -73,6 +68,7 @@
 .hero { overflow: hidden; border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: var(--shadow); }
 .hero-plate { padding: 12px 18px; }
 .hero-plate .plate-line { font-size: 14px; }
+.hero-where { padding: 10px 18px 14px; }
 .panel { padding: 16px 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); }
 .student-left .panel { padding: 14px 16px; }
 .panel h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 18px; font-weight: 900; }
@@ -126,13 +122,7 @@
   .student-left { max-width: none; }
 }
 
-/* stamina: her account (thick) and what is left of today (thin, in her colour) */
-.stamina-rows { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.stamina-line { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; }
-.stamina-meter { height: 7px; border-radius: 4px; background: #efe2d1; overflow: hidden; }
-.stamina-meter.is-today { height: 5px; }
-.stamina-meter .meter-fill { height: 100%; border-radius: inherit; background: #e08a2e; }
-.stamina-meter.is-today .meter-fill { background: var(--plate); }
+/* stamina on her page: her account (thick) and what is left of today (thin, in her colour) */
 .big-number.is-stamina { color: #7a4d0e; }
 .meter-stamina .meter-fill { background: #e08a2e; }
 .meter-today { height: 6px; }

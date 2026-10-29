@@ -6,6 +6,7 @@
 .cafe-scene { position: relative; height: clamp(320px, 60vh, 520px); border-radius: 22px; overflow: hidden;
               border: 1px solid var(--line); background: var(--panel); }
 .cafe-room, .cafe-floor { position: absolute; inset: 0; }
+.cafe-floor { isolation: isolate; }  /* the walkers' depths stack among themselves, under the header and the room's name */
 .cafe-room > * { position: absolute; }
 .cafe-room img.picture { inset: 0; width: 100%; height: 100%; object-fit: cover; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cafe-room { filter: brightness(.82) saturate(.9); } }
