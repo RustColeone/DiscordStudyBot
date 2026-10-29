@@ -550,6 +550,21 @@ body.keyboard-open .places-nav { display: none; }  /* typing on a phone: every l
 .stamina-track.is-unknown { background: repeating-linear-gradient(90deg, #e4d4c0 0 4px, transparent 4px 7px); }
 .stamina-fill { display: block; height: 100%; border-radius: inherit; background: #e08a2e; }
 .stamina-note { font-size: 11px; font-weight: 700; line-height: 1.25; color: var(--muted); }
+/* The ring around the bolt (what is left today), shown when the header is short of room (places.js fitHeader): the
+   pill folds to it, then your tab to your initial. */
+.stamina-bolt { position: relative; place-items: center; }
+.stamina-ring { display: none; }
+.stamina-ring circle { fill: none; stroke: #e4d4c0; stroke-width: 3.5; }
+.stamina-ring .stamina-ring-fill { stroke: #e08a2e; stroke-linecap: round; }
+.stamina-ring.is-unknown circle { stroke-dasharray: 3 4; }
+.site-header.is-tight .stamina { padding: 3px; }
+.site-header.is-tight .stamina-total, .site-header.is-tight .stamina-note { display: none; }
+.site-header.is-tight .stamina-bolt { display: grid; width: 34px; height: 34px; }
+.site-header.is-tight .stamina-bolt > svg:last-child { width: 16px; height: 16px; }
+.site-header.is-tight .stamina-ring { display: block; position: absolute; inset: 0; width: 100%; height: 100%;
+                                      transform: rotate(-90deg); }
+.site-header.is-tighter .user-tab { padding: 3px; }
+.site-header.is-tighter .user-name { display: none; }
 @media (max-width: 760px) {
   .stamina { gap: 8px; padding: 4px 10px 4px 8px; }
   .user-tab { padding: 3px; }

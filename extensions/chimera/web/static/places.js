@@ -53,7 +53,7 @@
     if (!holder) return;
     const today = total?.today;
     holder.hidden = !today;
-    if (!today) { holder.replaceChildren(); return; }
+    if (!today) { holder.replaceChildren(); fitHeader(); return; }
     const fraction = today.allowance ? Math.max(0, Math.min(1, today.left / today.allowance)) : null;
     const text = today.allowance ? `${amount(today.spent)} / ${amount(today.allowance)}` : `${amount(today.spent)}`;
     const opener = document.createElement(set ? "button" : "a");
@@ -63,10 +63,17 @@
                                  : `Stamina: ${amount(today.spent)} spent today (no daily total set)`;
     opener.setAttribute("aria-label", said);
     opener.title = said;
+    // The bolt, in a ring of what is left today: the ring is all the pill shows when the header is short of room
+    // (`fitHeader`).
     const bolt = document.createElement("span");
     bolt.className = "stamina-bolt";
     bolt.setAttribute("aria-hidden", "true");
-    bolt.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#f0a04b" stroke="#a8601c" stroke-width="1.5" ' +
+    const left = Math.round((fraction ?? 0) * 100);
+    bolt.innerHTML = `<svg class="stamina-ring${fraction == null ? " is-unknown" : ""}" viewBox="0 0 36 36">` +
+                     '<circle cx="18" cy="18" r="15.5" pathLength="100"/>' +
+                     (left > 0 ? `<circle class="stamina-ring-fill" cx="18" cy="18" r="15.5" pathLength="100" ` +
+                                 `stroke-dasharray="${left} 100"/>` : "") + "</svg>" +
+                     '<svg width="20" height="20" viewBox="0 0 24 24" fill="#f0a04b" stroke="#a8601c" stroke-width="1.5" ' +
                      'stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></svg>';
     const bars = document.createElement("span");
     bars.className = "stamina-total";
@@ -85,6 +92,7 @@
     note.innerHTML = window.t ? window.t("stamina<br>today") : "stamina<br>today";
     opener.append(bolt, bars, note);
     holder.replaceChildren(opener);
+    fitHeader();
     if (!set) return;
     opener.onclick = () => {
       if (holder.querySelector(".stamina-edit")) { holder.querySelector(".stamina-edit").remove(); return; }
@@ -108,6 +116,32 @@
       field.focus();
     };
   };
+
+  // ---- room in the header: when the places would run under the stamina (a narrow window, a long name, more places),
+  // the pill folds to its ring, then your tab to your initial. (A phone has the places along the bottom.) ------------
+  const fitHeader = () => {
+    const header = document.querySelector(".site-header");
+    const nav = header?.querySelector(".places-nav"), end = header?.querySelector(".site-end");
+    if (!nav || !end) return;
+    header.classList.remove("is-tight", "is-tighter");
+    if (nav.hidden || getComputedStyle(nav).position === "fixed") return;
+    const clear = () => nav.getBoundingClientRect().right + 8 <= end.getBoundingClientRect().left;
+    for (const step of ["is-tight", "is-tighter"]) {
+      if (clear()) return;
+      header.classList.add(step);
+    }
+  };
+  // Fitted as soon as the places or the stamina are drawn, and again when the window, a font or a name changes their
+  // size (a frame later: the fit itself resizes the end).
+  let fitting = 0;
+  const refit = () => { if (!fitting) fitting = requestAnimationFrame(() => { fitting = 0; fitHeader(); }); };
+  const header = document.querySelector(".site-header");
+  if (header && window.ResizeObserver) {
+    const watch = new ResizeObserver(refit);
+    for (const part of [header, header.querySelector(".places-nav"), header.querySelector(".site-end")]) {
+      if (part) watch.observe(part);
+    }
+  }
 
   // ---- you: the tab right of the stamina, to your own page ----------------------------------------------------------
   // The web UI publishes it with its place (`you: {path, name}`, the path relative to its link); any page with the
@@ -187,5 +221,6 @@
     const page = document.querySelector(".site-page");
     if (page) page.textContent = current || "";
     window.renderYou(document.getElementById("user-tab"), places, { current: current === "You" });
+    fitHeader();
   };
 })();
