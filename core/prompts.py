@@ -1,10 +1,12 @@
 """Prompt parts: the pieces of a persona's prompt that engines place for it (see contracts.PromptPart).
 
 A persona's own parts come from its module or from core.yml (`personas: <name>: parts:`); modules may add parts
-for every persona or for those they name. `Session.prompt` renders them for one persona at one place."""
+for every persona or for those they name. `Session.prompt` renders them for one persona at one place, and
+`Session.aprompt` awaits the async ones too."""
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import inspect
 import re
@@ -18,6 +20,7 @@ FILE_LIMIT = 1_000_000  # characters read from a part's file (comments included)
 CUT = " [...]"
 COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)  # an unclosed comment runs to the end, as in HTML
 PART_KEYS = frozenset({"name", "text", "file", "place", "order"})
+PART_WAIT_S = 8.0  # seconds an async part may take before it is left out
 
 
 class FileText:
@@ -102,26 +105,60 @@ def describe(error: BaseException) -> str:
         return type(error).__name__
 
 
+def _ordered(parts: Iterable[PromptPart], place: str) -> list[PromptPart]:
+    if place not in PART_PLACES:
+        raise ValueError(f"place is one of {', '.join(PART_PLACES)}")
+    return sorted((part for part in parts if part.place == place), key=lambda part: part.order)
+
+
+def _text(text) -> str:
+    if not isinstance(text, str):
+        raise TypeError(f"gave {type(text).__name__}, not text")
+    return text
+
+
 def render(parts: Iterable[PromptPart], context: PartContext, place: str,
            report: Callable[[PromptPart, str, str], None]) -> str:
     """The parts at `place`, in order (ties keep the order given), each stripped and joined by a blank line, at most
     PLACE_LIMIT characters. A part whose text fails or is not text is left out, and `report(part, kind, detail)`
-    is called with kind `failed`; one cut to fit is reported `cut`, those after it `left_out`."""
-    if place not in PART_PLACES:
-        raise ValueError(f"place is one of {', '.join(PART_PLACES)}")
-    texts: list[str] = []
-    size, full = 0, False
-    for part in sorted((part for part in parts if part.place == place), key=lambda part: part.order):
+    is called with kind `failed`; one cut to fit is reported `cut`, those after it `left_out`. An async part is
+    left out (`arender` awaits it)."""
+    found = []
+    for part in _ordered(parts, place):
         try:
             text = part.text if isinstance(part.text, str) else part.text(context)
-            if inspect.iscoroutine(text):
-                text.close()
-                raise TypeError("its text function is async; it is called, never awaited")
-            if not isinstance(text, str):
-                raise TypeError(f"gave {type(text).__name__}, not text")
+            if inspect.isawaitable(text):
+                if inspect.iscoroutine(text):
+                    text.close()
+                raise TypeError("its text function is async: it is rendered with Session.aprompt")
+            found.append((part, _text(text)))
         except Exception as error:  # a module's or a file's problem must not fail the run
             report(part, "failed", "left out: " + describe(error))
-            continue
+    return _join(found, place, report)
+
+
+async def arender(parts: Iterable[PromptPart], context: PartContext, place: str,
+                  report: Callable[[PromptPart, str, str], None]) -> str:
+    """`render`, with each async part awaited in turn for at most PART_WAIT_S seconds (one that takes longer is
+    left out and reported `failed`)."""
+    found = []
+    for part in _ordered(parts, place):
+        try:
+            text = part.text if isinstance(part.text, str) else part.text(context)
+            if inspect.isawaitable(text):
+                text = await asyncio.wait_for(text, PART_WAIT_S)
+            found.append((part, _text(text)))
+        except TimeoutError:
+            report(part, "failed", f"left out: it took more than {PART_WAIT_S:g} s")
+        except Exception as error:  # a module's or a file's problem must not fail the run
+            report(part, "failed", "left out: " + describe(error))
+    return _join(found, place, report)
+
+
+def _join(found: list[tuple[PromptPart, str]], place: str, report: Callable[[PromptPart, str, str], None]) -> str:
+    texts: list[str] = []
+    size, full = 0, False
+    for part, text in found:
         text = text.strip()
         if not text:
             continue

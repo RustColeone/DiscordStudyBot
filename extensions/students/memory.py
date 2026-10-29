@@ -2,10 +2,12 @@
 until 2026-10-27; a student is an agent with this memory, so it is part of what the students module adds.
 
 Every engine that places prompt parts (MomoChat) tells her, each turn, who the person is to her, what they call her,
-her notes for the message and her mood's news. After each of her messages a watcher lets her learn from it: how it
-left her feeling, what is worth remembering, and a day of contact for her closeness with the person. What was said in
-a group chat, every student there heard: the notes one keeps of it go into each classmate's file too; a direct chat
-stays between the two. A person with several accounts (`people:`, or linked with `$link`) is one person to every
+her notes for the message, what was said before that bears on it (word for word: her first look, with mneme-llm 0.3)
+and her mood's news. After each of her messages a watcher lets her learn from it: the exchange kept word for word,
+how it left her feeling, what is worth remembering, and a day of contact for her closeness with the person. Two
+tools let her search everything said before with the person, and read an exchange with its neighbours, when the
+first look does not have it. What was said in a group chat, every student there heard: the exchange and the notes
+one keeps of it go into each classmate's file too; a direct chat stays between the two. A person with several accounts (`people:`, or linked with `$link`) is one person to every
 student. Pages see where she stands with you as facts (bond, alias, mood, plans, what she calls you, your accounts).
 `$alias` names a student your way, `$callme` says what the students call you, `$link` joins another account of yours,
 `$bond` shows where each stands with you. Agents (personas that are not students) keep nothing.
@@ -22,6 +24,7 @@ from pathlib import Path
 from contracts import Capability, ModelRequest, PromptPart, Risk, ToolResult, Watcher
 
 import mneme_llm
+from mneme_llm.tools import SPECS, Toolbox
 
 RESET = {"reset", "remove", "clear", "none"}
 DAY = 86400
@@ -36,7 +39,10 @@ FORMER = {"room": "momochat", "assistant": "momochat", "chat": "momochat"}
 # What `students: <persona>:` (or her student.yml `memory:`, under it) may set for one student, over the settings for
 # all.
 OWN = ("learn", "notes", "mood", "met_role", "owner_role", "writer_profile", "reflect_after_notes", "language",
-       "memory_language", "decisions", "config", "call_owner")
+       "memory_language", "decisions", "config", "call_owner", "episodes", "said", "said_skip", "embed", "search")
+# What was said, kept word for word (mneme-llm 0.3): a file of an older mneme-llm keeps notes only.
+EPISODES = hasattr(mneme_llm.Mneme, "alook")
+TOOLBOXES = 64  # the newest runs' search tools kept (each remembers what its searches showed)
 # Interfaces whose people are another's (`platforms:` adds to it): Whale-chan's own bot is on Discord.
 PLATFORMS = {"whale_chan": "discord"}
 
@@ -56,6 +62,15 @@ def flag(value, default: bool) -> bool:
     return default if value is None else bool(value)
 
 
+def whole(value, default: int, low: int, high: int) -> int:
+    """A whole-number setting within [low, high]; one that is not a number is the default."""
+    try:
+        number = int(value) if value is not None and not isinstance(value, bool) else default
+    except (TypeError, ValueError):
+        number = default
+    return max(low, min(high, number))
+
+
 class Settings:
     def __init__(self, config, folder: Path | None = None):
         self.raw, self.folder = dict(config), folder
@@ -71,6 +86,15 @@ class Settings:
         self.language = str(config.get("language") or "")
         self.call_owner = str(config.get("call_owner") or "")  # what her memory calls the owner (else their name)
         self.memory_language = str(config.get("memory_language") or "") or None  # notes also glossed in it
+        # What was said, word for word: each exchange kept (`episodes`), a first look of `said` characters of it for
+        # each message (0: none), leaving out the newest `said_skip` exchanges of the chat (the engine still shows
+        # them), found by meaning as well as words with `embed` (OpenAI embeddings, OPENAI_API_KEY), and `search`:
+        # her tools to look through the rest.
+        self.episodes = flag(config.get("episodes"), True)
+        self.said = whole(config.get("said"), 6000, 0, 50_000)
+        self.said_skip = whole(config.get("said_skip"), 15, 0, 200)
+        self.embed = flag(config.get("embed"), True)
+        self.search = flag(config.get("search"), True)
         # Who judges her mood and what is worth keeping: core (her model), or luna (GPT-6 Luna's Decisions API with
         # OPENAI_API_KEY, then the local micro model once it has learned, then her model). Anything else is core.
         self.decisions = "luna" if str(config.get("decisions") or "").strip().lower() == "luna" else "core"
@@ -130,6 +154,7 @@ class Book:
         self.codes: dict[str, tuple[str, float]] = {}  # a `$link` code → (the person who asked for it, until when)
         self.settings = settings or Settings({})
         self.opened: dict[str, object] = {}
+        self.toolboxes: dict[tuple[str, str], Toolbox] = {}  # (run, student) → her search tools in that run
         self.index = self.folder / "names.json"  # persona → her display name and other names, as engines showed her
         try:
             names = dict(json.loads(self.index.read_text(encoding="utf-8")))
@@ -250,12 +275,12 @@ class Book:
         self.folder.mkdir(parents=True, exist_ok=True)
         own = self.settings.of(persona)
         luna = own.decisions == "luna"  # GPT-6 Luna's Decisions API (OPENAI_API_KEY), then the micro model, then hers
-        # No meaning tiers that need the network at recall: her part is rendered without waiting, so notes are
-        # found by their words, and by their glosses in `memory_language`.
+        # Notes are found by their words (and their glosses in `memory_language`); what was said, by meaning too
+        # (`embed`: embeddings with OPENAI_API_KEY, the query's waited for a few seconds at most).
         language = own.memory_language or (mneme_llm.STORED if own.config_file else None)
         memory = mneme_llm.Mneme(str(path), persona, config=own.config_file, companion_name=self.shown(persona),
                                  display_language=own.language or mneme_llm.STORED, luna=luna, micro=luna,
-                                 embed=False, meaning_micro=False, memory_language=language)
+                                 embed=own.embed and EPISODES, meaning_micro=False, memory_language=language)
         self.link(memory)
         for subject, role in self.roles.items():
             memory.relate(subject, role)  # (the same role again changes nothing)
@@ -325,10 +350,24 @@ class Book:
             for subject in sorted(subjects):
                 self.publish(facts, persona, subject)
 
+    def toolbox(self, persona: str, run: str):
+        """Her search tools in one run (they remember what their searches showed, so a search again brings new
+        exchanges), or None when she keeps nothing of what was said."""
+        memory = self.open(persona)
+        if memory is None or not EPISODES:
+            return None
+        key = (run, persona)
+        if key not in self.toolboxes:
+            while len(self.toolboxes) >= TOOLBOXES:
+                del self.toolboxes[next(iter(self.toolboxes))]
+            self.toolboxes[key] = Toolbox(memory)
+        return self.toolboxes[key]
+
     def close(self) -> None:
         for memory in self.opened.values():
             memory.close()
         self.opened.clear()
+        self.toolboxes.clear()
 
 
 def no_notes(person: str, language: str) -> str:
@@ -352,6 +391,24 @@ def called(book: Book, persona: str, subject: str, owner: bool, sender) -> str:
             or (book.settings.call_owner if owner else "") or book.name_of(subject) or sender.name or sender.id)
 
 
+def where(address) -> str:
+    """The conversation an exchange was said in, as her memory names it."""
+    return str(address)
+
+
+async def hear(book: Book, settings: Settings, exchange, subject: str, said) -> list[str]:
+    """What was said in a group chat, every student there heard: each classmate keeps the exchange word for word too.
+    Returns the classmates who keep it."""
+    heard = []
+    for persona in getattr(exchange, "personas", ()):  # (contracts 1.9)
+        own = settings.of(persona)
+        if persona == exchange.persona.name or not book.keeps(persona) or not (own.learn and own.episodes):
+            continue
+        await book.open(persona, create=True).episodes.akeep(subject, said, conversation=where(exchange.address))
+        heard.append(persona)
+    return heard
+
+
 def share(book: Book, settings: Settings, exchange, subject: str, notes, facts) -> list[str]:
     """What was said in a group chat (a conversation with several students), every student there heard: the notes
     one kept of it are kept in each classmate's file as well, as her own (source "heard"). A direct chat stays
@@ -371,9 +428,10 @@ def share(book: Book, settings: Settings, exchange, subject: str, notes, facts) 
 
 
 def make_part(book: Book, settings: Settings):
-    def text(context) -> str:
-        """Who the person is to her, what they call her, her notes for this message and her mood's news (until she has
-        replied); nothing for a routine run, or a person she has nothing on."""
+    async def text(context) -> str:
+        """Who the person is to her, what they call her, her notes for this message, what was said before that bears
+        on it (her first look) and her mood's news (until she has replied); nothing for a routine run, or a person
+        she has nothing on."""
         persona, trigger = context.persona, context.trigger
         engine = getattr(context, "engine", "")  # (contracts 1.9; an older core gives none)
         if trigger.origin != "person" or not book.keeps(persona.name) or not conversation(engine, settings):
@@ -390,10 +448,12 @@ def make_part(book: Book, settings: Settings):
         query = impulse(trigger) or trigger.text  # (speaking up, her notes for what moves her)
         notes = (memory.memory.context(subject, query, user_name=person) or no_notes(person, own.language)) \
             if own.notes else ""
+        said = await memory.alook(subject, query, user_name=person, budget=own.said, conversation=where(context.address),
+                                  skip=own.said_skip, search=own.search) if EPISODES and own.said else ""
         # Her mood's news is told once: marked by the watcher once she has replied, so a step asked twice (or a run
         # replayed) shows it each time; without the watcher, at once.
         news = (memory.mood.news(subject, mark=not own.learn) or "") if own.mood else ""
-        return "\n\n".join(part for part in (who, notes, news) if part)
+        return "\n\n".join(part for part in (who, notes, said, news) if part)
     return text
 
 
@@ -421,10 +481,11 @@ def first_role(memory, subject: str, own: Settings, owner: bool) -> None:
 
 def make_learner(book: Book, settings: Settings):
     async def learn(exchange, context) -> None:
-        """After each of her messages: how it left her feeling and what is worth keeping (one decision call, and
-        a note writer only when something is), a day of contact for her closeness, and once a day her impression.
-        Notes from a group chat go to her classmates there too (`share`). A message she started herself (speaking
-        up) moves her mood only: notes come from what people tell her."""
+        """After each of her messages: the exchange kept word for word, how it left her feeling and what is worth
+        keeping (one decision call, and a note writer only when something is), a day of contact for her closeness,
+        and once a day her impression. The exchange and the notes from a group chat go to her classmates there too
+        (`hear`, `share`). A message she started herself (speaking up) moves her mood only: notes and what was said
+        come from what people tell her."""
         persona, trigger = exchange.persona, exchange.trigger
         if trigger.origin != "person" or not conversation(exchange.engine, settings) or not book.keeps(persona.name):
             return
@@ -442,15 +503,21 @@ def make_learner(book: Book, settings: Settings):
         memory.mood.news(subject, mark=True)  # she has replied: what moved her before was told
         said = [(f"({persona.display_name}'s own thought)", motive) if motive else (person, trigger.text),
                 (persona.display_name, exchange.text)]
+        keep = own.episodes and EPISODES and not motive
+        kept = {"keep": keep, "conversation": where(exchange.address)} if EPISODES else {}
         if own.mood or own.notes:
             seen = await memory.aobserve(subject, said, source="speak-up" if motive else "user", user_name=person,
-                                         complete=complete, mood=own.mood, capture=own.notes)
+                                         complete=complete, mood=own.mood, capture=own.notes, **kept)
             if seen.error:
                 context.log("notes_not_written", persona=persona.name, error=seen.error)
             if seen.notes:
                 share(book, settings, exchange, subject, seen.notes, context.facts)
         elif not motive:
             memory.relations.seen(subject)
+            if keep:
+                await memory.episodes.akeep(subject, said, conversation=where(exchange.address))
+        if keep:
+            await hear(book, settings, exchange, subject, said)
         if own.notes and not motive:
             updated = memory.memory.profile_updated_at(subject)
             if (updated is None or time.time() - updated >= DAY) and \
@@ -491,6 +558,20 @@ def make_alias(book: Book, facts=None):
         book.publish(facts, persona, subject)
         return ToolResult.ok(f"You call {shown} {stored} now; she will know.", data={"persona": persona, "alias": stored})
     return alias
+
+
+def make_recall(book: Book, settings: Settings, tool: str):
+    """Her `search` or `read` through what was said before with the person who wrote, as mneme-llm's tools do it."""
+    async def recall(arguments, context) -> ToolResult:
+        persona = getattr(context, "persona", "")  # (contracts 1.14: whose turn called it)
+        if not persona or not book.keeps(persona) or not settings.of(persona).search:
+            return ToolResult.fail("Only a student's own turn can look through her memory.", "not_a_student")
+        box = book.toolbox(persona, context.run_id)
+        if box is None:
+            return ToolResult.ok("Nothing said before is kept yet.")
+        subject = book.subject(context.address.interface, context.sender.id)
+        return ToolResult.ok(await box.acall(tool, dict(arguments), subject=subject))
+    return recall
 
 
 def publish_person(book: Book, facts, subject: str) -> None:
@@ -589,6 +670,8 @@ def contributions(context, students: dict[str, dict]) -> dict:
     facts = getattr(context, "facts", None)  # (None when loaded without a core)
     book.publish_all(facts)
     learns = settings.learn or any(flag(own.get("learn"), False) for own in settings.students.values())
+    searching = tuple(name for name in keep if settings.of(name).search) if EPISODES else ()
+    spec = {item["name"]: item for item in SPECS}
     return {
         "prompt_parts": [PromptPart("memory", make_part(book, settings), place="turn", order=50, personas=keep)],
         "watchers": [Watcher("memory", make_learner(book, settings), personas=keep, timeout_s=180)] if learns else [],
@@ -604,6 +687,13 @@ def contributions(context, students: dict[str, dict]) -> dict:
             Capability("students.link", "Join another account of yours, with a code.", make_link(book, facts),
                        {"text": {"type": "string", "description": "a code from `$link`, or nothing for a new one"}},
                        risk=Risk.WRITE, internal=True, command="link", command_argument="text"),
+            # Hers alone (offered to her turns only), about the person who wrote, never anyone else.
+            *([Capability("students.search_memory", spec["search"]["description"],
+                          make_recall(book, settings, "search"), spec["search"]["parameters"]["properties"],
+                          required=("query",), risk=Risk.READ, personas=searching, timeout_s=60),
+               Capability("students.read_memory", spec["read"]["description"], make_recall(book, settings, "read"),
+                          spec["read"]["parameters"]["properties"], required=("id",), risk=Risk.READ,
+                          personas=searching, timeout_s=60)] if searching else []),
         ],
         # Each changes only what is yours (your name for her, her name for you, your own accounts: a link needs a
         # code from the account it joins), and only you can type them (models are not offered them).

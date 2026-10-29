@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Literal, Mapping, Protocol, Sequence, Union
+from typing import Any, Awaitable, Callable, Literal, Mapping, Protocol, Sequence, Union
 
 from contracts.capability import ToolResult
 from contracts.messages import Address, Delivery, Display, FileRef, Origin, Request
@@ -72,14 +72,16 @@ class PartContext:
 class PromptPart:
     """A piece of a persona's prompt that engines place for it: its personality, house rules, memory, anything.
 
-    `text` is the text, or a function of a `PartContext` returning it ("" adds nothing). `place` says where an
+    `text` is the text, or a function of a `PartContext` returning it ("" adds nothing); since 1.14 the function may
+    be async (a part that looks something up), and engines render it with `Session.aprompt` (`Session.prompt` leaves
+    an async part out). `place` says where an
     engine puts it: `stable` in the system prompt (the same every turn, so the provider's prompt cache keeps
     serving it), `turn` in the turn's context after the history (it may change every turn). Parts come in `order`
     (lower first). A module's part is for the personas it names (`personas`), or for every persona when it names
     none; a persona's own parts are its own. Engines get them rendered with `Session.prompt`."""
 
     name: str
-    text: Union[str, Callable[[PartContext], str]]
+    text: Union[str, Callable[[PartContext], Union[str, Awaitable[str]]]]
     place: str = "stable"
     order: int = 100
     personas: tuple[str, ...] = ()
@@ -221,14 +223,18 @@ class Activity:
 
 
 class Tools(Protocol):
-    def list(self) -> Sequence[Mapping[str, Any]]:
-        """Capability schemas this session may offer to a model."""
+    def list(self, persona: str = "") -> Sequence[Mapping[str, Any]]:
+        """Capability schemas this session may offer to a model; with `persona` (added in 1.14), to that persona's
+        turn (a capability for some personas only is left out of the others')."""
 
-    async def call(self, name: str, arguments: Mapping[str, Any], call_id: str | None = None) -> ToolResult:
+    async def call(self, name: str, arguments: Mapping[str, Any], call_id: str | None = None, *,
+                   persona: str = "") -> ToolResult:
         """Run a capability under policy. Never raises for policy decisions; see ToolResult.status.
 
         `call_id` identifies the call within the run. Repeating a completed call_id returns the stored
-        result instead of running again, which makes engines safe to replay after a restart.
+        result instead of running again, which makes engines safe to replay after a restart. `persona` (added in
+        1.14) is whose turn made the call: the capability sees it as `ToolContext.persona`. Without it, a run of
+        one persona is hers, and a run of several is nobody's in particular.
         """
 
 
@@ -330,7 +336,12 @@ class Session(Protocol):
     def prompt(self, persona: str, place: str = "stable") -> str:
         """The prompt parts for one of the run's personas at `place` ("stable" or "turn"), rendered in order and
         joined ("" when there are none): its own parts and the modules' parts for it. A part that fails to render
-        is left out (and logged); none can fail the run."""
+        is left out (and logged); none can fail the run. An async part is left out too: use `aprompt`."""
+        ...
+
+    async def aprompt(self, persona: str, place: str = "stable") -> str:
+        """`prompt`, with async parts awaited (added in 1.14): each in turn, for at most a few seconds (one that takes
+        longer is left out, and logged). Render once per turn: a part may cost a lookup."""
         ...
 
     def inbox(self) -> list[Request]:

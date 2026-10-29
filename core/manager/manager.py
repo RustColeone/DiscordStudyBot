@@ -31,7 +31,7 @@ from core.manager.routines import Caller, RoutineDesk
 from core.manager.policy import Assignment, Owners, Permissions, most_specific
 from core.manager.secrets import Secrets
 from core.manager.stamina import Paused, Stamina, money
-from core.prompts import FileText, parts_for, render, with_parts
+from core.prompts import FileText, arender, parts_for, render, with_parts
 from core.providers.registry import Providers
 from core.serialize import request_from_dict, request_to_dict
 from core.storage.tank import RunRecord, Tank
@@ -250,6 +250,17 @@ class Manager:
     def render_prompt(self, persona: Persona, place: str, context: PartContext) -> str:
         """Session.prompt: the persona's parts and the modules' parts for it at `place`, rendered, secrets scrubbed.
         A part that cannot be rendered is left out, and audited once until it renders again."""
+        parts, report, done = self._rendering(persona, place)
+        return done(render(parts, context, place, report))
+
+    async def arender_prompt(self, persona: Persona, place: str, context: PartContext) -> str:
+        """Session.aprompt: `render_prompt` with the async parts awaited."""
+        parts, report, done = self._rendering(persona, place)
+        return done(await arender(parts, context, place, report))
+
+    def _rendering(self, persona: Persona, place: str):
+        """The parts to render, how a problem is reported, and what finishes the text (scrubbed, and the problems
+        that went away forgotten)."""
         reported: set[tuple] = set()
 
         def report(part: PromptPart, kind: str, problem: str) -> None:
@@ -268,11 +279,13 @@ class Manager:
                 report(part, "secret", f"left out: {part.text.path} is a protected secret path")
                 continue
             parts.append(part)
-        text = self.secrets.scrub(render(parts, context, place, report))
-        # A part that rendered without its problem this time is reported anew if it breaks again.
-        self._part_problems = {key for key in self._part_problems
-                               if (key[0], key[2]) != (persona.name, place) or key in reported}
-        return text
+
+        def done(text: str) -> str:
+            # A part that rendered without its problem this time is reported anew if it breaks again.
+            self._part_problems = {key for key in self._part_problems
+                                   if (key[0], key[2]) != (persona.name, place) or key in reported}
+            return self.secrets.scrub(text)
+        return parts, report, done
 
     def prompt_part_warnings(self) -> list[str]:
         """Parts whose file is missing: not an error (it is left out until it exists), but worth saying at start."""
@@ -911,19 +924,23 @@ class Manager:
                                    "conversations private to the owner", "private_here")
         return None
 
-    def tool_schemas(self, run_id: str) -> list[dict[str, Any]]:
+    def tool_schemas(self, run_id: str, persona: str = "") -> list[dict[str, Any]]:
         record = self.tank.run(run_id)
         return [capability.schema() for capability in sorted(self.capabilities.values(), key=lambda c: c.name)
-                if not capability.internal and self._refusal(record, capability, capability.name) is None]
+                if not capability.internal and capability.offered_to(persona, record.personas)
+                and self._refusal(record, capability, capability.name) is None]
 
     async def call_tool(self, run_id: str, name: str, arguments: dict, call_id: str | None = None, *,
-                        approved: bool = False, key: str | None = None, typed: bool = False) -> ToolResult:
+                        approved: bool = False, key: str | None = None, typed: bool = False,
+                        persona: str = "") -> ToolResult:
         """Access, then Approval, then the call, with Enforcement throughout. `typed`: the owner's own
         `$command` (it is their approval, except for confirmations); `approved`: the owner approved
-        this exact call."""
+        this exact call; `persona`: whose turn made it (the capability sees it)."""
         record = self.tank.run(run_id)
         capability = self.capabilities.get(name)
         refusal = self._refusal(record, capability, name, typed=typed or approved)
+        if refusal is None and not typed and not capability.offered_to(persona, record.personas):
+            refusal = ToolResult.fail(f"{name} is not offered to {persona or 'this run'}", "not_offered")
         if refusal is not None:
             self.audit.record("tool_refused", run=run_id, tool=name, code=refusal.error_code)
             return refusal
@@ -973,7 +990,7 @@ class Manager:
         self.tank.start_action(run_id, key, name, stored, tier.value)
         workspace = self.data_dir / "workspaces" / run_id
         workspace.mkdir(parents=True, exist_ok=True)
-        context = ToolContextHandle(self, record, capability.extension, workspace)
+        context = ToolContextHandle(self, record, capability.extension, workspace, persona)
         started = time.monotonic()
         try:
             with self._work(run_id, name):

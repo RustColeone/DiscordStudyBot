@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from contracts import Address, Request, Sender
+from contracts import Address, Capability, Request, Sender, ToolResult
 from tests.core_support import FakeAdapter, extension_module, iface, settle, start_core
 
 
@@ -194,6 +194,33 @@ class CoreRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tools.hidden", names)
         self.assertNotIn("tools.secret", names)
         self.assertNotIn("core.send_message", names)
+        extension_module(core, "probe").RELEASE.set()
+        await settle(core)
+
+    async def test_a_capability_for_some_personas_is_theirs_alone_and_knows_whose_turn_called(self):
+        core = await self.core()
+        await iface(core).say("hold")
+        await asyncio.sleep(0.01)
+        run = core.tank.runs(("running",))[0]
+        mine = run.personas[0]
+        seen = []
+
+        async def whose(arguments, context):
+            seen.append(context.persona)
+            return ToolResult.ok("ok")
+        core.manager.register_capability(Capability("tools.whose", "Whose turn?", whose, personas=(mine,)), "tools")
+        core.manager.register_capability(Capability("tools.others", "Not hers.", whose, personas=("nobody",)), "tools")
+        self.assertIn("tools.whose", [tool["name"] for tool in core.manager.tool_schemas(run.id)])
+        self.assertIn("tools.whose", [tool["name"] for tool in core.manager.tool_schemas(run.id, mine)])
+        self.assertNotIn("tools.whose", [tool["name"] for tool in core.manager.tool_schemas(run.id, "nobody")])
+        self.assertNotIn("tools.others", [tool["name"] for tool in core.manager.tool_schemas(run.id)])
+        self.assertEqual((await core.manager.call_tool(run.id, "tools.whose", {}, persona=mine)).status, "success")
+        self.assertEqual((await core.manager.call_tool(run.id, "tools.whose", {}, "c2")).status, "success")
+        refused = await core.manager.call_tool(run.id, "tools.others", {}, "c3")
+        self.assertEqual(refused.error_code, "not_offered")
+        self.assertEqual(seen, [mine, mine])  # named, then the run's only persona
+        with self.assertRaises(ValueError):
+            Capability("tools.bad", "x", whose, personas=("",))
         extension_module(core, "probe").RELEASE.set()
         await settle(core)
 

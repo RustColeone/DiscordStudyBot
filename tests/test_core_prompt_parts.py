@@ -1,16 +1,19 @@
 """Prompt parts: core.yml's `personas: <name>: parts:`, modules' parts, their rendering and where engines put them."""
 
+import asyncio
 import tempfile
 import textwrap
 import time
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 from contracts import Address, Engine, EngineSpec, PartContext, Persona, PromptPart, Request, RunYield, Sender
 from core.config import ConfigError, CoreConfig
 from core.manager.secrets import Secrets
-from core.prompts import PLACE_LIMIT, FileText, parts_for, render, with_parts
+from core import prompts as prompts_module
+from core.prompts import PLACE_LIMIT, FileText, arender, parts_for, render, with_parts
 from tests.core_support import ROOT, FakeAdapter, iface, make_config, settle, start_core, turn_context
 from tests.test_momochat import NAMES, Script
 from tests.test_momochat import turn as room_turn
@@ -172,7 +175,24 @@ class RenderTests(Temporary):
             warnings.simplefilter("error")
             text, problems = self.render([PromptPart("later", later)])
         self.assertEqual(text, "")
-        self.assertIn("async", problems[0][2])
+        self.assertIn("aprompt", problems[0][2])
+
+    def test_aprompt_awaits_an_async_part_and_leaves_out_one_that_takes_too_long(self):
+        async def later(context):
+            await asyncio.sleep(0)
+            return f"looked up for {context.trigger.sender.name}"
+
+        async def slow(_):
+            await asyncio.sleep(5)
+            return "too late"
+
+        problems = []
+        parts = [PromptPart("a", "plain"), PromptPart("b", later), PromptPart("c", slow), PromptPart("d", "after")]
+        with mock.patch.object(prompts_module, "PART_WAIT_S", 0.05):
+            text = asyncio.run(arender(parts, context(), "stable",
+                                       lambda part, kind, detail: problems.append((part.name, kind, detail))))
+        self.assertEqual(text, "plain\n\nlooked up for Alice\n\nafter")
+        self.assertEqual(problems, [("c", "failed", "left out: it took more than 0.05 s")])
 
     def test_the_parts_at_one_place_keep_to_the_limit(self):
         parts = [PromptPart("big", "x" * (PLACE_LIMIT - 10)), PromptPart("next", "y" * 50), PromptPart("last", "z")]
@@ -270,6 +290,20 @@ class AssistantTests(unittest.IsolatedAsyncioTestCase):
                                           "Instructions for this conversation:\nKeep it short."))
         self.assertNotIn("birthday", system)
         self.assertIn("It is Pat's birthday.", turn_context(adapter.calls[0]))
+
+    async def test_an_async_turn_part_is_looked_up_once_a_turn_whatever_its_steps(self):
+        core, adapter = await self.core([], [{"message": "Thinking.", "status": "continue", "actions": []},
+                                             reply("Done.")])
+        asked = []
+
+        async def lookup(context):
+            asked.append(context.trigger.text)
+            return f"Looked up: {context.trigger.text}."
+        core.manager.register_prompt_part(PromptPart("lookup", lookup, place="turn"), "test")
+        await self.say(core, "hello")
+        self.assertEqual(asked, ["hello"])
+        self.assertEqual(len(adapter.calls), 2)
+        self.assertTrue(all("Looked up: hello." in turn_context(call) for call in adapter.calls))
 
     async def test_without_parts_the_system_prompt_is_as_before(self):
         core, adapter = await self.core([])

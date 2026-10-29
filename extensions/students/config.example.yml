@@ -25,6 +25,13 @@
 # memory_language: Chinese      # notes also glossed in this language, so they are found whatever language you ask in
 # decisions: core               # core (her model) or luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
 # call_owner: 主人               # what her memory calls the bot's owner (left out: their name)
+# episodes: true                # keep each exchange word for word too (mneme-llm 0.3), found again below
+# said: 6000                    # her first look for each message: what was said before that bears on it, up to this
+#                               # many characters, word for word (0: none)
+# said_skip: 15                 # left out of it: the newest exchanges of the chat, which the engine still shows
+# embed: true                   # find what was said by meaning too (OpenAI embeddings, OPENAI_API_KEY; about $0.004
+#                               # a thousand exchanges); false: by its words alone
+# search: true                  # her tools to search everything said before with the person, and read around it
 # config: whale.toml            # a mneme-llm config file, read when her file is first made (relative to its data folder)
 # students:                     # a student's own settings, over the ones above, when one should differ (her
 #   grok: {learn: false}        # student.yml `memory:` has her own, under these: DeepSeek's call_owner 主人, zh)

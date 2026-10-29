@@ -191,6 +191,9 @@ class MomoChatEngine(Engine):
     async def _take_turn(self, session: Session, state: dict, turn: dict) -> RunYield | None:
         """Her steps until she answers (None), or a wait (the run's yield)."""
         turn["status"] = "active"
+        if "parts" not in turn:  # her prompt parts, rendered once a turn: a part may look something up
+            turn["parts"] = {place: await session.aprompt(turn["persona"], place) for place in ("stable", "turn")}
+            await session.save(state)
         try:
             if turn["pending"]:
                 outcome = await self._execute_pending(session, state, turn)
@@ -305,7 +308,8 @@ class MomoChatEngine(Engine):
             action = turn["pending"][0]
             if self._group(session):
                 await session.progress(f"{self._persona(session, turn['persona']).display_name} · {action['tool']}")
-            result = await session.tools.call(action["tool"], action["arguments"], call_id=action["call_id"])
+            result = await session.tools.call(action["tool"], action["arguments"], call_id=action["call_id"],
+                                              persona=turn["persona"])
             if result.status == "needs_approval":
                 if not action.get("awaiting"):
                     action["awaiting"] = result.data.get("approval_id", "") or True
@@ -403,7 +407,7 @@ class MomoChatEngine(Engine):
             return (ToolSpec(PASS, "Stay silent this time: you have nothing worth adding. Call it alone.",
                              steps.NO_ARGUMENTS),)
         specs = []
-        for tool in session.tools.list():
+        for tool in session.tools.list(turn["persona"]):
             if tool["name"] in (ASK, PASS, HAND_OFF):
                 continue
             risk = str(tool.get("risk") or "read")
@@ -457,7 +461,7 @@ class MomoChatEngine(Engine):
 
     async def _json_step(self, session: Session, state: dict, turn: dict, correction: str = "",
                          final: bool = False) -> dict[str, Any]:
-        names = set() if final or turn["optional"] else {tool["name"] for tool in session.tools.list()}
+        names = set() if final or turn["optional"] else {tool["name"] for tool in session.tools.list(turn["persona"])}
         for attempt in range(3):
             try:
                 result = await session.models.generate(self._request(
@@ -501,12 +505,14 @@ class MomoChatEngine(Engine):
                 + f" Keep each message under {display.max_text_chars} characters."
         motive = self._speak_up(session)
         listed = [] if final or motive or turn["optional"] else [
-            {key: tool[key] for key in ("name", "description", "parameters", "risk")} for tool in session.tools.list()]
+            {key: tool[key] for key in ("name", "description", "parameters", "risk")}
+            for tool in session.tools.list(persona.name)]
         if many and not final and not native and self._can_hand_off(session, turn):
             listed.append({"name": HAND_OFF, "description": "Ask a classmate to do part of the work (group chat).",
                            "parameters": steps.HAND_OFF_PARAMETERS, "risk": "read"})
         instructions = str(session.options.get("instructions") or "").strip()
-        parts = session.prompt(persona.name)  # her prompt parts (her personality, say)
+        rendered = turn.get("parts") or {}  # her prompt parts (her personality, say), rendered for this turn
+        parts = rendered["stable"] if "stable" in rendered else session.prompt(persona.name)
         pass_status = '|"pass"' if turn["optional"] and not native else ""
         contract = (steps.NATIVE_CONTRACT[style].format(display=layout) if native else
                     steps.CONTRACT[style].format(display=layout, pass_status=pass_status,
@@ -520,7 +526,7 @@ class MomoChatEngine(Engine):
             system += "\n\n" + steps.GROUP.format(roster=roster, hand_off=steps.HAND_OFF_RULE[native])
         now = dt.datetime.fromtimestamp(session.trigger.received_at).astimezone()
         context = [f"The current time is {now.strftime('%A %Y-%m-%d %H:%M')} (UTC{now.strftime('%z')})."]
-        turn_parts = session.prompt(persona.name, "turn")
+        turn_parts = rendered["turn"] if "turn" in rendered else session.prompt(persona.name, "turn")
         if turn_parts:
             context.append(turn_parts)
         activity = self._activity(session)

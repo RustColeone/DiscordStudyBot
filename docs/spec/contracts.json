@@ -1,7 +1,7 @@
 {
- "version": "1.13",
+ "version": "1.14",
  "constants": {
-  "CONTRACTS_VERSION": "1.13",
+  "CONTRACTS_VERSION": "1.14",
   "DIARY_KINDS": [
    "fact",
    "episode",
@@ -165,7 +165,7 @@
    ]
   },
   "Capability": {
-   "doc": "One action. `name` is `<extension>.<action>`. `parameters` are JSON-schema properties; `required` lists mandatory ones. `needs` lists Display features the conversation must support (for example `files`). `internal` capabilities are callable by engines but not offered to models as tools. `access` is the lowest level that may call it (`member`, `admin`, `creator`; `owner_only` means `creator`). The caller's level is `ToolContext.access`, so a capability may also do more for higher levels (an admin sees every conversation's items, a member only their own). `command`, when set, makes the capability available as `$<command> <text>`, with the text passed as `command_argument`. It may be a name or a `Command` declaring options and a template for interfaces with native command menus; a name becomes a `Command` with one option for `command_argument`. `risk` is the tier (see Risk). Attributes refine it; the core enforces them and configuration can only make them stricter: * `private`: shows the owner's private data (messages, screen, clipboard, files). Offered only in conversations private to the owner; its run's output goes nowhere else. * `subject`: the parameter that permission rules and saved grants match on (a unit, a chat, a path); `subject_kind=\"path\"` also makes the core refuse secret paths (`.env`, keys) to models. * `escalate(arguments)`: may return a higher tier for a call (never a lower one). * `never_auto`: a model's call always asks the owner; no rule or grant changes that. * `grantable`: the owner may answer an approval with \"always allow\" for that exact subject in that conversation (needs `subject`). * `confirm`: even the owner's own typed command asks for a one-tap confirmation. * `describe(arguments)`: one plain line for approval prompts (\"Restart navidrome.service\").",
+   "doc": "One action. `name` is `<extension>.<action>`. `parameters` are JSON-schema properties; `required` lists mandatory ones. `needs` lists Display features the conversation must support (for example `files`). `internal` capabilities are callable by engines but not offered to models as tools. `access` is the lowest level that may call it (`member`, `admin`, `creator`; `owner_only` means `creator`). The caller's level is `ToolContext.access`, so a capability may also do more for higher levels (an admin sees every conversation's items, a member only their own). `command`, when set, makes the capability available as `$<command> <text>`, with the text passed as `command_argument`. It may be a name or a `Command` declaring options and a template for interfaces with native command menus; a name becomes a `Command` with one option for `command_argument`. `risk` is the tier (see Risk). Attributes refine it; the core enforces them and configuration can only make them stricter: * `private`: shows the owner's private data (messages, screen, clipboard, files). Offered only in conversations private to the owner; its run's output goes nowhere else. * `subject`: the parameter that permission rules and saved grants match on (a unit, a chat, a path); `subject_kind=\"path\"` also makes the core refuse secret paths (`.env`, keys) to models. * `escalate(arguments)`: may return a higher tier for a call (never a lower one). * `never_auto`: a model's call always asks the owner; no rule or grant changes that. * `grantable`: the owner may answer an approval with \"always allow\" for that exact subject in that conversation (needs `subject`). * `confirm`: even the owner's own typed command asks for a one-tap confirmation. * `describe(arguments)`: one plain line for approval prompts (\"Restart navidrome.service\"). `personas` (added in 1.14), when given, are the only personas it is offered to: an engine that says whose turn it is (`Tools.list(persona)`) leaves it out of others', and a call made for another persona is refused. Without a persona, a run with any of them is offered it.",
    "fields": [
     {
      "name": "name",
@@ -268,6 +268,11 @@
      "name": "describe",
      "type": "Callable | none",
      "default": null
+    },
+    {
+     "name": "personas",
+     "type": "list[str]",
+     "default": "()"
     }
    ]
   },
@@ -1073,7 +1078,7 @@
    ]
   },
   "PromptPart": {
-   "doc": "A piece of a persona's prompt that engines place for it: its personality, house rules, memory, anything. `text` is the text, or a function of a `PartContext` returning it (\"\" adds nothing). `place` says where an engine puts it: `stable` in the system prompt (the same every turn, so the provider's prompt cache keeps serving it), `turn` in the turn's context after the history (it may change every turn). Parts come in `order` (lower first). A module's part is for the personas it names (`personas`), or for every persona when it names none; a persona's own parts are its own. Engines get them rendered with `Session.prompt`.",
+   "doc": "A piece of a persona's prompt that engines place for it: its personality, house rules, memory, anything. `text` is the text, or a function of a `PartContext` returning it (\"\" adds nothing); since 1.14 the function may be async (a part that looks something up), and engines render it with `Session.aprompt` (`Session.prompt` leaves an async part out). `place` says where an engine puts it: `stable` in the system prompt (the same every turn, so the provider's prompt cache keeps serving it), `turn` in the turn's context after the history (it may change every turn). Parts come in `order` (lower first). A module's part is for the personas it names (`personas`), or for every persona when it names none; a persona's own parts are its own. Engines get them rendered with `Session.prompt`.",
    "fields": [
     {
      "name": "name",
@@ -2411,6 +2416,25 @@
      "doc": "Other open runs in this conversation (work already in progress)."
     },
     {
+     "name": "aprompt",
+     "async": true,
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "place",
+       "type": "str",
+       "keyword_only": false,
+       "default": "stable"
+      }
+     ],
+     "returns": "str",
+     "doc": "`prompt`, with async parts awaited (added in 1.14): each in turn, for at most a few seconds (one that takes longer is left out, and logged). Render once per turn: a part may cost a lookup."
+    },
+    {
      "name": "diary",
      "async": false,
      "parameters": [
@@ -2473,7 +2497,7 @@
       }
      ],
      "returns": "str",
-     "doc": "The prompt parts for one of the run's personas at `place` (\"stable\" or \"turn\"), rendered in order and joined (\"\" when there are none): its own parts and the modules' parts for it. A part that fails to render is left out (and logged); none can fail the run."
+     "doc": "The prompt parts for one of the run's personas at `place` (\"stable\" or \"turn\"), rendered in order and joined (\"\" when there are none): its own parts and the modules' parts for it. A part that fails to render is left out (and logged); none can fail the run. An async part is left out too: use `aprompt`."
     },
     {
      "name": "reply",
@@ -2637,7 +2661,7 @@
    ]
   },
   "ToolContext": {
-   "doc": "Handles the core gives a capability for one call. `display` is what the calling conversation can show (for example its upload limit). `files` are the files people attached to the run's requests, oldest first; `own_files` only those the person who started the run attached (in a group, others may add messages to a run). `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`). `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it.",
+   "doc": "Handles the core gives a capability for one call. `display` is what the calling conversation can show (for example its upload limit). `files` are the files people attached to the run's requests, oldest first; `own_files` only those the person who started the run attached (in a group, others may add messages to a run). `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`). `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it. `persona` (added in 1.14) is the persona whose turn made the call, as the engine said (`Tools.call`), or the run's only persona; \"\" when nobody in particular (a group run whose engine did not say, a typed command, a call carried out once the owner approved it).",
    "attributes": [
     {
      "name": "address",
@@ -2690,6 +2714,10 @@
     {
      "name": "history",
      "type": "'History'"
+    },
+    {
+     "name": "persona",
+     "type": "str"
     }
    ],
    "methods": [
@@ -2795,17 +2823,30 @@
        "type": "str | none",
        "keyword_only": false,
        "default": null
+      },
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": true,
+       "default": ""
       }
      ],
      "returns": "ToolResult",
-     "doc": "Run a capability under policy. Never raises for policy decisions; see ToolResult.status. `call_id` identifies the call within the run. Repeating a completed call_id returns the stored result instead of running again, which makes engines safe to replay after a restart."
+     "doc": "Run a capability under policy. Never raises for policy decisions; see ToolResult.status. `call_id` identifies the call within the run. Repeating a completed call_id returns the stored result instead of running again, which makes engines safe to replay after a restart. `persona` (added in 1.14) is whose turn made the call: the capability sees it as `ToolContext.persona`. Without it, a run of one persona is hers, and a run of several is nobody's in particular."
     },
     {
      "name": "list",
      "async": false,
-     "parameters": [],
+     "parameters": [
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
      "returns": "Sequence",
-     "doc": "Capability schemas this session may offer to a model."
+     "doc": "Capability schemas this session may offer to a model; with `persona` (added in 1.14), to that persona's turn (a capability for some personas only is left out of the others')."
     }
    ]
   },

@@ -24,7 +24,10 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 #       stamina (a run that reaches a persona's daily allowance, or its Request.extra `budget_usd`, waits for the
 #       owner; InterfacePort.stamina, InterfacePort.spending).
 # 1.13: 1.12 plus a persona's own default daily allowance (Persona.allowance).
-CONTRACTS_VERSION = "1.13"
+# 1.14: 1.13 plus async prompt parts (Session.aprompt renders them), whose persona a tool call is for
+#       (Tools.list and Tools.call take `persona`, ToolContext.persona) and capabilities offered to some personas
+#       only (Capability.personas).
+CONTRACTS_VERSION = "1.14"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",

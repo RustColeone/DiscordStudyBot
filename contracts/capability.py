@@ -95,6 +95,9 @@ class ToolContext(Protocol):
     receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`).
     `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for
     capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it.
+    `persona` (added in 1.14) is the persona whose turn made the call, as the engine said (`Tools.call`), or the
+    run's only persona; "" when nobody in particular (a group run whose engine did not say, a typed command, a
+    call carried out once the owner approved it).
     """
 
     address: Address
@@ -110,6 +113,7 @@ class ToolContext(Protocol):
     workspace: Path
     access: Access  # the caller's effective level: member, admin or creator
     history: "History"  # added in 1.6: this conversation's history, to read
+    persona: str  # added in 1.14: whose turn made the call ("" for nobody in particular)
 
     async def progress(self, text: str) -> None: ...
 
@@ -158,6 +162,10 @@ class Capability:
       conversation (needs `subject`).
     * `confirm`: even the owner's own typed command asks for a one-tap confirmation.
     * `describe(arguments)`: one plain line for approval prompts ("Restart navidrome.service").
+
+    `personas` (added in 1.14), when given, are the only personas it is offered to: an engine that says whose turn
+    it is (`Tools.list(persona)`) leaves it out of others', and a call made for another persona is refused. Without
+    a persona, a run with any of them is offered it.
     """
 
     name: str
@@ -181,6 +189,7 @@ class Capability:
     grantable: bool = False
     confirm: bool = False
     describe: Callable[[Mapping[str, Any]], str] | None = None
+    personas: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.owner_only:
@@ -206,6 +215,17 @@ class Capability:
             raise ValueError(f"{self.name}: subject_kind must be value or path")
         if self.grantable and self.subject is None:
             raise ValueError(f"{self.name}: grantable needs a subject")
+        personas = (self.personas,) if isinstance(self.personas, str) else self.personas
+        if not isinstance(personas, (tuple, list, frozenset, set)) or \
+                not all(isinstance(name, str) and name for name in personas):
+            raise ValueError(f"{self.name}: personas is a list of persona names")
+        object.__setattr__(self, "personas", tuple(personas))
+
+    def offered_to(self, persona: str, run_personas=()) -> bool:
+        """Whether this capability is for `persona`'s turn (or, with none named, for a run of these personas)."""
+        if not self.personas:
+            return True
+        return persona in self.personas if persona else any(name in self.personas for name in run_personas)
 
     @property
     def extension(self) -> str:

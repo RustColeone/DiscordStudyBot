@@ -282,11 +282,15 @@ A module gives its own personas parts (`Persona(..., parts=(...))`), and may add
 `Contributions.prompt_parts`: `PromptPart(name, text, place="stable", order=100, personas=())`, for every
 persona, or for those in `personas`. Two modules may not add parts of the same name (the second fails to
 load). A part's `text` may be a function of a `PartContext` (`persona`, `address`, `trigger`, `owner`, and since 1.9
-`engine`, the engine placing it), called
-(never awaited) each time the part is used, so it should be quick. A persona's own part shadows a module's part
+`engine`, the engine placing it), called each time the part is used, so it should be quick. Since contracts 1.14 it
+may be async, for a part that looks something up (the students' memory waits on an embedding): `session.aprompt`
+awaits each in turn, for at most 8 seconds (one that takes longer is left out and audited), and
+`session.prompt` leaves it out. A persona's own part shadows a module's part
 of the same name. A part that raises or returns something other than text is left out and audited
 (`prompt_part_problem`, with the module that added it), once until it renders again; it never fails the run.
-Engines get the rendered parts with `session.prompt(persona, place)`; MomoChat places them as above. An engine that never calls it ignores parts.
+Engines get the rendered parts with `session.prompt(persona, place)`, or `await session.aprompt(persona, place)`
+to have the async ones too; MomoChat renders both places once at the start of each turn (whatever its steps) and
+places them as above. An engine that never calls either ignores parts.
 
 ### Watchers
 
@@ -754,6 +758,7 @@ Capability("music.find_tracks", "Search the library by artist or title.", find_t
 | `internal` | Callable by engines but not shown to models. |
 | `command`, `command_argument` | Also available as `$command <text>`, with the text in that parameter. An owner's `$command` counts as approval of that exact call (except `confirm`, a secret in the arguments, or private data in a shared conversation, which ask to confirm). `command` is a name, or a `Command` declaration (below). |
 | `timeout_s` | Hard limit for one call (default 600). |
+| `personas` | Since 1.14: the only personas it is offered to, for a capability that is someone's own (a student's search through her memory). An engine that says whose turn it is (`tools.list(persona)`, `tools.call(..., persona=)`) leaves it out of others' turns, and a call for another persona is refused; without a persona, a run with any of them is offered it. |
 
 **Access levels.** `access="admin"` or `"creator"` (or `owner_only=True`) limits who may call a
 capability at all; `context.access` (`member`, `admin`, `creator`) is the caller's effective level, so
@@ -762,7 +767,9 @@ for members and every conversation's items for admins. Describe the admin behavi
 `admin_help`; `$help` shows it to admins only.
 
 The handler receives validated `arguments` and a `ToolContext`: `address`, `sender`, `origin`,
-`run_id`; `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
+`run_id`; `persona` (contracts 1.14: whose turn made the call, as the engine said, or the run's only persona; ""
+for nobody in particular: a group run whose engine did not say, a typed command, a call carried out once the
+owner approved it); `display` (what the calling conversation can show, e.g. `max_upload_mb` for fitting files);
 `history` (contracts 1.6: the calling conversation's history to read, `recent`, `search` and `summary`, as engines see
 it; for capabilities that carry a conversation elsewhere or work from it, such as Chimera's `chimera.invite` to the
 Classroom; a capability cannot change it);
@@ -814,6 +821,7 @@ any other one (`$cancel`, a conversation cancelled).
 | `store(conversation=, persona=, person=)` | Your module's key-value store, scoped by any combination of this conversation, one of these personas (across conversations) and the trigger's sender (across conversations); no arguments: the module's store everywhere. See [Storing data](#storing-data). |
 | `memory(name)` | Older: a persona's store shared by every module running it; prefer `store(persona=name)`. |
 | `prompt(name, place="stable")` | That persona's [prompt parts](#prompt-parts) at `stable` or `turn`, rendered in order and joined ("" when it has none). |
+| `await aprompt(name, place="stable")` | The same with async parts awaited (contracts 1.14). Render once per turn: a part may cost a lookup. |
 | `diary(name)` | That persona's notes about the trigger's sender, in this conversation or across those sharing its `diary_scope` (see below). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
 | `history.search(text, limit)` | This conversation's messages containing `text` (any case), newest first, at most 100: further back than `recent` reaches (200). |
@@ -821,7 +829,7 @@ any other one (`$cancel`, a conversation cancelled).
 | `inbox()` | Requests for this run's lane that arrived while this run was thinking; each is returned once. Messages arriving while the run waits on a capability or a file delivery start their own run instead. |
 | `activity()` | Other open runs in this conversation (`Activity`: `run_id`, `status` `working`/`running`/`waiting_input`/`waiting_approval`, `sender_id`, `sender_name`, `request`, `doing`, `since`), so an engine can say "still converting" instead of starting the same work again. |
 | `models.generate(ModelRequest)` | Model calls (default profile: the first persona's). With `output_schema`, `result.data` is parsed and validated JSON. `images` (up to 6 local JPEG/PNG/GIF/WebP files, for example the request's attachments) are shown with the last user message; candidates whose provider has `vision: false` are tried last and told images were attached. `persona` (one of the session's) says whose call it is, so her `$model` choice here applies and her message can say which model wrote it; engines with several personas should set it (without it the core uses the run's only persona with that profile, or none). `result.fallbacks` says why each candidate before the one that answered did not (empty when the first did). `result.cached_input_tokens` (contracts 1.7) is how many of `input_tokens` the provider read from its prompt cache, which it bills far cheaper; `effort` may be `max` (1.7) for providers that think longest at it. Raises `ModelError` (`unavailable`, `invalid_output`, `budget_exceeded`, `not_configured`). `models.ready(profile)` (contracts 1.6) says whether some candidate of a profile has its provider configured, so an engine can pick who works before trying. |
-| `tools.list()`, `await tools.call(name, args, call_id)` | Capabilities allowed here, and calling them under policy. Never raises for policy; check `result.status` (`success`, `failed`, `needs_input`, `needs_approval`). |
+| `tools.list(persona="")`, `await tools.call(name, args, call_id, persona="")` | Capabilities allowed here, and calling them under policy. Never raises for policy; check `result.status` (`success`, `failed`, `needs_input`, `needs_approval`). Since 1.14, `persona` says whose turn it is: a capability for some personas only (`Capability.personas`) is listed for theirs alone and refused for others (`not_offered`), and the capability sees whose turn called it (`ToolContext.persona`). |
 | `await reply(text, quote=None, persona=None, label="")`, `await send_file(file)`, `await progress(text)` | Output; returns the interface's `Delivery` (or a refusal such as `run_closed`, `conversation_disabled`, `too_large`). `persona` (one of the session's) makes the persona's display name the reply's `speaker` and the sender name in history; `label` qualifies it (for example a work note, recorded with kind `note`). |
 
 Return one of:

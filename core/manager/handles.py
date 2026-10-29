@@ -38,11 +38,12 @@ class ToolsHandle:
     def __init__(self, manager: "Manager", run_id: str):
         self._manager, self._run_id = manager, run_id
 
-    def list(self) -> list[dict[str, Any]]:
-        return self._manager.tool_schemas(self._run_id)
+    def list(self, persona: str = "") -> list[dict[str, Any]]:
+        return self._manager.tool_schemas(self._run_id, persona)
 
-    async def call(self, name: str, arguments: Mapping[str, Any], call_id: str | None = None) -> ToolResult:
-        return await self._manager.call_tool(self._run_id, name, dict(arguments or {}), call_id)
+    async def call(self, name: str, arguments: Mapping[str, Any], call_id: str | None = None, *,
+                   persona: str = "") -> ToolResult:
+        return await self._manager.call_tool(self._run_id, name, dict(arguments or {}), call_id, persona=persona)
 
 
 SUMMARY_CHARS = 8000
@@ -180,13 +181,20 @@ class SessionHandle:
                            chats=self._manager.diary_chats(record.address, self.options, subject))
 
     def prompt(self, persona: str, place: str = "stable") -> str:
+        match, context = self._part_context(persona, place)
+        return self._manager.render_prompt(match, place, context)
+
+    async def aprompt(self, persona: str, place: str = "stable") -> str:
+        match, context = self._part_context(persona, place)
+        return await self._manager.arender_prompt(match, place, context)
+
+    def _part_context(self, persona: str, place: str):
         match = next((item for item in self.personas if item.name == persona), None)
         if match is None:
             raise ValueError("A session can only render the prompt of its own personas")
         if place not in PART_PLACES:
             raise ValueError(f"place is one of {', '.join(PART_PLACES)}")
-        return self._manager.render_prompt(match, place, PartContext(match, self.address, self.trigger, self.owner,
-                                                                     self._engine))
+        return match, PartContext(match, self.address, self.trigger, self.owner, self._engine)
 
     def inbox(self) -> list[Request]:
         return self._manager.take_inbox(self.run_id)
@@ -218,7 +226,7 @@ class SessionHandle:
 class ToolContextHandle:
     """Implements contracts.ToolContext for one capability call."""
 
-    def __init__(self, manager: "Manager", record: RunRecord, extension: str, workspace: Path):
+    def __init__(self, manager: "Manager", record: RunRecord, extension: str, workspace: Path, persona: str = ""):
         trigger = request_from_dict(record.trigger)
         self._manager = manager
         self.address: Address = trigger.address
@@ -243,6 +251,8 @@ class ToolContextHandle:
         self.workspace = workspace
         self.access = manager.caller_access(record)
         self.history = ReadingHistory(HistoryHandle(manager, self.address))
+        self.persona = persona if persona in record.personas else \
+            (record.personas[0] if not persona and len(record.personas) == 1 else "")
 
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)

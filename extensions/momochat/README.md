@@ -65,8 +65,12 @@ and the group's rules. Then the conversation: the thread since the last `/new`, 
 (30) word for word (at most `history_chars` characters of them, when set; a second is never split), older ones as the
 conversation's rolling summary (rewritten by one `compact_profile` call once `compact_every`, 20, have scrolled
 out; `core.search_history` finds their words), with `$commands` and their answers left out. Then the turn's context:
-the time, her turn parts (a student's memory of the person, from the students module), other requests in progress,
-what was said in this run before her, and why she speaks if nobody asked her. Then the message and her turn so far.
+the time, her turn parts (a student's memory of the person, from the students module: her notes and her first look
+at what was said before), other requests in progress, what was said in this run before her, and why she speaks if
+nobody asked her. Then the message and her turn so far. Her prompt parts are rendered once at the start of her turn
+(`session.aprompt`, contracts 1.14: a part may look something up), and kept for its every step. The tools she is
+offered are the ones for her turn (`tools.list(persona)`), and her calls say it is hers (a student's search through
+her memory).
 Images attached to the run's messages, sent shortly before (`history_image_minutes`, 30) or found by tools are shown
 on every step. The system prompt and the conversation stay the same prefix from step to step, so the provider's
 prompt cache serves them.
