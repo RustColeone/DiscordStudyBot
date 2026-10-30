@@ -2,8 +2,9 @@
 
 The default backend is OpenAI's speech API (`gpt-4o-mini-tts`, which takes a style instruction, so she sounds
 like herself in every language), using OPENAI_API_KEY. `voice: {backend: cloned, reference: clip.wav}` speaks in the
-voice of a short clip instead, through OpenRouter's speech API (OPENROUTER_API_KEY; Fish Audio's S2.1 makes a sentence
-in two or three seconds; the clip goes with each request and nothing is stored there). Piper, a local voice that needs
+voice of a short clip instead, through OpenRouter's speech API (OPENROUTER_API_KEY; Fish Audio's Drama 3 makes a
+sentence in about two seconds; the clip goes with each request and nothing is stored there), and `patient:` settings
+over those for her own first messages, where nobody waits: Seed Audio sounds best and takes half a minute. Piper, a local voice that needs
 no key, is an optional backend in `voice_piper.py`: nothing loads it unless `voice: {backend: piper}` is set, and the
 file can be deleted to keep the module light.
 
@@ -92,7 +93,7 @@ class ClonedVoice:
     name = "cloned"
 
     def __init__(self, config: Mapping[str, Any]):
-        self.model = str(config.get("model", "fish-audio/s2.1-pro"))
+        self.model = str(config.get("model", "fish-audio/drama-3"))
         self.reference = Path(str(config.get("folder", "."))) / str(config.get("reference", "voice-reference.wav"))
         self.reference_text = str(config.get("reference_text", ""))
         self.base_url = str(config.get("base_url", "https://openrouter.ai/api/v1")).rstrip("/")
@@ -117,7 +118,7 @@ class ClonedVoice:
                                          headers={"Authorization": f"Bearer {_key(self.key_env)}",
                                                   "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=90) as response:
+            with urllib.request.urlopen(request, timeout=150) as response:  # (Seed Audio can take over a minute)
                 sound = response.read()
         except urllib.error.HTTPError as error:
             raise RuntimeError(f"OpenRouter speech answered {error.code}: "

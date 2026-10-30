@@ -81,6 +81,34 @@ Rules for engines:
 6. **Whether teamwork pays is Chimera's question.** It is answered by developing Chimera until it beats a single
    model reliably, with its outcomes log and the benchmark rounds as the evidence. MomoChat does not try routes.
 
+## Personality and memory
+
+Decided 2026-10-30. A student is kept in separate parts, so that a long friendship fits a fixed context and a companion
+can outlive any one model. The guide "A student's personality" on the architecture page explains it with a diagram.
+
+| Part | What it is | Size | Where |
+| --- | --- | --- | --- |
+| Character | Who she is to everyone | Small, fixed | `student.yml`, her prompt files |
+| Personality | Who she has become with you | Small, always in the prompt | Per student and person |
+| Memory | What happened | Large, looked up when it matters | Her mneme-llm file |
+| Model | Whoever writes the words | Replaceable | Her profiles |
+
+1. **Memory stays outside the prompt.** Each message brings up only what bears on it. What has faded leaves the context and
+   can still be searched. So the prompt stays the same size however long the conversation runs.
+2. **Personality has four parts:** reactions (a local decision model: how things move her), habits (how she talks,
+   measured from her replies), ways of thinking (if-then rules with their evidence), and her best replies (kept word for
+   word, the closest few shown each turn).
+3. **Luna gives the baseline.** GPT-6 Luna's Decisions API judges each exchange and the local model learns from it. That
+   is pre-training: a baseline is what anyone would feel, so it is not yet hers.
+4. **👍 and 👎 make her yours.** They are assisted training: labels from the one judge who counts, outweighing Luna's.
+5. **She learns from your mood.** Catching it is a moment, her mood moving toward yours, more the closer you are. Learning
+   from it is lasting, a lesson for the local model. Joy she shares; when you are low she worries for you rather than
+   sinking with you.
+6. **The test is the transplant.** Remove her memory, replace her model, and from personality alone you should get a very
+   similar companion. The same messages go to the original and the transplant, and you judge.
+
+Built: memory, Luna and the local model learning from it, voice clips marked with 👍 / 👎. The rest of 2 to 6 is planned.
+
 ## Interfaces and products
 
 - The MomoChat page in the web UI, the Discord interface and the cli are frontends of `momochat`. Without MomoChat

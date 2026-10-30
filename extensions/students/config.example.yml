@@ -24,7 +24,7 @@
 # reflect_after_notes: 5        # rewrite her impression of a person once a day, once she has this many notes
 # language: zh                  # the language of the lines it adds to prompts (en or zh; mneme-llm's default: en)
 # memory_language: Chinese      # notes also glossed in this language, so they are found whatever language you ask in
-# decisions: core               # core (her model) or luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
+# decisions: luna               # luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, micro, hers)
 # call_owner: 主人               # what her memory calls the bot's owner (left out: their name)
 # episodes: true                # keep each exchange word for word too (mneme-llm 0.3), found again below
 # said: 6000                    # her first look for each message: what was said before that bears on it, up to this

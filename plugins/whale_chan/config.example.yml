@@ -59,9 +59,12 @@ history_chars: 40000            # and at most this many characters of them
 #
 # backend: cloned speaks in the voice of a short clip, through OpenRouter (OPENROUTER_API_KEY; needs ffmpeg). Her
 # owner's 👍 or 👎 on a voice message files it with its text in the data folder's voice/good or voice/bad.
-#   model: fish-audio/s2.1-pro    # fast: two or three seconds a sentence
+#   model: fish-audio/drama-3     # fast: about two seconds a sentence (fish-audio/s2.1-pro: as fast, less natural)
 #   reference: voice-reference.wav   # in her data folder; keep it out of the repository, it is someone's voice
 #   reference_text: ""            # what the clip says, if you know it; a wrong one is worse than none
+#   patient:                      # her own first messages, where nobody waits: over the settings above
+#     model: bytedance-seed/seed-audio-1-0   # the best sound, 20 to 70 seconds a sentence, about $0.03
+#     reference: voice-reference-slow.wav
 
 # Slash commands besides /new, /voice and /speakup (names from the core's catalog; [] for none).
 # slash_commands: [help, memory, remind, reminders, routine, draw, search, read, video]

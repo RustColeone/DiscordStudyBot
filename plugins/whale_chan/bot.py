@@ -432,7 +432,8 @@ class WhaleChanBot(Interface):
     async def _speak(self, channel, reply: Reply) -> None:
         """Her reply said aloud too, as a voice message (a failure is logged, the text is already there)."""
         self._mark_voiced(reply.run_id)
-        backend = voice.backend(self.voice)
+        speaking_up = str(reply.in_reply_to or "").startswith("speak-up-")  # nobody waits for her own first message
+        backend = voice.backend({**self.voice, **dict(self.voice.get("patient") or {})} if speaking_up else self.voice)
         if backend.ready():
             self.port.log("voice_not_ready", detail=backend.ready())
             return

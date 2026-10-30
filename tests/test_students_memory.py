@@ -66,6 +66,61 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.core.manager.idle()  # and what the watchers do after
         return chat.texts(conversation)[-1]
 
+    def asked_memory(self, recall=0.9):
+        """A memory with one look, three search hits and two notes, its calls recorded."""
+        episode = lambda id, said: SimpleNamespace(id=id, at=float(id), lines=(("Alice", said), ("Her", "ok")))
+        searched = []
+
+        async def alook(subject, query, **options):
+            return [episode(1, "the look's own")]
+
+        async def asearch(subject, query, limit):
+            searched.append(query)
+            return [episode(1, "the look's own"), episode(2, "my car is a white Dolphin"), episode(3, "what car do I drive?")]
+
+        async def find(notes, query):
+            return SimpleNamespace(similarities={7: 0.33, 8: 0.20}, floor=0.41)  # both under the floor
+
+        async def adecide(text, questions):
+            return {"recall": SimpleNamespace(probability=recall)}
+        notes = [SimpleNamespace(id=7, text="Alice drives a white Dolphin."), SimpleNamespace(id=8, text="Alice likes tea.")]
+        return SimpleNamespace(
+            said_cut=(0.08, 0.16), decider=SimpleNamespace(tiers=[object()], adecide=adecide),
+            episodes=SimpleNamespace(alook=alook, asearch=asearch, render=lambda found, **_: " | ".join(
+                item.lines[0][1] for item in found)),
+            memory=SimpleNamespace(meaning=SimpleNamespace(find=find), notes=lambda subject: notes)), searched
+
+    async def test_asked_about_the_past_she_gets_a_search_and_her_closest_notes(self):
+        module = memory_module()
+        own = module.Settings({"language": "en"}, self.tmp)
+        memory, searched = self.asked_memory()
+        text = await module.first_look(memory, "chat:alice", "what car do I drive?", "Alice", "chat:dm", own)
+        self.assertEqual(searched, ["what car do I drive?"])  # we search for her: she need not choose to
+        self.assertIn("my car is a white Dolphin", text)
+        self.assertNotIn(" | what car do I drive?", text)  # the same question asked before: "I don't remember" again
+        self.assertEqual(text.count("the look's own"), 1)
+        self.assertIn("Alice drives a white Dolphin.", text)  # under the floor, and the closest there is
+
+    async def test_ordinary_chat_costs_no_search(self):
+        module = memory_module()
+        own = module.Settings({"language": "en"}, self.tmp)
+        memory, searched = self.asked_memory(recall=0.02)
+        self.assertEqual(await module.first_look(memory, "chat:alice", "long day", "Alice", "chat:dm", own), "the look's own")
+        self.assertEqual(searched, [])
+        memory.decider.tiers = []  # (`decisions: core`: nobody to ask)
+        self.assertFalse(await module.asks_back(memory, "what car do I drive?"))
+
+        async def broken(text, questions):
+            raise RuntimeError("down")
+        memory.decider = SimpleNamespace(tiers=[object()], adecide=broken)
+        self.assertFalse(await module.asks_back(memory, "what car do I drive?"))  # a look without it is still a look
+        self.assertEqual(await module.closest_notes(SimpleNamespace(memory=SimpleNamespace(meaning=None)), "s", "q"), [])
+
+    def test_luna_judges_by_default_so_the_local_model_learns(self):
+        module = memory_module()
+        self.assertEqual(module.Settings({}, self.tmp).decisions, "luna")
+        self.assertEqual(module.Settings({"decisions": "core"}, self.tmp).decisions, "core")
+
     async def test_she_hears_how_her_classmates_seem_today(self):
         memory = memory_module()
         settings = memory.Settings({"language": "en"}, self.tmp)

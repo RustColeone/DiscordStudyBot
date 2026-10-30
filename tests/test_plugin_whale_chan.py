@@ -538,6 +538,20 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         await react("👎")  # (gone from `recent`: nothing to do)
         self.assertFalse((folder / "bad").exists())
 
+    async def test_her_own_first_message_uses_the_patient_voice_when_there_is_one(self):
+        bot = self.bot({"model": "quick", "patient": {"model": "slow"}})
+        voice = sys.modules[self.module.__name__.rsplit(".", 1)[0] + ".voice"]
+        used = []
+
+        def synthesize(self_, text, path):
+            used.append(self_.model)
+            return (path.write_bytes(b"OggS"), path)[1]
+        bot._voice_command("dm:1", ["on"])
+        with patch.object(voice.OpenAIVoice, "synthesize", synthesize), patch.dict(os.environ, {"OPENAI_API_KEY": "k"}):
+            await self.reply(bot, "你回来啦", run="r1", to="m1")
+            await self.reply(bot, "主人在吗", run="r2", to="speak-up-1-99")
+        self.assertEqual(used, ["quick", "slow"])
+
     def test_the_cloned_voice_sends_her_clip_and_makes_a_voice_message(self):
         from core.loader import import_extension
         _, module = import_extension(PLUGIN)
@@ -564,7 +578,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(voice.urllib.request, "urlopen", urlopen), patch.object(voice.subprocess, "run") as run:
                 path = speaker.synthesize("主人", folder / "out.ogg")
         self.assertEqual((sent["url"], sent["key"]), ("https://openrouter.ai/api/v1/audio/speech", "Bearer k"))
-        self.assertEqual((sent["body"]["model"], sent["body"]["input"]), ("fish-audio/s2.1-pro", "主人"))
+        self.assertEqual((sent["body"]["model"], sent["body"]["input"]), ("fish-audio/drama-3", "主人"))
         self.assertEqual(sent["body"]["input_references"],
                          [{"type": "input_audio", "input_audio": {"data": "data:audio/x-wav;base64,UklGRg=="}}])
         self.assertEqual(path, folder / "out.ogg")

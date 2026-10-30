@@ -1,6 +1,7 @@
 "use strict";
 // What is DiscordStudyBot's own on the architecture page: the top map (the core, and the modules in the slots they
-// fill), the guides "The three layers" and "How a mod goes in", and how a module looks among the folders. app.js, diagram.js and style.css are
+// fill), the guides "The three layers", "A student's personality" and "How a mod goes in", and how a module looks among
+// the folders. app.js, diagram.js and style.css are
 // the same viewer in every repository that has one (mneme-llm's too); this file is what differs.
 window.SITE = (() => {
   const SLOT = { interfaces: "Interface slot", engines: "Engine slot", capabilities: "Capability slot", personas: "Persona slot",
@@ -8,6 +9,7 @@ window.SITE = (() => {
   const CORE_KIND = { GW: "gateway", MG: "manager", PR: "providers", BOT: "store", TANK: "store", START: "startup" };
   const GUIDE = "guide/mods";
   const LAYERS = "guide/layers";
+  const PERSONALITY = "guide/personality";
 
   // A module's description, then what it declares it builds on (contracts 1.10) and the names it had (1.11).
   function moduleTip(h, folder) {
@@ -39,6 +41,8 @@ window.SITE = (() => {
     slots.personas = chart.group(SLOT.personas, () => inSlot("personas").forEach(module), { kind: "personas", pack: true });
     slots.watchers = chart.group(SLOT.watchers, () => inSlot("watchers").forEach(module), { kind: "watchers", pack: true });
     chart.node("The three layers", { kind: "guide", sub: "interface → engine → agent or student", target: link(LAYERS) });
+    chart.node("A student's personality", { kind: "guide", sub: "who she becomes, kept apart from what she remembers",
+                                            target: link(PERSONALITY) });
     chart.node("How a mod goes in", { kind: "guide", sub: "add a module of your own", target: link(GUIDE) });
     chart.node("contracts", { kind: "contracts", sub: "the only code every part shares", target: link("contracts"),
                               tip: firstLine(files["contracts/__init__.py"]?.doc) });
@@ -160,6 +164,140 @@ window.SITE = (() => {
     pane.push(linkList([["Design: students, agents, harnesses", h.github("docs/DESIGN.md")],
                         ["momochat", link("extensions/momochat")], ["chimera", link("extensions/chimera")],
                         ["students", link("extensions/students")], ["web UI", link("plugins/webui")]]));
+    return pane;
+  }
+
+  // ---- the guide: a student's personality, apart from her memory (docs/DESIGN.md) -----------------------------------
+  function personalityChart(h) {
+    const { fileLink, link } = h;
+    const chart = new h.Chart("DOWN", { overview: true });
+    const talk = chart.node("What you say", { kind: "external", sub: "every message, on any interface" });
+    const teachers = chart.group("Who teaches her", () => {
+      chart.node("Luna", { kind: "providers", sub: "built: judges each exchange, a baseline",
+                           target: fileLink("extensions/students/memory.py") });
+      chart.node("you: 👍 / 👎", { kind: "external", sub: "assisted training: what is right for you",
+                                  target: fileLink("plugins/whale_chan/bot.py") });
+    }, { kind: "capabilities", pack: true });
+    const memory = chart.group("Memory: what happened (large, looked up when it matters)", () => {
+      chart.node("notes", { kind: "store", sub: "built: facts, plans, impressions", target: fileLink("extensions/students/memory.py") });
+      chart.node("what was said", { kind: "store", sub: "built: every exchange, word for word" });
+    }, { kind: "personas", pack: true });
+    const personality = chart.group("Personality: who she has become (small, always there)", () => {
+      chart.node("reactions", { kind: "module", sub: "built: a local model of how things move her" });
+      chart.node("habits", { kind: "external", sub: "planned: how she talks, measured" });
+      chart.node("ways of thinking", { kind: "external", sub: "planned: if this, then she…" });
+      chart.node("her best replies", { kind: "external", sub: "planned: word for word" });
+    }, { kind: "engines", pack: true });
+    const character = chart.node("Her character", { kind: "module", sub: "who she is to everyone: student.yml",
+                                                    target: link("extensions/students") });
+    const turn = chart.node("One turn's prompt", { kind: "manager", sub: "stays the same size, however long you talk" });
+    const model = chart.node("Any model", { kind: "providers", sub: "DeepSeek today; swap it and she stays", target: link("core/providers") });
+    chart.edge(talk, memory, { label: "kept" });
+    chart.edge(talk, teachers, { label: "judged" });
+    chart.edge(teachers, personality, { label: "trains" });
+    chart.edge(memory, turn, { dashed: true, label: "only what bears on this message" });
+    chart.edge(personality, turn, { label: "always" });
+    chart.edge(character, turn, { label: "always" });
+    chart.edge(turn, model, { label: "she answers" });
+    return chart;
+  }
+
+  // What is left of her after the transplant: your goal, as something to try.
+  function transplant(h) {
+    const { make } = h;
+    const parts = [["Her character", "stays", "stays"], ["Reactions, habits, ways of thinking, her best replies", "stays", "stays"],
+                   ["What she knows about you", "gone", "stays"], ["The way the model itself tends to write", "stays", "changes"]];
+    const box = make("div", "doc");
+    const toggles = {};
+    const result = make("ul", "");
+    const draw = () => {
+      result.replaceChildren(...parts.map(([name, wiped, swapped]) => {
+        const state = toggles.memory.checked && wiped === "gone" ? "gone" : toggles.model.checked && swapped === "changes"
+          ? "changes: her examples and habits pull it back" : "stays";
+        return make("li", "", `${name}: ${state}`);
+      }));
+      verdict.textContent = toggles.memory.checked || toggles.model.checked
+        ? "The goal: you would still recognise her. She may not know your cat's name, but she would tease you the same way."
+        : "Today's companion, whole.";
+    };
+    const verdict = make("p", "");
+    for (const [key, label] of [["memory", "Wipe her memory"], ["model", "Swap her model"]]) {
+      const row = make("label", "");
+      row.style.display = "block";
+      row.style.padding = "6px 0";
+      toggles[key] = make("input", "");
+      toggles[key].type = "checkbox";
+      toggles[key].addEventListener("change", draw);
+      row.append(toggles[key], " " + label);
+      box.append(row);
+    }
+    box.append(result, verdict);
+    draw();
+    return box;
+  }
+
+  function personalityPane(h) {
+    const { make, link, linkList, heading } = h;
+    const pane = [...heading("Guide", "A student's personality")];
+    pane.push(make("div", "doc", "A companion should be someone, not a model reading a long file. So a student is kept " +
+      "in separate parts: her character (who she is to everyone), her personality (who she has become with you) and her " +
+      "memory (what happened). Personality is the part we want to keep small and carry anywhere."));
+    const sections = [
+      ["The context issue", "A conversation can go on forever; a model's context cannot, and each extra token costs money " +
+        "and time. If everything she is had to fit in the prompt, a long friendship would slowly break her. So only two " +
+        "things are always there: her character and her personality, both small. Memory is large and stays outside: each " +
+        "message brings up only what bears on it, and what has faded leaves the context but can still be searched. In a " +
+        "simulated month of daily chats the prompt levelled off at about 8,600 tokens, and replies stayed around 2 seconds."],
+      ["Memory is not personality", "Memory answers \"what is your cat called?\". Personality answers \"how would she " +
+        "tease you about the cat?\". Delete the first and she forgets facts. Delete the second and a stranger is wearing " +
+        "her name. Most systems store only the first and hope the second follows from it."],
+      ["How she learns: Luna first", "After each exchange a small set of questions is asked: how did this move her, what " +
+        "does she feel, was it worth remembering? GPT-6 Luna's Decisions API answers them in about 0.3 seconds for a " +
+        "tiny cost. A local model on your own machine watches every answer and learns from it, and once its guesses agree " +
+        "with Luna's it answers by itself. This is pre-training: it gives her a sensible baseline. But a baseline is what " +
+        "anyone would feel, so it is not yet hers."],
+      ["👍 and 👎: assisted training", "Your reactions are what make her yours. A 👍 or 👎 on her message is a label from " +
+        "the only judge who counts: you. Luna says what is reasonable; you say what is right for you. Marked examples " +
+        "outweigh Luna's, so the local model drifts from the baseline toward your companion. Today this files her voice " +
+        "messages with their text. Next it should cover every reply, and feed the parts below."],
+      ["Learning from your mood", "She should feel with you. If you say you got promoted, or \"this is worth celebrating, " +
+        "we should be happy!\", she should be happy, and remember that this is the kind of thing that makes her happy. " +
+        "Two things are different here. Catching your mood is a moment: her mood moves toward yours, more the closer you " +
+        "are. Learning from it is lasting: the moment becomes a lesson for the local model, so next time she reacts that " +
+        "way without being told. Joy she shares; when you are low she does not sink with you, she worries for you, " +
+        "because a companion who only mirrors makes things worse."],
+      ["Habits", "How she talks should be measured, not described. If she has picked up saying 喵 at the end of sentences, " +
+        "that is a number: how often, where in the sentence, in what mood. Counted from her own replies, it costs no model " +
+        "call, it goes into her prompt as one short line, and it can be checked: if she drifts, the count shows it."],
+      ["Ways of thinking", "Some of what you shape is not speech but attitude. Chinese internet has a word for one: 绿茶, " +
+        "or 小绿茶, close to a pick-me girl with a sweet, innocent act. Adjectives do not carry that across models. " +
+        "\"Pick-me\" means little to a model; what carries is behaviour: \"when you mention another girl, she acts " +
+        "unbothered, then lets slip that she would never do that to you.\" So ways of thinking are kept as a short list of " +
+        "if-then rules, each with the exchanges that show it, stronger the more you reinforce it, fading when you do not."],
+      ["Her best replies", "A description of a voice is weaker than the voice. The replies you marked 👍 are kept word for " +
+        "word, and each turn shows the two or three closest to the moment. Changing to a new model, this is what pulls it " +
+        "back to her: every model has a default manner, and examples are the strongest thing against it."],
+      ["Unique to each person", "Her character is the same for everyone. Personality is kept per person: with you she may " +
+        "have learned to be a little pick-me and say 喵; with someone else she has not. Nobody but you and those close to " +
+        "you can shape it, so a stranger in a group chat cannot teach her anything."],
+    ];
+    for (const [title, text] of sections) pane.push(make("h3", "", title), make("div", "doc", text));
+    pane.push(make("h3", "", "The goal: try the transplant"), make("div", "doc", "Remove her memory, replace the model, and " +
+      "from personality alone you should get a very similar companion out of the box. That is also how we will measure " +
+      "it: the same messages to the original and to the transplant, and you judge which is which."), transplant(h));
+    pane.push(make("h3", "", "What exists today"));
+    const status = make("ul", "doc");
+    for (const line of ["Built: memory, the first look and search, moods, closeness, voice clips marked with 👍 / 👎.",
+                        "Built, and on since 2026-10-30: Luna's judgments, and the local model learning from them.",
+                        "Planned: 👍 / 👎 on every reply, marked examples outweighing Luna's, catching your mood, " +
+                        "habits, ways of thinking, her best replies, a personality you can export, the transplant test."]) {
+      status.append(make("li", "", line));
+    }
+    pane.push(status, make("h3", "", "Read more"));
+    pane.push(linkList([["Design: students, agents, harnesses", h.github("docs/DESIGN.md")],
+                        ["Her memory: memory.py", h.fileLink("extensions/students/memory.py")],
+                        ["Her voice and the marks: bot.py", h.fileLink("plugins/whale_chan/bot.py")],
+                        ["students", link("extensions/students")]]));
     return pane;
   }
 
@@ -292,7 +430,11 @@ window.SITE = (() => {
              { path: LAYERS, label: "The three layers", keywords: "three layers interface engine harness agent student " +
                "memory chatgpt design momochat chimera stamina", chart: layersChart, pane: layersPane,
                title: "The three layers", hint: "Interface → engine → agent or student, beside ChatGPT's page → " +
-               "harness → model. Click a box for the module." }],
+               "harness → model. Click a box for the module." },
+             { path: PERSONALITY, label: "A student's personality", keywords: "personality persona memory habits training " +
+               "thumbs luna decisions mood transplant context companion voice", chart: personalityChart, pane: personalityPane,
+               title: "A student's personality", hint: "Memory is what happened, and stays outside. Personality is who she " +
+               "has become, and is always there. The details have the plan, and a transplant to try." }],
     // Folders whose files are grouped two levels deep when another folder imports them (core/manager, extensions/web).
     deep: ["core", "extensions", "plugins"],
     folderBox, folderPane,

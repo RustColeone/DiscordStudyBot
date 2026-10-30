@@ -15,6 +15,7 @@ student. Pages see where she stands with you as facts (bond, alias, mood, plans,
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import secrets
@@ -24,6 +25,7 @@ from pathlib import Path
 from contracts import Capability, ModelRequest, PromptPart, Risk, ToolResult, Watcher
 
 import mneme_llm
+from mneme_llm.decide import Predicate
 from mneme_llm.tools import SPECS, Toolbox
 
 RESET = {"reset", "remove", "clear", "none"}
@@ -96,9 +98,9 @@ class Settings:
         self.said_skip = whole(config.get("said_skip"), 15, 0, 200)
         self.embed = flag(config.get("embed"), True)
         self.search = flag(config.get("search"), True)
-        # Who judges her mood and what is worth keeping: core (her model), or luna (GPT-6 Luna's Decisions API with
-        # OPENAI_API_KEY, then the local micro model once it has learned, then her model). Anything else is core.
-        self.decisions = "luna" if str(config.get("decisions") or "").strip().lower() == "luna" else "core"
+        # Who judges her mood and what is worth keeping: luna (GPT-6 Luna's Decisions API with OPENAI_API_KEY, then
+        # the local micro model, which learns from Luna, then her model), or core (her model alone, nothing learned).
+        self.decisions = "core" if str(config.get("decisions") or "").strip().lower() == "core" else "luna"
         given = str(config.get("config") or "")  # a mneme-llm config file (TOML), read when her file is new
         path = Path(given).expanduser() if given else None
         self.config_file = str(path if path is None or path.is_absolute() or folder is None else folder / path) \
@@ -377,6 +379,63 @@ def no_notes(person: str, language: str) -> str:
     return f"关于{person}的笔记：（暂无）" if language.startswith("zh") else f"Notes about {person}: (none yet)"
 
 
+# Is the person asking about something from before? Then we search for her: left to herself, a model that answers at once
+# rather says it does not remember. Luna tells in 0.2 s, the local model once it has learned, and a tier missing means no.
+RECALL = "recall"
+ASKS_BACK = Predicate(RECALL, "The person is asking about something from before: a fact about themselves or the people "
+                              "and pets around them, something they said or did, or something that happened earlier, "
+                              "that the assistant would need to remember to answer. Not a new topic, a request for "
+                              "ideas, or a question about the assistant.")
+RECALL_FOUND = 5  # exchanges a search adds to her first look
+RECALL_NOTES = 6  # and her closest notes
+CLOSEST = {"en": "The notes of yours closest to this:", "zh": "你的笔记里和这件事最接近的："}
+
+
+async def asks_back(memory, query: str) -> bool:
+    if not memory.decider.tiers:
+        return False
+    try:
+        found = (await memory.decider.adecide(query, [ASKS_BACK])).get(RECALL)
+    except Exception:  # (a look without it is still a look)
+        return False
+    return found is not None and found.probability >= 0.5
+
+
+async def first_look(memory, subject: str, query: str, person: str, conversation: str, own) -> str:
+    """What was said that bears on the message. When they ask about something from before, also what a search finds,
+    past what has faded out of the look. Their same question asked before is left out: all it holds is what she said
+    then, and an "I don't remember" found again is said again."""
+    asked = await asyncio.gather(memory.episodes.alook(subject, query, budget=own.said, conversation=conversation,
+                                                       skip=own.said_skip, cut=memory.said_cut),
+                                 asks_back(memory, query) if own.search else _nothing(False))
+    found = list(asked[0])
+    if asked[1]:
+        found += [item for item in await memory.episodes.asearch(subject, query, limit=RECALL_FOUND + 3)
+                  if item.id not in {seen.id for seen in found}][:RECALL_FOUND + 3]
+    same = "".join(query.split())
+    found = sorted((item for item in found if "".join(item.lines[0][1].split()) != same), key=lambda item: item.at)
+    said = memory.episodes.render(found, user_name=person, search=own.search)
+    closest = await closest_notes(memory, subject, query) if asked[1] and own.notes else []
+    head = CLOSEST["zh" if own.language.startswith("zh") else "en"]
+    return "\n\n".join(part for part in (said, "\n".join([head, *closest]) if closest else "") if part)
+
+
+async def closest_notes(memory, subject: str, query: str) -> list[str]:
+    """Her notes nearest in meaning, by rank. The usual recall keeps a note only above a floor, and a short question
+    and a short note score low ("what car do I drive?" against the note of it: 0.33, floor 0.41, and first of 291)."""
+    meaning = memory.memory.meaning
+    if meaning is None:
+        return []
+    notes = {note.id: note for note in memory.memory.notes(subject)}
+    found = await meaning.find(list(notes.values()), query)
+    ranked = sorted(found.similarities.items(), key=lambda pair: -pair[1])[:RECALL_NOTES]
+    return [f"- {notes[id].text}" for id, _ in ranked if id in notes]
+
+
+async def _nothing(value):
+    return value
+
+
 # How a classmate seems, by mneme-llm's face for her mood: said as a classmate would notice it.
 SEEMS = {"great": ("in high spirits", "很开心"), "good": ("happy", "开心"), "ok": ("calm", "平静"),
          "worry": ("worried", "有点担心"), "sad": ("sad", "有点难过")}
@@ -470,10 +529,11 @@ def make_part(book: Book, settings: Settings):
         who = "\n".join(line for line in (memory.relations.line(subject, person),
                                           memory.aliases.line(subject, person)) if line)
         query = impulse(trigger) or trigger.text  # (speaking up, her notes for what moves her)
-        notes = (memory.memory.context(subject, query, user_name=person) or no_notes(person, own.language)) \
-            if own.notes else ""
-        said = await memory.alook(subject, query, user_name=person, budget=own.said, conversation=where(context.address),
-                                  skip=own.said_skip, search=own.search) if EPISODES and own.said else ""
+        notes, said = await asyncio.gather(  # (each waits on the same query's embedding)
+            memory.memory.acontext(subject, query, user_name=person) if own.notes else _nothing(""),
+            first_look(memory, subject, query, person, where(context.address), own) if EPISODES and own.said
+            else _nothing(""))
+        notes = (notes or no_notes(person, own.language)) if own.notes else ""
         # Her mood's news is told once: marked by the watcher once she has replied, so a step asked twice (or a run
         # replayed) shows it each time; without the watcher, at once.
         news = (memory.mood.news(subject, mark=not own.learn) or "") if own.mood else ""
