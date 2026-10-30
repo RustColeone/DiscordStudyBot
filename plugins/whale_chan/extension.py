@@ -1,7 +1,7 @@
-"""Whale-chan (鲸酱): an example drop-in extension. Her own Discord bot, chatting like a personal AI web client
-(ChatGPT, Claude) inside the app: a frontend of MomoChat. She is the DeepSeek student: the bot is one more way to
-reach her, as MomoChat's other pages are, and what she is (her prompt, name, models) and remembers (her memory) is
-the same everywhere.
+"""Whale-chan (鲸酱): an example drop-in extension. Her own Discord bot, chatting
+inside the app: a frontend of MomoChat. She is the DeepSeek student: the bot is one more way to reach her, as
+MomoChat's other pages are, and what she is (her prompt, name, models) and remembers (her memory) is the same
+everywhere.
 
 Drop this folder into `plugins/` (it already is), put the bot token in `.env` as
 DISCORD_BOT_TOKEN_WHALE_CHAN (or in this folder's config.yml) and restart: the core loads it without
@@ -9,8 +9,8 @@ changes to core.yml. Without a token only her voice loads.
 
 It contributes: the `whale_chan` interface (the Discord bot, which also speaks her short replies as voice messages
 where `/voice on` asks it to, and her own first messages), her voice (`whale_chan.speak`, for her model to call) and
-defaults for its own conversations (`whale_chan:*` is MomoChat with the DeepSeek student, as a chat client: complete
-answers, one thread until `/new`; in servers it answers mentions and replies; every write and critical action asks
+defaults for its own conversations (`whale_chan:*` is MomoChat with the DeepSeek student, one thread until `/new`; in
+servers it answers mentions and replies; every write and critical action asks
 the owner first, with no exceptions, in case she misread a request or a page tried to trick her). core.yml settings
 win over all of these. Until 2026-10-27 it also had an engine of its own, `chat`: that is MomoChat's former name.
 """
@@ -49,15 +49,16 @@ MOVED = {"prompt": "extensions/students/deepseek/ (whale.md, prompt.md)",
          "memory": "extensions/students/deepseek/student.yml (memory: language zh, memory_language Chinese already)",
          "mood": "extensions/students/config.yml (mood)",
          "diary": "nowhere: a student's memory is the students module's"}
-# How MomoChat runs her chats: a chat client's, as her own engine did. Her settings of these names (effort,
-# max_steps, ...) win, and the assignment's own `options` over them.
-OPTIONS = {"style": "full", "effort": "high", "max_steps": 10, "max_tokens": 8000, "history_limit": 60,
+# How MomoChat runs her chats: a chat app's, short and casual, at the effort in her student.yml (none: she answers at
+# once); `style: full` and `effort: high` in her settings make this a chat client, thorough and slow. Her settings of
+# these names (style, max_steps, ...) win, and the assignment's own `options` over them.
+OPTIONS = {"style": "chat", "max_steps": 10, "max_tokens": 8000, "history_limit": 60,
            "history_chars": 40000, "timeout_s": 240, "compact": False, "new_chat_text": "🐳 好的主人，新的对话开始啦～"}
 
 
 def chat_options(config) -> dict:
     """MomoChat's options for her chats: OPTIONS, with her settings of the same names (and `tool_calls`)."""
-    return {**OPTIONS, **{key: config[key] for key in (*OPTIONS, "tool_calls") if key in config}}
+    return {**OPTIONS, **{key: config[key] for key in (*OPTIONS, "effort", "tool_calls") if key in config}}
 
 
 def flag(value, default: bool = False) -> bool:
@@ -75,7 +76,7 @@ def setup(context) -> Contributions:
     moved = {key: where for key, where in MOVED.items() if key in config}
     if moved:
         context.log("settings_moved", keys=sorted(moved), to=sorted(set(moved.values())))
-    speech = dict(config.get("voice") or {})
+    speech = {"folder": str(context.data_dir), **dict(config.get("voice") or {})}  # (`folder`: where her clip is)
     speaking = speech.get("enabled", True) is not False
     capabilities = [voice.capability(speech)] if speaking else []
     token = str(config.get("token") or os.getenv(str(config.get("token_env", "DISCORD_BOT_TOKEN_WHALE_CHAN")), ""))
@@ -89,7 +90,7 @@ def setup(context) -> Contributions:
                   **custom, "options": {**chat_options(config), **dict(custom.get("options") or {})}}
     bot = WhaleChanBot(name, token, context.data_dir, config=config, persona=persona,
                        voice={**speech, "enabled": speaking})
-    return Contributions(capabilities=capabilities, interfaces=[bot],
+    return Contributions(capabilities=[*capabilities, *bot.capabilities()], interfaces=[bot],
                          assignments={f"{name}:*": assignment},
                          admission={f"{name}:*": {"enabled": True, "require_mention_in_groups": True}},
                          permissions={f"{name}:*": {"tiers": {"write": "always-ask", "critical": "always-ask"}}})

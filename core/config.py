@@ -92,8 +92,8 @@ class CoreConfig:
         self.secret_paths = list(secrets)
         # An agent is a persona with her models (no memory: a student is a module's agent with one). `agents:` (or
         # `personas:`, its name before; merged, `agents:` winning key by key) defines core.yml's own: an entry with a
-        # `prompt` is an agent, with her models as `models:` (a profile of her name) or a `profile:` (and her day's
-        # spending as `allowance:`, by default); one without only adds its `parts` to a module's persona (a student's).
+        # `prompt` is an agent, with her models as `models:` (a profile of her name) or a `profile:` (her day's spending
+        # as `allowance:`, by default, and how hard she thinks in a conversation as `effort:`); one without only adds its `parts` to a module's persona (a student's).
         self.personas: dict[str, Persona] = {}
         self.persona_parts: dict[str, tuple] = {}
         try:
@@ -117,7 +117,7 @@ class CoreConfig:
                     self.personas[name] = Persona(name, value.get("display_name", name), value["prompt"], profile,
                                                   parts, aliases=tuple(value.get("aliases") or ()),
                                                   description=str(value.get("description") or ""),
-                                                  allowance=allowance)
+                                                  allowance=allowance, effort=str(value.get("effort") or ""))
                 elif set(value) - {"parts"}:
                     raise ConfigError(f"persona {name!r} has no `prompt`: such an entry only adds `parts` to a "
                                       f"module's persona; to change {sorted(set(value) - {'parts'})}, give the "

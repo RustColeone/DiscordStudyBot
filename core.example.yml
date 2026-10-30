@@ -77,6 +77,8 @@
 #   accounts:
 #     deepseek: {balance: true}
 #     openrouter: {balance: true}   # one key for every company's models: one balance to watch
+# OPENROUTER_API_KEY alone runs every student: each model in a student.yml names its OpenRouter route (`openrouter:`),
+# tried after the company's own key, so beside those keys it is their spare. What it charges is counted as it says.
 #     openai: {budget: 10.00, since: "2026-10-28"}
 
 # Model profiles: ordered candidates; candidates without an API key are skipped.

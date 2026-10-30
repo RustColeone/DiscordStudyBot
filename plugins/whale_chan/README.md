@@ -122,8 +122,9 @@ modules:
   every 30 minutes, likelier after a long quiet and off-peak, never in quiet hours (1–8), within 20
   minutes of her own message, or before you answered her last one. Her reason comes from her memory's facts (a
   plan of yours for tomorrow, from its `plans`; a lingering feeling, from her `mood`), or the time of day. It starts as a dry run that only
-  writes down what it would have done. `/speakup status|rehearse|now|on|off|dry` (owner only).
-* **Voice.** `/voice on` makes her short replies voice messages in that chat (`/voice off`, `/voice`
+  writes down what it would have done. `/speakup status|rehearse|now|on|off|dry` (owner only), or typed as
+  `$speakup now` on any interface.
+* **Voice.** `/voice on` (or `$voice on`) makes her short replies voice messages in that chat (`/voice off`, `/voice`
   shows which; the bot answers these itself, and keeps the choice in its bottle); her own speak-ups come as voice
   messages too, and an answer for which she already sent one herself (`whale_chan.speak`) gets no second. OpenAI speech (`gpt-4o-mini-tts`, voice
   `coral`, with a style instruction) by default; Piper, a local voice, is an optional backend

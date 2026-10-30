@@ -121,7 +121,10 @@ class Persona:
     strongest models). An engine asking for a tier she has not named uses `own`, then `profile`.
 
     Added in 1.13: `allowance`, her own default daily allowance in dollars (0: no daily limit; None: the core's
-    default). The owner's settings come first: core.yml `stamina:` (`personas`, then `allowance`) and `$stamina`."""
+    default). The owner's settings come first: core.yml `stamina:` (`personas`, then `allowance`) and `$stamina`.
+
+    Added in 1.15: `effort`, how hard she thinks in a conversation (an `Effort`; empty: the engine's setting). A
+    session's own `effort` comes first; "none" answers at once, without a thinking phase."""
 
     name: str
     display_name: str
@@ -134,6 +137,7 @@ class Persona:
     description: str = ""
     profiles: Mapping[str, str] = field(default_factory=dict)
     allowance: float | None = None
+    effort: str = ""
 
     def tier(self, name: str) -> str:
         """The profile for tier `name` (`own`, `strong`): hers, else `own`, else `profile`."""

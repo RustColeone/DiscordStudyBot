@@ -420,8 +420,9 @@ class Providers:
                                cached_input_tokens=result.cached_input_tokens,
                                tool_calls=tuple(result.tool_calls),
                                replay={"provider": provider, "fields": dict(result.replay)} if result.replay else None,
-                               price=price, cost=self.prices.cost(price, result.input_tokens, result.output_tokens,
-                                                                  result.cached_input_tokens) if price else None)
+                               price=price, cost=result.cost if result.cost is not None else
+                               self.prices.cost(price, result.input_tokens, result.output_tokens,
+                                                result.cached_input_tokens) if price else None)
         if unsupported:
             raise ModelError("tools_unsupported", f"{unsupported} cannot call tools" + (
                 f"; before it: {'; '.join(failures)}" if failures else ""))

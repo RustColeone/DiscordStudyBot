@@ -75,9 +75,9 @@ Images attached to the run's messages, sent shortly before (`history_image_minut
 on every step. The system prompt and the conversation stay the same prefix from step to step, so the provider's
 prompt cache serves them.
 
-**Two styles.** `brief` (the default): she speaks as she goes, briefly, in her own voice, quoting the message in a
-group. `full`: a personal AI chat client (Whale-chan's bot): complete answers in Markdown and LaTeX, her notes while
-she works shown as progress, and only the answer posted.
+**Three styles.** `brief` (the default): she speaks as she goes, briefly, in her own voice, quoting the message in a
+group. `chat`: a chat app (Whale-chan's bot): short and casual, her notes while she works shown as progress, and only
+the answer posted. `full`: a personal AI chat client: the same, with complete answers in Markdown and LaTeX.
 
 **Threads.** `/new` (or `/reset`, `/clear`) starts a fresh thread in that conversation (`new_chat_text` answers):
 earlier messages stay in history but are no longer read, and the summary of before is set aside.
@@ -98,8 +98,8 @@ default of the assignment option of the same name, which wins:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `style` | `brief` | `brief` or `full` (above) |
-| `effort` | `low` | Reasoning effort of each step: `low`, `medium`, `high` |
+| `style` | `brief` | `brief`, `chat` or `full` (above) |
+| `effort` | `low` | Reasoning effort of each step: `none` (she answers at once), `low`, `medium`, `high`. Between the assignment's option and this default comes her own (`Persona.effort`: `effort:` in a student.yml or an agent) |
 | `max_steps` | 8 | Steps (tool rounds) of one speaker per message |
 | `max_turns` | 12 | Speakers' turns per message, hand-offs and follow-ups included |
 | `max_handoffs` | 3 | Hand-offs per message (0: none) |
@@ -128,7 +128,7 @@ assignments:
   "discord:dm:*":
     engine: momochat
     personas: [deepseek]
-    options: {style: full, effort: high}
+    options: {style: chat}
 ```
 
 A busy group chat makes many model calls: give its assignment a larger `budget`.
@@ -139,7 +139,7 @@ A busy group chat makes many model calls: give its assignment a larger `budget`.
 | --- | --- |
 | engine `assistant` (one persona), module `assistant` | `momochat` with one persona, `style: brief` |
 | engine `room` (group chats on a work board), module `room` | `momochat` with several personas. The work board's `jobs` are hand-offs now (`ask_classmate`), one at a time; `work_note` is gone |
-| engine `chat` (Whale-chan's plugin) | `momochat` with `style: full`, her old settings as her assignment's options |
+| engine `chat` (Whale-chan's plugin) | `momochat` with `style: chat`, her old settings as her assignment's options |
 | `diary` (the core diary, in all three) | nothing: a student's memory is the students module's |
 
 core.yml lines saying `engine: room` (or `assistant`, `chat`) reach MomoChat, and the audit log says

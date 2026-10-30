@@ -17,6 +17,7 @@
 #                               # every student there), a day of contact
 # notes: true                   # keep notes, and give her those that fit each message
 # mood: true                    # judge her mood after each exchange; tell her its news once
+# classmates: true              # tell her how the other students seem today (read from their files: no model call)
 # met_role: acquaintance        # the role someone gets when they first talk with her ("": leave them without one)
 # owner_role: creator           # the bot's owner's, when they first talk with her ("": as anyone else's)
 # writer_profile: deepseek      # the model profile for mneme-llm's own calls (left out: her own)
@@ -32,7 +33,7 @@
 # embed: true                   # find what was said by meaning too (OpenAI embeddings, OPENAI_API_KEY; about $0.004
 #                               # a thousand exchanges); false: by its words alone
 # search: true                  # her tools to search everything said before with the person, and read around it
-# config: whale.toml            # a mneme-llm config file, read when her file is first made (relative to its data folder)
+# config: memory.toml           # a mneme-llm config file, read when her file is first made (relative to its data folder)
 # students:                     # a student's own settings, over the ones above, when one should differ (her
 #   grok: {learn: false}        # student.yml `memory:` has her own, under these: DeepSeek's call_owner 主人, zh)
 # platforms: {mybot: discord}   # interfaces that share people: one Discord user is one person on both bots

@@ -68,9 +68,10 @@ class Seat:
     @property
     def levels(self) -> tuple[Mapping[str, Any], ...]:
         """Her models from the weakest to the strongest, each once: her own (cheap) ones, then her strong ones. The page
-        can give a seat any of them (`lv0`, `lv1`, …)."""
+        can give a seat any of them (`lv0`, `lv1`, …). The same models through OpenRouter are spare routes, not levels."""
         found: list[Mapping[str, Any]] = []
-        for item in (*self.cheap, *self.strong):
+        models = (*self.cheap, *self.strong)
+        for item in [item for item in models if item["provider"] != "openrouter"] or models:
             if not any((item["provider"], item["model"]) == (seen["provider"], seen["model"]) for seen in found):
                 found.append(item)
         return tuple(found)

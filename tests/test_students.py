@@ -57,6 +57,14 @@ class StudentFolderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "outside the students folder"):
             self.module.read_students(self.root)
 
+    def test_a_model_with_an_openrouter_name_gets_a_spare_route_so_one_key_runs_everyone(self):
+        models = [{"provider": "a", "model": "m", "openrouter": "maker/m"}, {"provider": "a", "model": "n"}]
+        self.assertEqual(self.module.routes(models), [{"provider": "a", "model": "m"}, {"provider": "a", "model": "n"},
+                                                      {"provider": "openrouter", "model": "maker/m"}])
+        for data in self.module.STUDENTS:  # every student can run on OPENROUTER_API_KEY alone
+            self.assertTrue(any(item["provider"] == "openrouter" for item in self.module.routes(data["models"])),
+                            data["name"])
+
     def test_profiles_put_her_own_models_first_then_the_others_first_ones_in_fallback_order(self):
         a, b, c, x = ({"provider": name, "model": name} for name in "abcx")
         students = [{"name": "ann", "models": [a], "fallback": 2}, {"name": "bea", "models": [b, x], "fallback": 1},
@@ -81,7 +89,8 @@ class ShippedStudentsTests(unittest.TestCase):
         self.assertEqual((gpt.display_name, gpt.aliases, gpt.formerly), ("GPT", ("Luna",), ("luna",)))
         self.assertTrue(all(persona.description for persona in contributions.personas))  # for Chimera's prompts
         self.assertEqual((gpt.tier("strong"), contributions.profiles["gpt_strong"]),
-                         ("gpt_strong", [{"provider": "openai", "model": "gpt-6.1-sol"}]))
+                         ("gpt_strong", [{"provider": "openai", "model": "gpt-6.1-sol"},
+                                         {"provider": "openrouter", "model": "openai/gpt-6.1-sol"}]))
         self.assertEqual(contributions.personas[1].tier("strong"), "gemini_own")  # no strong models: her own
         self.assertEqual(claude.aliases, ("Haiku",))
         for persona in contributions.personas:  # each has her picture in her own folder

@@ -8,7 +8,7 @@ from typing import Any, Callable, Literal, Mapping, Protocol, Sequence
 
 from contracts.messages import FileRef
 
-Effort = Literal["low", "medium", "high", "max"]  # "max" added in 1.7: providers that have it think longest
+Effort = Literal["none", "low", "medium", "high", "max"]  # "max" added in 1.7: providers that have it think longest
 
 
 @dataclass(frozen=True)
@@ -141,6 +141,7 @@ class AdapterResult:
     cached_input_tokens: int = 0  # (1.7) of input_tokens, read from the provider's prompt cache
     tool_calls: tuple[ToolCall, ...] = ()  # (1.7) with tools; unparsable arguments stay a string (refused)
     replay: Mapping[str, Any] | None = None  # (1.7) sent back with this assistant message
+    cost: float | None = None  # (1.15) dollars, when the provider says what it charged (OpenRouter does)
 
 
 class NotConfigured(RuntimeError):

@@ -11,6 +11,7 @@ import dataclasses
 import os
 import shutil
 import subprocess
+import json
 import tempfile
 import time
 from collections import OrderedDict
@@ -18,7 +19,8 @@ from pathlib import Path
 
 import discord
 
-from contracts import Address, Command, Delivery, Display, FileRef, Interface, Option, Reply, Request, Sender
+from contracts import (Address, Capability, Command, Delivery, Display, FileRef, Interface, Option, Reply, Request,
+                       Risk, Sender, ToolResult)
 
 from . import slash, voice
 from .math_render import MathRenderer, fallback_text, split_math
@@ -26,14 +28,17 @@ from .speakup import MARK, Ledger, Settings, SpeakUp
 from .voice import VOICE_NAME, speakable
 
 # Her own commands: `/new` becomes the message MomoChat starts a fresh thread on; `/voice` and `/speakup` the bot
-# answers itself. The rest come from the core's catalog.
+# answers itself (typed as `$voice` and `$speakup` they are the core's, from any interface). The rest come from the
+# core's catalog.
+SPEAK_UP = ("status", "rehearse", "now", "on", "off", "dry")
+MARKS = {"👍": "good", "👎": "bad"}  # her owner's reactions on a voice message: see on_raw_reaction_add
+CLIPS = 100  # voice messages kept until marked
 LOCAL = {
     "new": (Command("new", "Start a fresh chat (earlier messages stop being context)"), "/new"),
     "voice": (Command("voice", "Her replies here as voice messages: on or off",
                       (Option("mode", "on or off", choices=("on", "off")),)), None),
     "speakup": (Command("speakup", "鲸酱 messaging first: status, rehearse, now, on, off or dry (owner only)",
-                        (Option("do", "what to do", choices=("status", "rehearse", "now", "on", "off", "dry")),),
-                        access="creator"), None),
+                        (Option("do", "what to do", choices=SPEAK_UP),), access="creator"), None),
 }
 SLASH_DEFAULT = ("help", "memory", "remind", "reminders", "routine", "draw", "search", "read", "video")
 
@@ -140,6 +145,7 @@ class WhaleChanBot(Interface):
         self.client.event(self.on_ready)
         self.client.event(self.on_message)
         self.client.event(self.on_interaction)
+        self.client.event(self.on_raw_reaction_add)
         self._task = asyncio.create_task(self._run())
 
     def invite_url(self) -> str:
@@ -347,6 +353,34 @@ class WhaleChanBot(Interface):
             is_direct=True, mentions_me=True, display=self.display, extra={"speak_up": motive}))
         return bool(result)
 
+    def capabilities(self) -> list[Capability]:
+        """`$speakup` and `$voice`, for people to type on any interface; models are not offered them."""
+        def owner(context) -> str:
+            return context.sender.id if context.sender.id in self._owners else next(iter(self._owners), "")
+
+        async def speak_up(arguments, context) -> ToolResult:
+            action = str(arguments.get("do") or "status").strip().lower()
+            if action not in SPEAK_UP:
+                return ToolResult.fail(f"$speakup takes one of: {', '.join(SPEAK_UP)}", "invalid_arguments")
+            if not owner(context):
+                return ToolResult.fail("Her Discord bot is not connected yet.", "not_ready")
+            return ToolResult.ok(await self._speak_up_command(owner(context), action))
+
+        async def voice_mode(arguments, context) -> ToolResult:
+            if self.voice is None:
+                return ToolResult.fail("Her voice is off.", "not_ready")
+            mode = str(arguments.get("mode") or "").strip().lower()
+            if mode not in ("", "on", "off"):
+                return ToolResult.fail("$voice takes on or off.", "invalid_arguments")
+            here = context.address.conversation if context.address.interface == self.name else f"dm:{owner(context)}"
+            return ToolResult.ok(self._voice_command(here, [mode] if mode else []))
+        return [Capability("whale_chan.speakup", "鲸酱 messaging first: status, rehearse, now, on, off or dry.", speak_up,
+                           {"do": {"type": "string", "enum": list(SPEAK_UP)}}, risk=Risk.WRITE, internal=True,
+                           owner_only=True, command="speakup", command_argument="do"),
+                Capability("whale_chan.voice", "Her replies in this chat as voice messages: on or off.", voice_mode,
+                           {"mode": {"type": "string", "enum": ["on", "off"]}}, risk=Risk.WRITE, internal=True,
+                           command="voice", command_argument="mode")]
+
     async def _speak_up_command(self, user: str, action: str) -> str:
         if user not in self._owners:
             return "Only her owner can change how she speaks up."
@@ -407,14 +441,45 @@ class WhaleChanBot(Interface):
         descriptor, raw = tempfile.mkstemp(prefix="voice-", suffix=".ogg", dir=folder)
         os.close(descriptor)
         try:
-            path = await asyncio.to_thread(backend.synthesize, speakable(reply.text), Path(raw))
-            if await self._send_voice(channel, path) is None:
+            spoken = speakable(reply.text)
+            path = await asyncio.to_thread(backend.synthesize, spoken, Path(raw))
+            sent = await self._send_voice(channel, path)
+            if sent is None:
                 await channel.send(file=discord.File(str(path), filename=VOICE_NAME if path.suffix == ".ogg"
                                                      else "voice.wav"))
+            else:
+                self._keep_clip(path, sent.id, spoken, backend)
         except Exception as error:
             self.port.log("voice_failed", error=type(error).__name__, detail=str(error)[:200])
         finally:
             Path(raw).unlink(missing_ok=True)
+
+    def _keep_clip(self, path: Path, message_id, text: str, backend) -> None:
+        """The last CLIPS voice messages stay a while, so her owner can mark them (👍 or 👎 on the message)."""
+        folder = self.data_dir / "voice" / "recent"
+        folder.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, folder / f"{message_id}.ogg")
+        (folder / f"{message_id}.json").write_text(json.dumps(
+            {"text": text, "backend": backend.name, "model": getattr(backend, "model", ""), "at": time.time()},
+            ensure_ascii=False), encoding="utf-8")
+        for old in sorted(folder.glob("*.ogg"), key=lambda clip: clip.stat().st_mtime)[:-CLIPS]:
+            old.unlink(missing_ok=True)
+            old.with_suffix(".json").unlink(missing_ok=True)
+
+    async def on_raw_reaction_add(self, payload) -> None:
+        """Her owner's 👍 or 👎 on a voice message of hers files it with its text in `voice/good` or `voice/bad`: what
+        sounds right, for choosing her voice later or teaching a model of her own."""
+        verdict = MARKS.get(str(payload.emoji))
+        if verdict is None or str(payload.user_id) not in self._owners:
+            return
+        clip = self.data_dir / "voice" / "recent" / f"{payload.message_id}.ogg"
+        if not clip.exists():
+            return
+        folder = self.data_dir / "voice" / verdict
+        folder.mkdir(parents=True, exist_ok=True)
+        clip.replace(folder / clip.name)
+        clip.with_suffix(".json").replace(folder / clip.with_suffix(".json").name)
+        self.port.log("voice_marked", verdict=verdict)
 
     def _mark_voiced(self, run_id: str | None) -> None:
         if run_id:

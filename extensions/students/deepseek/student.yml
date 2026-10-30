@@ -6,8 +6,10 @@ formerly: [whale_chan, whale]  # Whale-chan's own persona, and the whale persona
 order: 4
 description: "DeepSeek, the blue-haired whale girl, a clever and lazy junior (she is not fat)"
 models:
-  - {provider: deepseek, model: deepseek-flash}
+  - {provider: deepseek, model: deepseek-flash, openrouter: deepseek/deepseek-v4.1-flash}
 fallback: 1
+effort: none                 # she answers at once: chat without a thinking phase (her Flash spent four tokens
+                             # thinking for each one it said, most of the wait; Chimera's seats set their own)
 # No `allowance`: Artificial Analysis lists no cost per task for DeepSeek V4 Flash (2026-10-28), so her day is the
 # core's $0.50 (yours: her card on the Students page).
 pictures: {avatar: avatar.png}

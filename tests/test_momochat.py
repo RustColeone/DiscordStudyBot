@@ -42,6 +42,35 @@ class AssistantEngineTests(unittest.IsolatedAsyncioTestCase):
     def prompt(self, adapter, index):
         return "\n".join(m["content"] for m in adapter.calls[index]["messages"])
 
+    async def test_she_thinks_as_hard_as_her_own_effort_says_and_a_chat_can_say_otherwise(self):
+        agents = {"agents": {"p": {"prompt": "You are P.", "effort": "none"}}}
+        core, adapter = await self.core([{"message": "hi", "status": "complete", "actions": []}], agents)
+        chat = iface(core)
+        await chat.say("hello")
+        await settle(core)
+        self.assertEqual(adapter.calls[-1]["effort"], "none")
+        await core.stop()
+        self.cores.remove(core)
+        chosen = {"assignments": {"*": {"engine": "momochat", "personas": ["p"], "options": {"effort": "high"}}}}
+        core, adapter = await self.core([{"message": "hi", "status": "complete", "actions": []}], {**agents, **chosen})
+        chat = iface(core)
+        await chat.say("hello")
+        await settle(core)
+        self.assertEqual(adapter.calls[-1]["effort"], "high")
+
+    async def test_the_chat_style_is_casual_and_posts_only_her_answer(self):
+        chat_style = {"assignments": {"*": {"engine": "momochat", "personas": ["p"], "options": {"style": "chat"}}}}
+        core, adapter = await self.core([
+            {"message": "Checking.", "status": "continue", "actions": [{"tool": "basic.now", "arguments": {}}]},
+            {"message": "noon", "status": "complete", "actions": []}], chat_style)
+        chat = iface(core)
+        await chat.say("what time is it?")
+        await settle(core)
+        self.assertEqual([reply.text for reply in chat.delivered if reply.kind == "text"], ["noon"])
+        self.assertIn("Checking.", [reply.text for reply in chat.delivered if reply.kind == "progress"])
+        self.assertIn("short and casual", self.prompt(adapter, 0))
+        self.assertNotIn("full assistant", self.prompt(adapter, 0))
+
     def counts(self):
         path = self.tmp / "counter.json"
         return json.loads(path.read_text()) if path.exists() else {}

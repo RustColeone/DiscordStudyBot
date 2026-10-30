@@ -88,25 +88,34 @@ def read_students(root: Path = HERE) -> list[dict]:
     return sorted(found, key=lambda data: (data.get("order", 1000), data["name"]))
 
 
+def routes(models) -> list[dict]:
+    """Candidates for these models: each from its own company, then the same ones through OpenRouter (`openrouter:` in
+    student.yml). A candidate without a key is skipped, so OPENROUTER_API_KEY alone runs every student, and beside the
+    companies' own keys it is their spare."""
+    direct = [{key: value for key, value in item.items() if key != "openrouter"} for item in models]
+    return [*direct, *({"provider": "openrouter", "model": item["openrouter"]} for item in models
+                       if item.get("openrouter"))]
+
+
 def profiles(students: list[dict]) -> dict[str, list[dict]]:
     """Each student prefers her own models, then the others' first models in `fallback` order (candidates without a
     key are skipped, so one key is always enough). `falls_back_to: <name>` puts that student's whole list after her
     own instead. Her tiers (Persona.profiles) are `<name>_own`, her own models only, and `<name>_strong`, her
     `strong:` models, when she has them."""
     ranked = sorted((data for data in students if data.get("fallback") is not None), key=lambda data: data["fallback"])
-    shared = [data["models"][0] for data in ranked]
+    shared = routes([data["models"][0] for data in ranked])
     result = {}
     for data in students:
-        own = list(data["models"])
+        own = routes(data["models"])
         result[data["name"]] = [*own, *(item for item in shared if item not in own)]
     for data in students:
         if data.get("falls_back_to"):
-            own = list(data["models"])
+            own = routes(data["models"])
             result[data["name"]] = [*own, *(item for item in result[data["falls_back_to"]] if item not in own)]
     for data in students:
-        result[f"{data['name']}_own"] = list(data["models"])
+        result[f"{data['name']}_own"] = routes(data["models"])
         if data.get("strong"):
-            result[f"{data['name']}_strong"] = list(data["strong"])
+            result[f"{data['name']}_strong"] = routes(data["strong"])
     return result
 
 
@@ -134,7 +143,8 @@ def setup(context) -> Contributions:
     personas = [Persona(data["name"], data["display_name"], data["prompt"], profile=data["name"],
                         aliases=tuple(data.get("aliases") or ()), formerly=tuple(data.get("formerly") or ()),
                         pictures=data["pictures"], description=str(data.get("description") or ""),
-                        profiles=tiers(data), allowance=data.get("allowance")) for data in STUDENTS]
+                        profiles=tiers(data), allowance=data.get("allowance"),
+                        effort=str(data.get("effort") or "")) for data in STUDENTS]
     # The students' own providers and profiles; this module's config.yml `providers:` (key by key) and `profiles:`
     # override them, and core.yml overrides both.
     providers = {}

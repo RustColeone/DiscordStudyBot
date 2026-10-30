@@ -25,9 +25,11 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 #       owner; InterfacePort.stamina, InterfacePort.spending).
 # 1.13: 1.12 plus a persona's own default daily allowance (Persona.allowance).
 # 1.14: 1.13 plus async prompt parts (Session.aprompt renders them), whose persona a tool call is for
+# 1.15: 1.14 plus the effort "none" (no thinking), Persona.effort, how hard she thinks in a conversation, and
+#       AdapterResult.cost, what the provider says it charged
 #       (Tools.list and Tools.call take `persona`, ToolContext.persona) and capabilities offered to some personas
 #       only (Capability.personas).
-CONTRACTS_VERSION = "1.14"
+CONTRACTS_VERSION = "1.15"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",

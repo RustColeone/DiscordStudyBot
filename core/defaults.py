@@ -56,7 +56,8 @@ def default_config() -> dict:
             "claude": {"kind": "anthropic", "api_key_env": "CLAUDE_API_KEY", "adaptive_thinking": True,
                        "models_since": MODELS_SINCE},
             "openrouter": {"kind": "openai_compatible", "base_url": "https://openrouter.ai/api/v1",
-                           "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object", "vision": False},
+                           "api_key_env": "OPENROUTER_API_KEY", "schema_mode": "json_object", "vision": False,
+                           "effort_param": True},
         },
         # Candidates without an API key are skipped, so any one configured provider works. Modules ship their
         # own profiles (the room: one per character).

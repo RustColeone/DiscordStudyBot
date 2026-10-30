@@ -24,7 +24,7 @@ from extensions.chimera.workspace.projects import detect_test, make_sample, proj
 from extensions.chimera.workspace.worktree import LandError, Worktrees
 
 # The providers the students and the core bring (each answered by a scripted adapter in the tests).
-PROVIDERS = ("deepseek", "openai", "gemini", "claude", "grok")
+PROVIDERS = ("deepseek", "openai", "gemini", "claude", "grok", "openrouter")
 SUNDAY = "Meetings on Sunday are listed first instead of last. Fix it and add a test."
 TEAM = {  # the scripted club: two families, so reviewers come from another one
     "team": {"gpt": False, "claude": False, "gemini": False, "grok": False, "deepseek": False,

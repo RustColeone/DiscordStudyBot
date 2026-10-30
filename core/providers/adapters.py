@@ -194,6 +194,12 @@ def api_key(settings: Mapping[str, Any]) -> str:
     return value
 
 
+def charge(usage) -> float | None:
+    """What the provider says this call cost, in dollars, if it says (OpenRouter's `usage.cost`)."""
+    value = getattr(usage, "cost", None)
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
 def cached_tokens(usage) -> int:
     """Prompt tokens read from the provider's cache: OpenAI's `prompt_tokens_details.cached_tokens`, DeepSeek's
     `prompt_cache_hit_tokens` (they bill these far cheaper)."""
@@ -287,6 +293,7 @@ class OpenAICompatible:
         input_tokens = getattr(usage, "prompt_tokens", 0) or 0
         output_tokens = getattr(usage, "completion_tokens", 0) or 0
         cached = cached_tokens(usage)
+        charged = charge(usage)
         text = lambda reply: tool_answer(reply.choices[0].message, schema_name, schema) if mode == "strict_tool" \
             else reply.choices[0].message.content or ""
         blank = lambda reply: not text(reply).strip() and not (
@@ -298,14 +305,16 @@ class OpenAICompatible:
             input_tokens += getattr(usage, "prompt_tokens", 0) or 0
             output_tokens += getattr(usage, "completion_tokens", 0) or 0
             cached += cached_tokens(usage)
+            charged = None if charged is None or charge(usage) is None else charged + charge(usage)
         choice = response.choices[0]
         reason = str(getattr(choice, "finish_reason", "") or "").lower()
         if mode != "tools":
-            return AdapterResult(text(response), input_tokens, output_tokens, reason == "length", mode, cached)
+            return AdapterResult(text(response), input_tokens, output_tokens, reason == "length", mode, cached,
+                                 cost=charged)
         reasoning = getattr(choice.message, "reasoning_content", None)  # DeepSeek's thinking: wanted back with tools
         return AdapterResult(text(response), input_tokens, output_tokens, reason == "length", mode, cached,
                              tool_calls=openai_calls(choice.message, back),
-                             replay={"reasoning_content": reasoning} if reasoning is not None else None)
+                             replay={"reasoning_content": reasoning} if reasoning is not None else None, cost=charged)
 
 
     async def list_models(self) -> list[tuple[str, dt.datetime | None]]:
@@ -419,7 +428,7 @@ class Anthropic:
                                {"type": "text", "text": last["content"]}]
         if system:
             params["system"] = system
-        if self.settings.get("adaptive_thinking"):
+        if self.settings.get("adaptive_thinking") and effort != "none":
             params["thinking"] = {"type": "adaptive"}
             params["output_config"] = {"effort": effort}
             # Thinking consumes output tokens; keep the visible budget intact.

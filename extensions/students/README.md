@@ -86,10 +86,11 @@ formerly: [luna]            # optional: her persona names before; what was kept 
 order: 1                    # where she stands in lists (MomoChat's default rotation follows assignments)
 description: "GPT, the ..." # one line on who she is, for engines that write their own prompts (Chimera's)
 models:                     # her own models, preferred in this order (her `own` tier: `gpt_own`)
-  - {provider: openai, model: gpt-6-luna}
+  - {provider: openai, model: gpt-6-luna, openrouter: openai/gpt-6-luna}   # openrouter: the same model through it
 strong:                     # optional: her strongest models (her `strong` tier: `gpt_strong`)
-  - {provider: openai, model: gpt-6.1-sol}
+  - {provider: openai, model: gpt-6.1-sol, openrouter: openai/gpt-6.1-sol}
 fallback: 2                 # optional: her first model is everyone else's 2nd fallback
+effort: none                # optional: how hard she thinks in a conversation (none: she answers at once)
 allowance: 3.59             # optional: her day's spending by default, in dollars (else the core's $0.50); core.yml
                             # `stamina:`, `$stamina` and her card on the Students page come first
 falls_back_to: gpt          # optional, instead: after her own models, this student's whole list

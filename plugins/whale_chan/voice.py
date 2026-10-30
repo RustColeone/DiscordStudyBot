@@ -1,9 +1,11 @@
 """Her voice: replies spoken aloud and sent as a Discord voice message.
 
 The default backend is OpenAI's speech API (`gpt-4o-mini-tts`, which takes a style instruction, so she sounds
-like herself in every language), using OPENAI_API_KEY. Piper, a local voice that needs no key, is an optional
-backend in `voice_piper.py`: nothing loads it unless `voice: {backend: piper}` is set, and the file can be
-deleted to keep the module light.
+like herself in every language), using OPENAI_API_KEY. `voice: {backend: cloned, reference: clip.wav}` speaks in the
+voice of a short clip instead, through OpenRouter's speech API (OPENROUTER_API_KEY; Fish Audio's S2.1 makes a sentence
+in two or three seconds; the clip goes with each request and nothing is stored there). Piper, a local voice that needs
+no key, is an optional backend in `voice_piper.py`: nothing loads it unless `voice: {backend: piper}` is set, and the
+file can be deleted to keep the module light.
 
 She speaks through the `whale_chan.speak` capability, so the core's permissions apply and a model can choose to
 send a voice note ("say goodnight to me"); the chat engine also uses it for her own first messages
@@ -13,9 +15,13 @@ send a voice note ("say goodnight to me"); the chat engine also uses it for her 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import mimetypes
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import urllib.error
 import urllib.request
@@ -78,9 +84,55 @@ class OpenAIVoice:
         return path
 
 
+class ClonedVoice:
+    """A voice taken from a short clip (`reference`: a WAV or MP3 of clear speech, in her data folder unless the path
+    is absolute), sent with each request to OpenRouter's speech API. `reference_text` is what the clip says, if known;
+    a wrong one is worse than none. Keep the clip out of the repository: it is someone's voice."""
+
+    name = "cloned"
+
+    def __init__(self, config: Mapping[str, Any]):
+        self.model = str(config.get("model", "fish-audio/s2.1-pro"))
+        self.reference = Path(str(config.get("folder", "."))) / str(config.get("reference", "voice-reference.wav"))
+        self.reference_text = str(config.get("reference_text", ""))
+        self.base_url = str(config.get("base_url", "https://openrouter.ai/api/v1")).rstrip("/")
+        self.key_env = str(config.get("key_env", "OPENROUTER_API_KEY"))
+
+    def ready(self) -> str:
+        if not _key(self.key_env):
+            return f"{self.key_env} is not set"
+        if not self.reference.is_file():
+            return f"her voice clip {self.reference} is missing"
+        return "" if shutil.which("ffmpeg") else "ffmpeg is not installed"
+
+    def _references(self) -> list[dict]:
+        kind = mimetypes.guess_type(self.reference.name)[0] or "audio/wav"
+        clip = base64.b64encode(self.reference.read_bytes()).decode()
+        return [{"type": "input_audio", "input_audio": {"data": f"data:{kind};base64,{clip}"}},
+                *([{"type": "text", "text": self.reference_text}] if self.reference_text else [])]
+
+    def synthesize(self, text: str, path: Path) -> Path:
+        body = {"model": self.model, "input": text, "response_format": "mp3", "input_references": self._references()}
+        request = urllib.request.Request(f"{self.base_url}/audio/speech", data=json.dumps(body).encode(),
+                                         headers={"Authorization": f"Bearer {_key(self.key_env)}",
+                                                  "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                sound = response.read()
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(f"OpenRouter speech answered {error.code}: "
+                               f"{error.read().decode('utf-8', 'replace')[:200]}") from None
+        # Discord's voice messages are Ogg Opus; the speech API gives MP3 or raw PCM.
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "mp3", "-i", "pipe:0", "-c:a", "libopus", "-b:a", "48k",
+                        "-ac", "1", "-f", "ogg", str(path)], input=sound, check=True, capture_output=True, timeout=60)
+        return path
+
+
 def backend(config: Mapping[str, Any]):
     """The configured backend; Piper's module is imported only when asked for."""
     kind = str(config.get("backend", "openai"))
+    if kind == "cloned":
+        return ClonedVoice(config)
     if kind == "piper":
         from .voice_piper import PiperVoice  # optional: delete voice_piper.py and this is never reached
         return PiperVoice(dict(config.get("piper") or {}))

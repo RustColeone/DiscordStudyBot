@@ -66,6 +66,33 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         await self.core.manager.idle()  # and what the watchers do after
         return chat.texts(conversation)[-1]
 
+    async def test_she_hears_how_her_classmates_seem_today(self):
+        memory = memory_module()
+        settings = memory.Settings({"language": "en"}, self.tmp)
+        book = memory.Book(self.tmp / "files", personas=NAMES, settings=settings)
+        book.names = {"gemini": {"display_name": "Gemini"}, "deepseek": {"display_name": "DeepSeek"}}
+        book.open("gpt", create=True)
+        subject = "chat:alice"
+        self.assertEqual(memory.classmates_line(book, "gpt", subject, "en"), "")  # nobody has felt anything yet
+        book.open("gemini", create=True).mood.apply(subject, delta=25, judge="test")
+        worry = book.open("deepseek", create=True).mood
+        worry.apply(subject, delta=-35, emotions={next(item.key for item in worry.settings.emotions if item.lowers): 30},
+                    judge="test")
+        self.assertEqual(memory.classmates_line(book, "gpt", subject, "en"),
+                         "(DeepSeek seems worried today; Gemini seems in high spirits today.)")
+        self.assertEqual(memory.classmates_line(book, "gpt", subject, "zh"),
+                         "（DeepSeek今天看起来有点担心，Gemini今天看起来很开心。）")
+        self.assertEqual(memory.classmates_line(book, "gemini", subject, "en"), "(DeepSeek seems worried today.)")
+        self.assertFalse((book.folder / "claude.db").exists())  # looking never makes a file for someone
+        persona, trigger = SimpleNamespace(name="gpt", display_name="GPT"), SimpleNamespace(
+            origin="person", sender=SimpleNamespace(id="alice", name="Alice"),
+            text="hello", extra={})
+        context = SimpleNamespace(persona=persona, trigger=trigger, address=SimpleNamespace(interface="chat",
+                                  conversation="dm"), owner=False, engine="momochat")
+        self.assertIn("Gemini seems in high spirits today", await memory.make_part(book, settings)(context))
+        quiet = memory.Settings({"classmates": False}, self.tmp)
+        self.assertNotIn("seems", await memory.make_part(book, quiet)(context))
+
     @staticmethod
     def seen(script, speaker):
         return "\n".join(message["content"] for message in script.prompts[speaker][-1])

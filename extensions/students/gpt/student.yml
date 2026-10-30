@@ -7,9 +7,9 @@ order: 1                    # where she stands in lists (and a group chat's defa
 # One line on who she is, for engines that write their own prompts around her (Chimera's work prompts).
 description: "GPT, the white-haired dragon girl and calm, dependable student-council president"
 models:                     # her own models, preferred in this order
-  - {provider: openai, model: gpt-6-luna}
+  - {provider: openai, model: gpt-6-luna, openrouter: openai/gpt-6-luna}
 strong:                     # optional: her strongest models, for heavy work (Chimera's strong seats); `$model gpt
-  - {provider: openai, model: gpt-6.1-sol}   # openai/gpt-6.1-sol` picks Sol for a chat
+  - {provider: openai, model: gpt-6.1-sol, openrouter: openai/gpt-6.1-sol}   # openai/gpt-6.1-sol` picks Sol for a chat
 fallback: 2                 # her first model is everyone else's 2nd fallback
 allowance: 3.59             # her day's spending by default, in dollars (yours: her card on the Students page):
                             # 10 × Artificial Analysis's cost per task of GPT-6.1 Sol (Medium), $0.36 on 2026-10-28

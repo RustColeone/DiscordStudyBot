@@ -15,9 +15,10 @@ token_env: DISCORD_BOT_TOKEN_WHALE_CHAN
 # persona: deepseek             # the student her bot speaks as
 # new_chat_text: "🐳 好的主人，新的对话开始啦～"   # the reply to /new
 
-# Her chats are MomoChat's, as a chat client (complete answers, only the answer posted): one ongoing thread per
+# Her chats are MomoChat's, as a chat app (short and casual, only the answer posted): one ongoing thread per
 # conversation, /new starts a fresh one. These are the options her bot's assignment gives MomoChat.
-effort: high                    # low | medium | high
+# style: chat                   # full: a chat client, complete answers
+# effort: none                  # she answers at once (student.yml); low | medium | high think first, and take longer
 max_steps: 10                   # tool steps per message
 max_tokens: 8000
 history_limit: 60               # messages of the current thread sent as context
@@ -53,8 +54,14 @@ history_chars: 40000            # and at most this many characters of them
 #   instructions: "A cute, playful, slightly tsundere young girl …"
 #   speak_up: true                # her own first messages come as voice messages too
 #   max_chars: 400                # longer replies stay text
-#   backend: openai               # or piper: a local voice, optional (voice_piper.py; not installed by default)
+#   backend: openai               # or cloned, or piper: a local voice, optional (voice_piper.py; not installed by default)
 #   piper: {model: /path/to/zh_CN-huayan-medium.onnx}
+#
+# backend: cloned speaks in the voice of a short clip, through OpenRouter (OPENROUTER_API_KEY; needs ffmpeg). Her
+# owner's 👍 or 👎 on a voice message files it with its text in the data folder's voice/good or voice/bad.
+#   model: fish-audio/s2.1-pro    # fast: two or three seconds a sentence
+#   reference: voice-reference.wav   # in her data folder; keep it out of the repository, it is someone's voice
+#   reference_text: ""            # what the clip says, if you know it; a wrong one is worse than none
 
 # Slash commands besides /new, /voice and /speakup (names from the core's catalog; [] for none).
 # slash_commands: [help, memory, remind, reminders, routine, draw, search, read, video]

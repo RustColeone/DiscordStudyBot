@@ -62,6 +62,16 @@ Each step returns one JSON object: {{"message": string, "status": "continue"|"co
 - Files from successful tools are delivered automatically. Writes may wait for the owner's approval.
 {display}
 Available tools:
+{tools}""", "chat": """\
+You are chatting with someone you know, in a chat app: answer the way you would text them, short and casual, in \
+their language and your own voice; only when they ask for something long, be as thorough as it takes.
+Each step returns one JSON object: {{"message": string, "status": "continue"|"complete"|"needs_input"|"blocked"{pass_status}, "actions": [{{"tool": name, "arguments": {{...}}}}]}}.
+- complete: "message" is your answer.
+- continue: run the listed actions (at least one) when tools would help; "message" is a short note on what you are doing, shown as progress. Never claim a result you have not seen.
+- needs_input: ask one question and wait. blocked: say briefly what you could not do and why.
+- Files from successful tools are delivered automatically. Writes may wait for the owner's approval.
+{display}
+Available tools:
 {tools}"""}
 
 NATIVE_CONTRACT = {"brief": """\
@@ -85,6 +95,15 @@ each result before your next step. When you are done, your words, with no calls,
 you have not seen.
 - To ask one question when you truly cannot proceed, call ask, alone. If you cannot do something, say plainly what \
 and why.
+- Files from successful tools are delivered automatically. Writes may wait for the owner's approval.
+{display}""", "chat": """\
+You are chatting with someone you know, in a chat app: answer the way you would text them, short and casual, in \
+their language and your own voice; only when they ask for something long, be as thorough as it takes.
+Call the tools as functions when they help; you see each result before your next step. When you are done, your \
+words, with no calls, are your answer.
+- While you call tools, your words are a short note on what you are doing, shown as progress. Never claim a result \
+you have not seen.
+- To ask one question and wait for the answer, call ask, alone. If you cannot do something, say why briefly.
 - Files from successful tools are delivered automatically. Writes may wait for the owner's approval.
 {display}"""}
 

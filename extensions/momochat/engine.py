@@ -30,7 +30,8 @@ from .history import NEW_THREAD, Reading, add_images, combine_images, flag, imag
 from .steps import ASK, HAND_OFF, PASS
 
 VERSION = 2  # of the state a run saves (runs another engine saved start over: their calls are `c…`, ours `m…`)
-STYLES = ("brief", "full")
+STYLES = ("brief", "full", "chat")
+ANSWER_ONLY = ("full", "chat")  # the styles that post only her answer, her notes while working shown as progress
 FAILURES = {
     "request_failed": ("我这边的请求失败了，这一步还没完成；其他成员可以继续各自的工作。",
                        "My request failed; this step is unfinished. The others can continue."),
@@ -208,7 +209,7 @@ class MomoChatEngine(Engine):
                     await self._close(session, state, turn)
                     return None
                 turn["steps"] += 1
-                if turn["steps"] == 1 and self._style(session) == "full":
+                if turn["steps"] == 1 and self._style(session) in ANSWER_ONLY:
                     await session.progress("Thinking…")
                 step = await self._step(session, state, turn)
                 self._record(session, state, turn, step)
@@ -246,7 +247,7 @@ class MomoChatEngine(Engine):
         await session.save(state)
         if not text:
             return
-        if self._style(session) == "full" and not final:
+        if self._style(session) in ANSWER_ONLY and not final:
             await session.progress(text)
             return
         turn["said"] = [*turn["said"], text][-6:]
@@ -314,7 +315,7 @@ class MomoChatEngine(Engine):
                 if not action.get("awaiting"):
                     action["awaiting"] = result.data.get("approval_id", "") or True
                     turn["transcript"].append(steps.waiting(action, f"[tool {action['tool']}] {result.summary}"))
-                    if self._style(session) == "full":
+                    if self._style(session) in ANSWER_ONLY:
                         await session.progress(f"Waiting for the owner to approve {action['tool']}…")
                 turn["status"] = "waiting_approval"
                 await session.save(state)
@@ -428,7 +429,8 @@ class MomoChatEngine(Engine):
     def _request(self, session: Session, state: dict, turn: dict, messages, **kwargs) -> ModelRequest:
         persona = self._persona(session, turn["persona"])
         return ModelRequest(messages, profile=persona.profile, persona=persona.name,
-                            images=self._images(session, state), effort=str(self._option(session, "effort")),
+                            images=self._images(session, state),
+                            effort=str(session.options.get("effort") or persona.effort or self.settings.effort),
                             max_tokens=self._number(session, "max_tokens", 100, 64000),
                             timeout_s=self._number(session, "timeout_s", 5, 900, float), **kwargs)
 
@@ -497,7 +499,7 @@ class MomoChatEngine(Engine):
         the tools offered as functions rather than listed)."""
         persona = self._persona(session, turn["persona"])
         style, display, many = self._style(session), session.display, self._group(session)
-        if style == "full":
+        if style in ANSWER_ONLY:
             layout = ("The chat shows Markdown; long answers are split into several messages automatically."
                       if display.markdown else "Use plain text only; no Markdown.")
         else:

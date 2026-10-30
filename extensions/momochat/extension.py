@@ -27,8 +27,8 @@ EXTENSION = Extension("momochat", setup, contracts="1", version="1", formerly=("
     Setting("max_steps", "Most steps (tool rounds) of one speaker per message", "number", 8),
     Setting("history_limit", "Earlier messages every speaker reads word for word", "number", 30),
     Setting("effort", "Reasoning effort: low, medium or high", "text", "low"),
-    Setting("style", "brief (a speaker in a conversation) or full (a chat client: complete answers, only the answer "
-            "posted)", "text", "brief"),
+    Setting("style", "brief (a speaker in a conversation), full (a chat client: complete answers, only the answer "
+            "posted) or chat (a chat app: short and casual, only the answer posted)", "text", "brief"),
     Setting("chime_in", "A group message naming no one: whose turn it is answers, the others may join in", "boolean",
             False),
     Setting("compact", "Fold messages older than history_limit into the chat's rolling summary", "boolean", True),

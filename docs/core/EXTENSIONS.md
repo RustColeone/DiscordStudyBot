@@ -149,6 +149,7 @@ agents:
     description: "Helper, a careful assistant"            # optional: one line, for engines that write their own
     aliases: [Help]                                         # optional
     allowance: 1.00                                         # optional: her day's spending by default (stamina)
+    effort: none                                            # optional: how hard she thinks in a conversation
   gpt:
     parts: [{name: personality, file: personas/gpt.md}]   # no prompt: parts for a module's agent (a student)
 ```
@@ -206,7 +207,9 @@ And since contracts 1.11:
   `persona.tier("strong")` is that profile, else her `own`, else `profile`. Chimera seats a student on her `own`
   tier for cheap work and her `strong` tier for strong work.
 
-And since contracts 1.13, `allowance`: her own default daily allowance in dollars (0: no daily limit; None: the
+And since contracts 1.15, `effort`: how hard she thinks in a conversation (`none`: no thinking phase, she answers at
+once; empty: the engine's setting; a session's own `effort` comes first). Since contracts 1.13, `allowance`: her own
+default daily allowance in dollars (0: no daily limit; None: the
 core's $0.50), a student's `allowance:` in her student.yml or an agent's in core.yml. The owner's settings come
 first (core.yml `stamina:`, `$stamina`, the pages). The students' are 10 × Artificial Analysis's cost per task of
 their strongest model at medium effort, as listed on 2026-10-28.

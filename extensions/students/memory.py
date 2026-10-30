@@ -2,8 +2,8 @@
 until 2026-10-27; a student is an agent with this memory, so it is part of what the students module adds.
 
 Every engine that places prompt parts (MomoChat) tells her, each turn, who the person is to her, what they call her,
-her notes for the message, what was said before that bears on it (word for word: her first look, with mneme-llm 0.3)
-and her mood's news. After each of her messages a watcher lets her learn from it: the exchange kept word for word,
+her notes for the message, what was said before that bears on it (word for word: her first look, with mneme-llm 0.3),
+her mood's news and how her classmates seem today. After each of her messages a watcher lets her learn from it: the exchange kept word for word,
 how it left her feeling, what is worth remembering, and a day of contact for her closeness with the person. Two
 tools let her search everything said before with the person, and read an exchange with its neighbours, when the
 first look does not have it. What was said in a group chat, every student there heard: the exchange and the notes
@@ -38,7 +38,7 @@ ENGINES = ("momochat",)
 FORMER = {"room": "momochat", "assistant": "momochat", "chat": "momochat"}
 # What `students: <persona>:` (or her student.yml `memory:`, under it) may set for one student, over the settings for
 # all.
-OWN = ("learn", "notes", "mood", "met_role", "owner_role", "writer_profile", "reflect_after_notes", "language",
+OWN = ("learn", "notes", "mood", "classmates", "met_role", "owner_role", "writer_profile", "reflect_after_notes", "language",
        "memory_language", "decisions", "config", "call_owner", "episodes", "said", "said_skip", "embed", "search")
 # What was said, kept word for word (mneme-llm 0.3): a file of an older mneme-llm keeps notes only.
 EPISODES = hasattr(mneme_llm.Mneme, "alook")
@@ -79,6 +79,7 @@ class Settings:
         self.learn = flag(config.get("learn"), True)
         self.notes = flag(config.get("notes"), True)
         self.mood = flag(config.get("mood"), True)
+        self.classmates = flag(config.get("classmates"), True)  # how the others seem today, in her turn
         self.met_role = str(config.get("met_role", "acquaintance") or "")
         self.owner_role = str(config.get("owner_role", "creator") or "")  # the bot's owner, when they first talk
         self.writer_profile = str(config.get("writer_profile") or "") or None
@@ -376,6 +377,29 @@ def no_notes(person: str, language: str) -> str:
     return f"关于{person}的笔记：（暂无）" if language.startswith("zh") else f"Notes about {person}: (none yet)"
 
 
+# How a classmate seems, by mneme-llm's face for her mood: said as a classmate would notice it.
+SEEMS = {"great": ("in high spirits", "很开心"), "good": ("happy", "开心"), "ok": ("calm", "平静"),
+         "worry": ("worried", "有点担心"), "sad": ("sad", "有点难过")}
+RECENT = 2 * DAY  # a classmate's mood counts as today's this long after anything moved her
+
+
+def classmates_line(book: "Book", persona: str, subject: str, language: str) -> str:
+    """How the others seem today with this person, from their own files (no model call); "" when none has felt
+    anything lately. Her file alone is hers to change: this only reads theirs, and never makes one."""
+    now, seen = time.time(), []
+    for name in book.known():
+        if name == persona or not (book.folder / f"{name}.db").exists():
+            continue
+        state = book.open(name).mood.state(subject)
+        if state.updated_at is not None and now - state.updated_at <= RECENT:
+            seen.append((book.shown(name), SEEMS.get(state.face, (state.face, state.face))))
+    if not seen:
+        return ""
+    if language.startswith("zh"):
+        return "（" + "，".join(f"{name}今天看起来{word[1]}" for name, word in seen) + "。）"
+    return "(" + "; ".join(f"{name} seems {word[0]} today" for name, word in seen) + ".)"
+
+
 def impulse(trigger) -> str:
     """Her own motive when the message is a turn she started herself (an interface marks it `extra.speak_up`: a
     student's Discord bot speaking up), else ""."""
@@ -430,8 +454,8 @@ def share(book: Book, settings: Settings, exchange, subject: str, notes, facts) 
 def make_part(book: Book, settings: Settings):
     async def text(context) -> str:
         """Who the person is to her, what they call her, her notes for this message, what was said before that bears
-        on it (her first look) and her mood's news (until she has replied); nothing for a routine run, or a person
-        she has nothing on."""
+        on it (her first look), her mood's news (until she has replied) and how her classmates seem today; nothing
+        for a routine run, or a person she has nothing on."""
         persona, trigger = context.persona, context.trigger
         engine = getattr(context, "engine", "")  # (contracts 1.9; an older core gives none)
         if trigger.origin != "person" or not book.keeps(persona.name) or not conversation(engine, settings):
@@ -453,7 +477,8 @@ def make_part(book: Book, settings: Settings):
         # Her mood's news is told once: marked by the watcher once she has replied, so a step asked twice (or a run
         # replayed) shows it each time; without the watcher, at once.
         news = (memory.mood.news(subject, mark=not own.learn) or "") if own.mood else ""
-        return "\n\n".join(part for part in (who, notes, said, news) if part)
+        others = classmates_line(book, persona.name, subject, own.language) if own.classmates else ""
+        return "\n\n".join(part for part in (who, notes, said, news, others) if part)
     return text
 
 
@@ -462,7 +487,7 @@ def writer(models, profile: str | None):
     async def complete(system: str, user: str) -> str:
         result = await models.generate(ModelRequest(
             [{"role": "system", "content": system}, {"role": "user", "content": user}], profile=profile,
-            effort="low", max_tokens=1500, timeout_s=60.0))  # reasoning models count their thinking too
+            effort="none", max_tokens=1500, timeout_s=60.0))  # short judgments: thinking cost several times the reply
         return result.text
     return complete
 

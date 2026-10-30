@@ -295,6 +295,26 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["output_config"]["format"]["schema"], SCHEMA)
         self.assertEqual(result.text, '{"answer": "x"}')
 
+    async def test_an_answer_costs_what_the_provider_says_it_charged(self):
+        from core.providers.adapters import charge
+        self.assertEqual(charge(SimpleNamespace(cost=0.0001)), 0.0001)
+        self.assertIsNone(charge(SimpleNamespace(prompt_tokens=3)))
+        self.assertIsNone(charge(None))
+        self.assertIsNone(charge(SimpleNamespace(cost=True)))
+
+    async def test_anthropic_with_effort_none_has_no_thinking_phase(self):
+        captured = {}
+
+        async def create(**params):
+            captured.update(params)
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"answer": "x"}')],
+                                   usage=SimpleNamespace(input_tokens=4, output_tokens=6), stop_reason="end_turn")
+        client = SimpleNamespace(with_options=lambda **options: SimpleNamespace(messages=SimpleNamespace(create=create)))
+        await Anthropic({"adaptive_thinking": True, "thinking_reserve": 1000}, client).complete(
+            "claude", REQUEST.messages, SCHEMA, "reply", "none", 500, 30)
+        self.assertNotIn("thinking", captured)
+        self.assertEqual(captured["max_tokens"], 500)
+
     def test_claude_schema_drops_limits_it_rejects_but_keeps_structure(self):
         from core.providers.adapters import claude_schema
         schema = {"type": "object", "properties": {
