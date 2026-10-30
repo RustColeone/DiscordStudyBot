@@ -12,6 +12,7 @@ core configuration (admission rules and assignments), not interface logic.
   max_upload_mb      local file budget, 1–100 (100)                         (WECHAT_BRIDGE_MAX_UPLOAD_MB)
   max_text_chars     message length the engine aims for (500)
   poll_seconds (1), status_seconds (15), coalesce_seconds (1, 0–5)        (WECHAT_BRIDGE_COALESCE_SECONDS)
+  give_up_s (300)    not ready this long in a row: stop checking until $wechat_login or $wechat_resume (0: never)
   account_interval_s (20), chat_interval_s (20)   minimum spacing of the bot's own messages
   submit_media (false)     submit incoming images/files/stickers as requests instead of only recording them
   observe_chatter (false)  record group messages not addressed to the account in history
@@ -33,11 +34,11 @@ ENVIRONMENT = {"database_root": "WECHAT_BRIDGE_DATABASE_ROOT", "database_keys": 
                "max_upload_mb": "WECHAT_BRIDGE_MAX_UPLOAD_MB", "coalesce_seconds": "WECHAT_BRIDGE_COALESCE_SECONDS"}
 DEFAULTS = {"python": "/usr/bin/python3", "display": ":0", "wayland_display": "wayland-0", "runtime_dir": "",
             "max_upload_mb": 100.0, "max_text_chars": 500, "poll_seconds": 1.0, "status_seconds": 15.0,
-            "coalesce_seconds": 1.0, "account_interval_s": 20.0, "chat_interval_s": 20.0, "submit_media": False,
-            "observe_chatter": False}
+            "give_up_s": 300.0, "coalesce_seconds": 1.0, "account_interval_s": 20.0, "chat_interval_s": 20.0,
+            "submit_media": False, "observe_chatter": False}
 NUMBERS = {"max_upload_mb": (1, 100), "max_text_chars": (20, 4000), "poll_seconds": (0.2, 60),
-           "status_seconds": (1, 300), "coalesce_seconds": (0, 5), "account_interval_s": (0, 3600),
-           "chat_interval_s": (0, 3600)}
+           "status_seconds": (1, 300), "give_up_s": (0, 86400), "coalesce_seconds": (0, 5),
+           "account_interval_s": (0, 3600), "chat_interval_s": (0, 3600)}
 
 
 def settings_from(config, data_dir: Path, environ=os.environ) -> dict:

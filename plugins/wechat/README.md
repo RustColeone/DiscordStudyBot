@@ -33,9 +33,9 @@ its default), so their access level is `creator`.
 | `wechat.send` | critical | `$wechat_send <chat> \| <text>` | subject `chat`, grantable | Sends text as the owner; cancels the chat's open runs. Takes `chat` and `text`, or `spec`, never both. |
 | `wechat.notify` | write | `$wechat_notify on\|off\|inherit <chat\|*>` | | Forwards a chat's incoming messages to the owner as events. |
 | `wechat.configure` | critical | none (`$call`) | never_auto | Sets one chat's minimum seconds between the bot's messages (`send_interval_s`, 5–3600). |
-| `wechat.login` | critical | `$wechat_login` | never_auto | Opens WeChat if needed and returns the login QR as a file, or confirms a pending login. |
+| `wechat.login` | critical | `$wechat_login` | never_auto | Opens WeChat if needed and returns the login QR as a file, or confirms a pending login; checks again after `give_up_s`. |
 | `wechat.pause` | write | `$wechat_pause` | | Stops reading and sending; the account stays logged in. |
-| `wechat.resume` | write | `$wechat_resume` | | Resumes from the saved read positions on the next poll. |
+| `wechat.resume` | write | `$wechat_resume` | | Resumes from the saved read positions on the next poll, and checks again after `give_up_s`. |
 
 `$wechat_send` and `$wechat_notify` are declared as `Command`s with options and a template
 (`{chat} | {text}`, `{mode} {chat}`), so native command menus can render them.
@@ -81,6 +81,7 @@ and `extension_config.wechat` in core.yml overrides it. A key missing from both 
 | `max_text_chars` | 500 | 20–4000 | | Length the engine aims for (`Display.max_text_chars`). |
 | `poll_seconds` | 1 | 0.2–60 | | Reading interval. |
 | `status_seconds` | 15 | 1–300 | | How long an account check is cached. |
+| `give_up_s` | 300 | 0–86400 | | Not ready this long in a row (outside a login): stop checking until `$wechat_login` or `$wechat_resume`; 0 never stops. |
 | `coalesce_seconds` | 1 | 0–5 | `…_COALESCE_SECONDS` | Gathering window for a burst of incoming text. |
 | `account_interval_s`, `chat_interval_s` | 20, 20 | 0–3600 | | Minimum spacing of the bot's own messages per account and per chat. |
 | `submit_media` | false | | | Submit incoming images, files and stickers as requests instead of only recording them. |
@@ -156,7 +157,9 @@ reports `set_ready(False, …)` and stops there), reports the account's username
 `port.set_owners` (used only when core.yml lists no WeChat owners) and starts the poll loop.
 
 **Reading.** Each poll asks the transport for the account status (cached for `status_seconds`) and
-reports readiness. When ready it lists sessions and reads only chats whose session row changed
+reports readiness. Each check runs the desktop helper, which waits up to 25 seconds when WeChat is not there, so after
+`give_up_s` of not ready in a row the interface stops checking, tells the owner once, and starts again
+on `$wechat_login`, `$wechat_resume` or a restart. When ready it lists sessions and reads only chats whose session row changed
 (timestamp, preview, unread count), 40 messages at a time, and skips a chat whose send or file receipt
 holds its lock. A per-chat cursor `[sort_seq, local_id, timestamp]` lives in the bottle. On the very
 first start a chat's current position is saved without submitting anything; a chat that appears later

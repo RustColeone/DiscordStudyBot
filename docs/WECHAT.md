@@ -93,6 +93,7 @@ variables still work as fallbacks.
 | `max_upload_mb` | 100 | file budget |
 | `max_text_chars` | 500 | length the engine aims for |
 | `poll_seconds`, `status_seconds` | 1, 15 | reading and account checks |
+| `give_up_s` | 300 | not ready this long in a row: stop checking until `$wechat_login` or `$wechat_resume` (0: never) |
 | `coalesce_seconds` | 1 | gathering window for bursts (0–5) |
 | `account_interval_s`, `chat_interval_s` | 20, 20 | spacing of the bot's own messages |
 | `submit_media` | false | answer images and files on their own instead of only recording them |

@@ -54,6 +54,7 @@ class FakeTransport:
         self.images: dict[str, Path] = {}
         self.before_commit = None
         self.confirmed = 0
+        self.checks = 0  # account checks (each one is a desktop helper run)
         self.closed = False
 
     def add_chat(self, native, name, kind="direct"):
@@ -80,6 +81,7 @@ class FakeTransport:
                 "last_timestamp": last + len(data["messages"]) * 1e-6}
 
     async def status(self, refresh=False):
+        self.checks += 1
         return dict(self.state)
 
     async def confirm_login(self):
@@ -505,6 +507,50 @@ class OwnerTests(WeChatCase):
         await self.poll()
         self.assertEqual(self.texts(), ["on my way"])
         self.assertEqual([item.direction for item in self.core.tank.recent_messages(QUIET, 5)], ["out"])
+
+    async def test_a_long_wait_stops_the_checks_until_resume(self):
+        # Each check runs the desktop helper: WeChat away for `give_up_s` in a row stops them, said once.
+        self.transport.state = {"state": "unavailable", "account_id": "", "name": "", "detail": "not running"}
+        await self.start(wechat={"give_up_s": 60})
+        await self.poll()
+        self.assertNotIn("stopped checking", self.owner.delivered[-1].text)
+        self.wechat._unready_since -= 61
+        await self.poll()
+        told = [reply.text for reply in self.owner.delivered if "stopped checking" in reply.text]
+        self.assertEqual(told, ["WeChat stopped checking: unavailable for 1 min (not running). Run $wechat_login to "
+                                "set it up again, or $wechat_resume."])
+        checks = self.transport.checks
+        await self.poll()
+        await self.poll()
+        self.assertEqual(self.transport.checks, checks)
+        self.assertEqual(len([reply for reply in self.owner.delivered if "stopped checking" in reply.text]), 1)
+        self.assertIn("stopped checking", await self.command("$wechat_status"))
+        self.transport.state = {"state": "ready", "account_id": ACCOUNT, "name": "Me", "detail": ""}
+        await self.command("$wechat_resume")
+        await self.poll()
+        self.assertTrue(self.core.gateway.ready()["wechat"][0])
+        self.transport.add("wxid_friend", "echo back again")
+        await self.poll()
+        self.assertEqual(self.texts(), ["back again"])
+
+    async def test_login_checks_again_and_a_login_in_progress_never_gives_up(self):
+        self.transport.state = {"state": "logged_out", "account_id": "", "name": "", "detail": ""}
+        await self.start(wechat={"give_up_s": 60})
+        self.wechat._unready_since -= 61
+        await self.poll()
+        self.assertTrue(self.wechat._gave_up)
+        await self.command("$wechat_login")
+        checks = self.transport.checks
+        await self.poll()
+        self.assertGreater(self.transport.checks, checks)
+        self.wechat._unready_since -= 61  # (minutes go by before the phone scans the code)
+        await self.poll()
+        self.assertEqual(self.wechat._gave_up, "")
+        self.transport.state = {"state": "confirming", "account_id": "", "name": "", "detail": ""}
+        await self.poll()
+        self.assertEqual(self.transport.confirmed, 1)
+        self.assertTrue(self.core.gateway.ready()["wechat"][0])
+        self.assertEqual(self.wechat._gave_up, "")
 
     async def test_pause_stops_reading_and_resume_continues_from_the_cursor(self):
         await self.start()

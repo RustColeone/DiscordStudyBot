@@ -35,6 +35,7 @@ STATES = {
     "confirming": "WeChat is waiting for the login to be confirmed on the phone. Run $wechat_login to continue.",
     "unavailable": "WeChat is not running or not readable ({detail}). Run $wechat_login to open it.",
     "identity_unknown": "WeChat's account cannot be verified ({detail}); replies are paused.",
+    "given_up": "WeChat stopped checking: {detail}. Run $wechat_login to set it up again, or $wechat_resume.",
 }
 
 
@@ -120,6 +121,8 @@ class WeChatInterface(Interface):
         self._uncertain: dict[str, list[dict]] = defaultdict(list)
         self._names: dict[str, str] = {}
         self._login_until = 0.0
+        self._unready_since: float | None = None  # when the account was last seen not ready, in a row
+        self._gave_up = ""  # why it stopped checking (no desktop calls until $wechat_login or $wechat_resume)
         self._last_error = ""
         self._error_notified: dict[str, float] = {}
 
@@ -218,13 +221,18 @@ class WeChatInterface(Interface):
         if self.paused:
             await self._report({"state": "paused"})
             return
+        if self._gave_up:
+            await self._report({"state": "given_up", "detail": self._gave_up})
+            return
         account = await self.transport.status()
         if account.get("state") == "confirming" and time.monotonic() < self._login_until:
             await self.transport.confirm_login()
             account = await self.transport.status(refresh=True)
         self._account = account
         if not await self._report(account):
+            await self._waiting(account)
             return
+        self._unready_since = None
         failure = None
         for chat in await self.transport.list_chats():
             self._names[chat["native_id"]] = chat["name"]
@@ -238,6 +246,22 @@ class WeChatInterface(Interface):
         self._first_pass_done = True
         if failure is not None:
             raise failure
+
+    async def _waiting(self, account: dict) -> None:
+        """Not ready: each check starts the desktop helper, which can hang until its timeout. After `give_up_s` of
+        it in a row (a login in progress restarts the count), stop checking until the owner sets WeChat up again."""
+        now, limit = time.monotonic(), float(self.settings.get("give_up_s", 300))
+        if self._unready_since is None or now < self._login_until:
+            self._unready_since = now
+        elif limit and now - self._unready_since >= limit:
+            detail = account.get("detail") or ""
+            self._gave_up = (f"{account.get('state', 'unavailable')} for {limit / 60:g} min"
+                             + (f" ({detail[:200]})" if detail else ""))
+            await self._report({"state": "given_up", "detail": self._gave_up})
+
+    def _check_again(self) -> None:
+        """The owner sets WeChat up again: check it from the next poll, with a fresh `give_up_s`."""
+        self._gave_up, self._unready_since = "", None
 
     async def _poll_chat(self, chat: dict) -> None:
         native = chat["native_id"]
@@ -601,6 +625,8 @@ class WeChatInterface(Interface):
         account = await self.transport.status(refresh=True)
         cursors = len(list(self.port.bottle.keys("cursor:")))
         state = "paused" if self.paused else account.get("state")
+        if self._gave_up and not self.paused:
+            state += f" (stopped checking: {self._gave_up}; $wechat_login or $wechat_resume checks again)"
         return ToolResult.ok(
             f"WeChat: {state} · account {account.get('name') or self.transport.username} "
             f"({self.transport.account_id})\nReader: {self.transport.read_backend}; polling every "
@@ -612,6 +638,7 @@ class WeChatInterface(Interface):
             data={"state": state})
 
     async def _op_login(self, arguments, context) -> ToolResult:
+        self._check_again()
         self._login_until = time.monotonic() + 180
         result = await self.transport.login()
         path = result.get("path")
@@ -698,4 +725,5 @@ class WeChatInterface(Interface):
 
     async def _op_resume(self, arguments, context) -> ToolResult:
         self.port.bottle.set("paused", False)
+        self._check_again()
         return ToolResult.ok("WeChat resumes with the next poll.")
