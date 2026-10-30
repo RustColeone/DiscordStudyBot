@@ -175,8 +175,8 @@ window.SITE = (() => {
     const teachers = chart.group("Who teaches her", () => {
       chart.node("Luna", { kind: "providers", sub: "built: judges each exchange, a baseline",
                            target: fileLink("extensions/students/memory.py") });
-      chart.node("you: 👍 / 👎", { kind: "external", sub: "assisted training: what is right for you",
-                                  target: fileLink("plugins/whale_chan/bot.py") });
+      chart.node("you", { kind: "external", sub: "what you correct and enjoy: what is right for you",
+                          target: fileLink("plugins/whale_chan/bot.py") });
     }, { kind: "capabilities", pack: true });
     const memory = chart.group("Memory: what happened (large, looked up when it matters)", () => {
       chart.node("notes", { kind: "store", sub: "built: facts, plans, impressions", target: fileLink("extensions/students/memory.py") });
@@ -247,33 +247,35 @@ window.SITE = (() => {
         "and time. If everything she is had to fit in the prompt, a long friendship would slowly break her. So only two " +
         "things are always there: her character and her personality, both small. Memory is large and stays outside: each " +
         "message brings up only what bears on it, and what has faded leaves the context but can still be searched. In a " +
-        "simulated month of daily chats the prompt levelled off at about 8,600 tokens, and replies stayed around 2 seconds."],
+        "simulated eight weeks of daily chats the prompt levelled off at about 8,600 tokens, replies stayed around 2.2 " +
+        "seconds, and she answered 44 of 46 questions about what she had been told."],
       ["Memory is not personality", "Memory answers \"what is your cat called?\". Personality answers \"how would she " +
         "tease you about the cat?\". Delete the first and she forgets facts. Delete the second and a stranger is wearing " +
         "her name. Most systems store only the first and hope the second follows from it."],
       ["How she learns: Luna first", "After each exchange a small set of questions is asked: how did this move her, what " +
         "does she feel, was it worth remembering? GPT-6 Luna's Decisions API answers them in about 0.3 seconds for a " +
-        "tiny cost. A local model on your own machine watches every answer and learns from it, and once its guesses agree " +
-        "with Luna's it answers by itself. This is pre-training: it gives her a sensible baseline. But a baseline is what " +
-        "anyone would feel, so it is not yet hers."],
-      ["👍 and 👎: assisted training", "Your reactions are what make her yours. A 👍 or 👎 on her message is a label from " +
-        "the only judge who counts: you. Luna says what is reasonable; you say what is right for you. Marked examples " +
-        "outweigh Luna's, so the local model drifts from the baseline toward your companion. Today this files her voice " +
-        "messages with their text. Next it should cover every reply, and feed the parts below."],
+        "tiny cost, and a local model on your own machine watches every answer and learns from it. Luna is the trainer, " +
+        "not the plan: this is pre-training for a sensible baseline, and in the end the local model replaces her " +
+        "completely, so that the personality belongs to you and runs on your machine. A baseline is what anyone would " +
+        "feel, so it is not yet hers."],
+      ["Assisted training", "What makes her yours is you. Luna says what is reasonable; you say what is right for you, " +
+        "mostly just by talking: when you correct her, play along or tell her to do that again. A 👍 or 👎 is one more way " +
+        "to say it, where a platform has reactions; nobody should have to rate every reply. Today a 👍 or 👎 on a voice " +
+        "message files it with its text. Your lessons are to outweigh Luna's and be kept apart from them."],
       ["Learning from your mood", "She should feel with you. If you say you got promoted, or \"this is worth celebrating, " +
         "we should be happy!\", she should be happy, and remember that this is the kind of thing that makes her happy. " +
         "Two things are different here. Catching your mood is a moment: her mood moves toward yours, more the closer you " +
         "are. Learning from it is lasting: the moment becomes a lesson for the local model, so next time she reacts that " +
-        "way without being told. Joy she shares; when you are low she does not sink with you, she worries for you, " +
-        "because a companion who only mirrors makes things worse."],
+        "way without being told. How far she mirrors you is for whoever deploys her to decide: it is their code and " +
+        "their judging questions."],
       ["Habits", "How she talks should be measured, not described. If she has picked up saying 喵 at the end of sentences, " +
         "that is a number: how often, where in the sentence, in what mood. Counted from her own replies, it costs no model " +
         "call, it goes into her prompt as one short line, and it can be checked: if she drifts, the count shows it."],
       ["Ways of thinking", "Some of what you shape is not speech but attitude. Chinese internet has a word for one: 绿茶, " +
         "or 小绿茶, close to a pick-me girl with a sweet, innocent act. Adjectives do not carry that across models. " +
-        "\"Pick-me\" means little to a model; what carries is behaviour: \"when you mention another girl, she acts " +
-        "unbothered, then lets slip that she would never do that to you.\" So ways of thinking are kept as a short list of " +
-        "if-then rules, each with the exchanges that show it, stronger the more you reinforce it, fading when you do not."],
+        "\"Pick-me\" means little to a model; what carries is behaviour. How to keep it is still open. Writing rules means " +
+        "summaries, which lose things and need a model to write them. The likelier way keeps no description at all: a " +
+        "small local detector learns to recognise the moment, and her own replies from such moments show her what to do."],
       ["Her best replies", "A description of a voice is weaker than the voice. The replies you marked 👍 are kept word for " +
         "word, and each turn shows the two or three closest to the moment. Changing to a new model, this is what pulls it " +
         "back to her: every model has a default manner, and examples are the strongest thing against it."],
@@ -289,8 +291,12 @@ window.SITE = (() => {
     const status = make("ul", "doc");
     for (const line of ["Built: memory, the first look and search, moods, closeness, voice clips marked with 👍 / 👎.",
                         "Built, and on since 2026-10-30: Luna's judgments, and the local model learning from them.",
-                        "Planned: 👍 / 👎 on every reply, marked examples outweighing Luna's, catching your mood, " +
-                        "habits, ways of thinking, her best replies, a personality you can export, the transplant test."]) {
+                        "Not yet good enough: the local model itself. Measured against Luna after 300 lessons it barely " +
+                        "beats always giving the commonest answer, and a reaction taught to it does not stick. The plan " +
+                        "is a small embedding model on your machine with your lessons kept in a layer of their own.",
+                        "Planned: reading your corrections from what you say, Luna handing over to the local model " +
+                        "question by question, catching your mood, habits, ways of thinking, her best replies, a " +
+                        "personality you can export, the transplant test."]) {
       status.append(make("li", "", line));
     }
     pane.push(status, make("h3", "", "Read more"));

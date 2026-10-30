@@ -96,18 +96,21 @@ can outlive any one model. The guide "A student's personality" on the architectu
 1. **Memory stays outside the prompt.** Each message brings up only what bears on it. What has faded leaves the context and
    can still be searched. So the prompt stays the same size however long the conversation runs.
 2. **Personality has four parts:** reactions (a local decision model: how things move her), habits (how she talks,
-   measured from her replies), ways of thinking (if-then rules with their evidence), and her best replies (kept word for
-   word, the closest few shown each turn).
-3. **Luna gives the baseline.** GPT-6 Luna's Decisions API judges each exchange and the local model learns from it. That
-   is pre-training: a baseline is what anyone would feel, so it is not yet hers.
-4. **👍 and 👎 make her yours.** They are assisted training: labels from the one judge who counts, outweighing Luna's.
+   measured from her replies), ways of thinking (how to keep them is open: a local detector for the moment and her own
+   replies from such moments, rather than written summaries), and her best replies (kept word for word).
+3. **Luna is the trainer, not the plan.** GPT-6 Luna's Decisions API judges each exchange and the local model learns
+   from it. That is pre-training: a baseline is what anyone would feel, so it is not yet hers. The local model replaces
+   Luna completely in the end, by turning her off or by taking over question by question once it is good enough.
+4. **You make her yours.** Assisted training comes mostly from what you say: corrections, playing along. A 👍 or 👎 is one
+   more way to say it where a platform has reactions; nobody rates every reply. Your lessons outweigh Luna's.
 5. **She learns from your mood.** Catching it is a moment, her mood moving toward yours, more the closer you are. Learning
-   from it is lasting, a lesson for the local model. Joy she shares; when you are low she worries for you rather than
-   sinking with you.
+   from it is lasting, a lesson for the local model. How far she mirrors is for whoever deploys her to decide.
 6. **The test is the transplant.** Remove her memory, replace her model, and from personality alone you should get a very
    similar companion. The same messages go to the original and the transplant, and you judge.
 
 Built: memory, Luna and the local model learning from it, voice clips marked with 👍 / 👎. The rest of 2 to 6 is planned.
+Measured 2026-10-30: the local model as it stands (hashed words) barely beats the commonest answer and cannot hold a
+taught reaction, so it needs replacing before it can replace Luna.
 
 ## Interfaces and products
 

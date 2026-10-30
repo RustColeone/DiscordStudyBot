@@ -380,7 +380,8 @@ def no_notes(person: str, language: str) -> str:
 
 
 # Is the person asking about something from before? Then we search for her: left to herself, a model that answers at once
-# rather says it does not remember. Luna tells in 0.2 s, the local model once it has learned, and a tier missing means no.
+# rather says it does not remember. Luna tells in 0.2 s, the local model once it has learned. With no answer (Luna down,
+# the local model unsure) she is searched for all the same: a search costs little, and without one she makes things up.
 RECALL = "recall"
 ASKS_BACK = Predicate(RECALL, "The person is asking about something from before: a fact about themselves or the people "
                               "and pets around them, something they said or did, or something that happened earlier, "
@@ -396,9 +397,9 @@ async def asks_back(memory, query: str) -> bool:
         return False
     try:
         found = (await memory.decider.adecide(query, [ASKS_BACK])).get(RECALL)
-    except Exception:  # (a look without it is still a look)
-        return False
-    return found is not None and found.probability >= 0.5
+    except Exception:
+        return True
+    return found is None or found.probability >= 0.5
 
 
 async def first_look(memory, subject: str, query: str, person: str, conversation: str, own) -> str:
@@ -410,14 +411,21 @@ async def first_look(memory, subject: str, query: str, person: str, conversation
                                  asks_back(memory, query) if own.search else _nothing(False))
     found = list(asked[0])
     if asked[1]:
-        found += [item for item in await memory.episodes.asearch(subject, query, limit=RECALL_FOUND + 3)
-                  if item.id not in {seen.id for seen in found}][:RECALL_FOUND + 3]
+        shown = {item.id for item in found} | on_screen(memory, subject, conversation, own.said_skip)
+        found += [item for item in await memory.episodes.asearch(subject, query, limit=RECALL_FOUND + 3, seen=shown)][:RECALL_FOUND]
     same = "".join(query.split())
     found = sorted((item for item in found if "".join(item.lines[0][1].split()) != same), key=lambda item: item.at)
     said = memory.episodes.render(found, user_name=person, search=own.search)
     closest = await closest_notes(memory, subject, query) if asked[1] and own.notes else []
     head = CLOSEST["zh" if own.language.startswith("zh") else "en"]
     return "\n\n".join(part for part in (said, "\n".join([head, *closest]) if closest else "") if part)
+
+
+def on_screen(memory, subject: str, conversation: str, skip: int) -> set[int]:
+    """The newest exchanges of this chat, which the engine shows anyway (the look leaves them out too)."""
+    return {row["id"] for row in memory.store.rows(
+        "select id from episodes where space = ? and subject = ? and conversation = ? order by at desc limit ?",
+        (memory.episodes.space, memory.episodes.who(subject), conversation, int(skip)))} if skip > 0 else set()
 
 
 async def closest_notes(memory, subject: str, query: str) -> list[str]:

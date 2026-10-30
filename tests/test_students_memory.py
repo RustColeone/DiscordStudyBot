@@ -74,9 +74,11 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         async def alook(subject, query, **options):
             return [episode(1, "the look's own")]
 
-        async def asearch(subject, query, limit):
+        async def asearch(subject, query, limit, seen):
             searched.append(query)
-            return [episode(1, "the look's own"), episode(2, "my car is a white Dolphin"), episode(3, "what car do I drive?")]
+            found = [episode(1, "the look's own"), episode(2, "my car is a white Dolphin"),
+                     episode(3, "what car do I drive?")]
+            return [item for item in found if item.id not in seen]
 
         async def find(notes, query):
             return SimpleNamespace(similarities={7: 0.33, 8: 0.20}, floor=0.41)  # both under the floor
@@ -86,8 +88,9 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
         notes = [SimpleNamespace(id=7, text="Alice drives a white Dolphin."), SimpleNamespace(id=8, text="Alice likes tea.")]
         return SimpleNamespace(
             said_cut=(0.08, 0.16), decider=SimpleNamespace(tiers=[object()], adecide=adecide),
-            episodes=SimpleNamespace(alook=alook, asearch=asearch, render=lambda found, **_: " | ".join(
-                item.lines[0][1] for item in found)),
+            episodes=SimpleNamespace(alook=alook, asearch=asearch, space="s", who=lambda subject: subject,
+                                     render=lambda found, **_: " | ".join(item.lines[0][1] for item in found)),
+            store=SimpleNamespace(rows=lambda sql, parameters: []),
             memory=SimpleNamespace(meaning=SimpleNamespace(find=find), notes=lambda subject: notes)), searched
 
     async def test_asked_about_the_past_she_gets_a_search_and_her_closest_notes(self):
@@ -112,8 +115,12 @@ class CompanionTests(unittest.IsolatedAsyncioTestCase):
 
         async def broken(text, questions):
             raise RuntimeError("down")
-        memory.decider = SimpleNamespace(tiers=[object()], adecide=broken)
-        self.assertFalse(await module.asks_back(memory, "what car do I drive?"))  # a look without it is still a look
+
+        async def unsure(text, questions):
+            return {}
+        for decide in (broken, unsure):  # (with no answer she is searched for: without it she made things up)
+            memory.decider = SimpleNamespace(tiers=[object()], adecide=decide)
+            self.assertTrue(await module.asks_back(memory, "what car do I drive?"))
         self.assertEqual(await module.closest_notes(SimpleNamespace(memory=SimpleNamespace(meaning=None)), "s", "q"), [])
 
     def test_luna_judges_by_default_so_the_local_model_learns(self):
