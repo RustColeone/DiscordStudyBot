@@ -114,7 +114,7 @@ assignments:
     personas: [wechat]
     lane: sender                      # group members are handled independently
     budget: {model_calls: 24, tool_calls: 24, seconds: 1800}
-    options: {history_scope: sender, quote: trigger, diary: false, max_steps: 12}
+    options: {history_scope: sender, quote: trigger, max_steps: 12}
 permissions:
   "wechat:*":
     use: ["*", "!system.*"]

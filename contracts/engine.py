@@ -269,38 +269,40 @@ class History(Protocol):
         conversation, and people can read and clear it with `$memory`."""
 
 
-DIARY_KINDS = ("fact", "episode", "reflection")
-
-
 @dataclass(frozen=True)
-class DiaryNote:
-    """One note a persona keeps about one person in one conversation. Times are Unix seconds."""
+class LogEntry:
+    """One line of the log: something that happened in a conversation. `module` wrote it ("core" for what the core
+    logs itself), `kind` is one short word (`note`, `action`, `landed`, …), `subject` the person it is about ("": nobody
+    in particular), `persona` the one it concerns, if any. Times are Unix seconds."""
 
     id: int
-    key: str
+    at: float
+    module: str
     kind: str
-    note: str
-    importance: int
-    created_at: float
-    updated_at: float
+    text: str
+    address: str
+    subject: str = ""
+    persona: str = ""
+    data: Mapping[str, Any] = field(default_factory=dict)
 
 
-class Diary(Protocol):
-    """One persona's notes about the person who sent the run's trigger, in this conversation only.
+class Logbook(Protocol):
+    """A conversation's log (added in 1.15, in place of the diary, which only kept what a persona noted of someone):
+    what happened here, written by modules through the handles they already have, read by engines, and by people with
+    `$log`. The core logs by itself every write and critical action that ran. A model never writes here directly, only
+    through a capability a module offers. It is not the audit log, the core's own record for the owner, which models
+    never read."""
 
-    People can read and delete what is kept about them with `$memory`. Routine runs have no person,
-    so their diary is empty and refuses writes.
-    """
+    def write(self, kind: str, text: str, *, person: bool = False, persona: str = "",
+              data: Mapping[str, Any] | None = None) -> LogEntry:
+        """Add one line (`person`: about the person this run or call is for). Raises ValueError for an empty text or
+        a kind that is not one short word."""
 
-    persona: str
-    available: bool
+    def recent(self, limit: int = 8, kind: str = "") -> list[LogEntry]:
+        """The newest lines of this conversation, oldest of them first (`kind`: of that kind only)."""
 
-    def recall(self, text: str = "", limit: int = 8) -> list[DiaryNote]:
-        """Notes matching words in `text` first, then the most important and recent ones."""
-
-    def write(self, key: str, kind: str, note: str, importance: int) -> bool:
-        """Create or replace the note under `key`. Raises ValueError for an invalid note, one that copies
-        the message instead of paraphrasing it, or past the per-run limit. Returns False when unchanged."""
+    def find(self, text: str, limit: int = 8) -> list[LogEntry]:
+        """The newest lines of this conversation holding words of `text`."""
 
 
 class Session(Protocol):
@@ -321,6 +323,7 @@ class Session(Protocol):
     options: Mapping[str, Any]
     owner: bool  # the trigger's sender is an owner of its interface (never for routines)
     access: str  # the trigger's sender's effective level: member, admin or creator
+    logbook: Logbook  # this conversation's log (added in 1.15)
 
     def store(self, *, conversation: bool = False, persona: str | None = None, person: bool = False) -> Store:
         """A key-value store of this engine's module (added in 1.5), scoped by any combination of: this
@@ -331,11 +334,6 @@ class Session(Protocol):
     def memory(self, persona: str) -> Store:
         """The persona's private key-value store, shared by all its conversations (older: prefer
         `store(persona=...)`, which is the module's own)."""
-
-    def diary(self, persona: str) -> Diary:
-        """The persona's notes about the trigger's sender. Notes are filed in the conversation they were written
-        in; with the assignment's `diary_scope` option, those of every conversation (same interface) sharing
-        that name are read and corrected together."""
 
     def prompt(self, persona: str, place: str = "stable") -> str:
         """The prompt parts for one of the run's personas at `place` ("stable" or "turn"), rendered in order and

@@ -172,7 +172,7 @@ openai/gpt-6.1-sol` picks it for a chat). The prompts say GPT where they said Lu
 - core.yml's assignments and `personas: luna:` parts that name `luna` are read as hers (`formerly: [luna]`); the audit
   says `persona_renamed_in_config` until you rename them there.
 - On the first start, the core moves what it kept under `luna` to `gpt` (her memory, the modules' stores scoped by
-  her, diary notes, `$model` choices, runtime assignments, facts, the runs she is in, her name on what she said) and
+  her, her lines in the log, `$model` choices, runtime assignments, facts, the runs she is in, her name on what she said) and
   records `persona_data_moved`; the web UI renames her old chats and bubbles (`persona_renamed`). Let open runs finish
   first. The next starts move nothing.
 
@@ -240,9 +240,8 @@ sixth of the text, and keeps working when the history no longer fits. It costs o
 of each message (about $0.004 a thousand) and the space of the words (about 6 KB an exchange); `episodes: false`
 keeps nothing, `said: 0` turns the first look off, `search: false` the tools.
 
-**One note keeper.** MomoChat keeps no notes of its own (the core diary is not used), so what a student remembers of
-you is kept here only, and is the same in every engine. Models are not offered the conversation notepad either
-(`basic.remember` is typed only, `$remember`), which a student without her diary took for a memory of her own.
+**One note keeper.** MomoChat keeps no notes of its own, so what a student remembers of you is kept here only, and is the same in every engine. Models are not offered the conversation notepad either
+(`basic.remember` is typed only, `$remember`), which a student took for a memory of her own.
 
 **Whale-chan is the DeepSeek student** (2026-10-27): her bot speaks as `deepseek`, so what she learns there is in
 `deepseek.db` with what she learns in MomoChat, under the same settings as every student. When a student speaks up

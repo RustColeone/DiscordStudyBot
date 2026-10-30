@@ -15,7 +15,7 @@ from contracts.models import Models
 from contracts.stores import Store
 
 if TYPE_CHECKING:
-    from contracts.engine import History
+    from contracts.engine import History, Logbook
 
 ResultStatus = Literal["success", "failed", "needs_input", "needs_approval"]
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
@@ -95,6 +95,7 @@ class ToolContext(Protocol):
     receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`).
     `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for
     capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it.
+    `logbook` (added in 1.15) is the conversation's log, for what a person may want to find later.
     `persona` (added in 1.14) is the persona whose turn made the call, as the engine said (`Tools.call`), or the
     run's only persona; "" when nobody in particular (a group run whose engine did not say, a typed command, a
     call carried out once the owner approved it).

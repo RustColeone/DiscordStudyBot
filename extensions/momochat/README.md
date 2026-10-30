@@ -86,9 +86,9 @@ earlier messages stay in history but are no longer read, and the summary of befo
 `⟨speak-up⟩ `, which history shows as her own impulse) is her own wish to message someone: one step from the motive,
 no tools.
 
-**It keeps nothing of people.** No core diary: a student's memory is the students module's (its prompt part and its
-watcher, which learns from what she says here), and an agent has none. An assignment's old `diary: true` does
-nothing.
+**It keeps nothing of people.** A student's memory is the students module's (its prompt part and its watcher, which
+learns from what she says here), and an agent has none. An assignment's old `diary: true` does nothing. Each turn shows
+the newest lines of the conversation's log from the last day (`log_lines`), so she can say what she did.
 
 ## Setup
 
@@ -101,6 +101,7 @@ default of the assignment option of the same name, which wins:
 | `style` | `brief` | `brief`, `chat` or `full` (above) |
 | `effort` | `low` | Reasoning effort of each step: `none` (she answers at once), `low`, `medium`, `high`. Between the assignment's option and this default comes her own (`Persona.effort`: `effort:` in a student.yml or an agent) |
 | `max_steps` | 8 | Steps (tool rounds) of one speaker per message |
+| `log_lines` | 3 | The conversation's newest lines of the log (last day) shown in each turn, so she can say what she did; 0: none |
 | `max_turns` | 12 | Speakers' turns per message, hand-offs and follow-ups included |
 | `max_handoffs` | 3 | Hand-offs per message (0: none) |
 | `max_tokens` | 1500 | Output tokens of each step |
@@ -140,7 +141,7 @@ A busy group chat makes many model calls: give its assignment a larger `budget`.
 | engine `assistant` (one persona), module `assistant` | `momochat` with one persona, `style: brief` |
 | engine `room` (group chats on a work board), module `room` | `momochat` with several personas. The work board's `jobs` are hand-offs now (`ask_classmate`), one at a time; `work_note` is gone |
 | engine `chat` (Whale-chan's plugin) | `momochat` with `style: chat`, her old settings as her assignment's options |
-| `diary` (the core diary, in all three) | nothing: a student's memory is the students module's |
+| `diary` (in all three) | nothing: a student's memory is the students module's |
 
 core.yml lines saying `engine: room` (or `assistant`, `chat`) reach MomoChat, and the audit log says
 `engine_renamed_in_config` until you rename them; runtime assignments are rewritten; open runs of the old engines

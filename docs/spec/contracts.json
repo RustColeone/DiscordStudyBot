@@ -2,11 +2,6 @@
  "version": "1.15",
  "constants": {
   "CONTRACTS_VERSION": "1.15",
-  "DIARY_KINDS": [
-   "fact",
-   "episode",
-   "reflection"
-  ],
   "PART_PLACES": [
    "stable",
    "turn"
@@ -15,7 +10,9 @@
    "place",
    "people",
    "away",
-   "tickets"
+   "tickets",
+   "views",
+   "you"
   ],
   "SHUTDOWN": "core-shutdown",
   "TIERS": [
@@ -414,39 +411,6 @@
     }
    ]
   },
-  "DiaryNote": {
-   "doc": "One note a persona keeps about one person in one conversation. Times are Unix seconds.",
-   "fields": [
-    {
-     "name": "id",
-     "type": "int"
-    },
-    {
-     "name": "key",
-     "type": "str"
-    },
-    {
-     "name": "kind",
-     "type": "str"
-    },
-    {
-     "name": "note",
-     "type": "str"
-    },
-    {
-     "name": "importance",
-     "type": "int"
-    },
-    {
-     "name": "created_at",
-     "type": "float"
-    },
-    {
-     "name": "updated_at",
-     "type": "float"
-    }
-   ]
-  },
   "Display": {
    "doc": "What a conversation can show. Engines adapt their output; interfaces render the rest.",
    "fields": [
@@ -727,6 +691,50 @@
     {
      "name": "data",
      "type": "bytes"
+    }
+   ]
+  },
+  "LogEntry": {
+   "doc": "One line of the log: something that happened in a conversation. `module` wrote it (\"core\" for what the core logs itself), `kind` is one short word (`note`, `action`, `landed`, …), `subject` the person it is about (\"\": nobody in particular), `persona` the one it concerns, if any. Times are Unix seconds.",
+   "fields": [
+    {
+     "name": "id",
+     "type": "int"
+    },
+    {
+     "name": "at",
+     "type": "float"
+    },
+    {
+     "name": "module",
+     "type": "str"
+    },
+    {
+     "name": "kind",
+     "type": "str"
+    },
+    {
+     "name": "text",
+     "type": "str"
+    },
+    {
+     "name": "address",
+     "type": "str"
+    },
+    {
+     "name": "subject",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "persona",
+     "type": "str",
+     "default": ""
+    },
+    {
+     "name": "data",
+     "type": "Mapping",
+     "default": "{}"
     }
    ]
   },
@@ -1430,69 +1438,6 @@
   }
  },
  "interfaces": {
-  "Diary": {
-   "doc": "One persona's notes about the person who sent the run's trigger, in this conversation only. People can read and delete what is kept about them with `$memory`. Routine runs have no person, so their diary is empty and refuses writes.",
-   "attributes": [
-    {
-     "name": "persona",
-     "type": "str"
-    },
-    {
-     "name": "available",
-     "type": "bool"
-    }
-   ],
-   "methods": [
-    {
-     "name": "recall",
-     "async": false,
-     "parameters": [
-      {
-       "name": "text",
-       "type": "str",
-       "keyword_only": false,
-       "default": ""
-      },
-      {
-       "name": "limit",
-       "type": "int",
-       "keyword_only": false,
-       "default": 8
-      }
-     ],
-     "returns": "list[DiaryNote]",
-     "doc": "Notes matching words in `text` first, then the most important and recent ones."
-    },
-    {
-     "name": "write",
-     "async": false,
-     "parameters": [
-      {
-       "name": "key",
-       "type": "str",
-       "keyword_only": false
-      },
-      {
-       "name": "kind",
-       "type": "str",
-       "keyword_only": false
-      },
-      {
-       "name": "note",
-       "type": "str",
-       "keyword_only": false
-      },
-      {
-       "name": "importance",
-       "type": "int",
-       "keyword_only": false
-      }
-     ],
-     "returns": "bool",
-     "doc": "Create or replace the note under `key`. Raises ValueError for an invalid note, one that copies the message instead of paraphrasing it, or past the per-run limit. Returns False when unchanged."
-    }
-   ]
-  },
   "Engine": {
    "doc": "Helper class that provides a standard way to create an ABC using inheritance.",
    "attributes": [
@@ -2184,6 +2129,87 @@
     }
    ]
   },
+  "Logbook": {
+   "doc": "A conversation's log (added in 1.15, in place of the diary, which only kept what a persona noted of someone): what happened here, written by modules through the handles they already have, read by engines, and by people with `$log`. The core logs by itself every write and critical action that ran. A model never writes here directly, only through a capability a module offers. It is not the audit log, the core's own record for the owner, which models never read.",
+   "attributes": [],
+   "methods": [
+    {
+     "name": "find",
+     "async": false,
+     "parameters": [
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "limit",
+       "type": "int",
+       "keyword_only": false,
+       "default": 8
+      }
+     ],
+     "returns": "list[LogEntry]",
+     "doc": "The newest lines of this conversation holding words of `text`."
+    },
+    {
+     "name": "recent",
+     "async": false,
+     "parameters": [
+      {
+       "name": "limit",
+       "type": "int",
+       "keyword_only": false,
+       "default": 8
+      },
+      {
+       "name": "kind",
+       "type": "str",
+       "keyword_only": false,
+       "default": ""
+      }
+     ],
+     "returns": "list[LogEntry]",
+     "doc": "The newest lines of this conversation, oldest of them first (`kind`: of that kind only)."
+    },
+    {
+     "name": "write",
+     "async": false,
+     "parameters": [
+      {
+       "name": "kind",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "text",
+       "type": "str",
+       "keyword_only": false
+      },
+      {
+       "name": "person",
+       "type": "bool",
+       "keyword_only": true,
+       "default": false
+      },
+      {
+       "name": "persona",
+       "type": "str",
+       "keyword_only": true,
+       "default": ""
+      },
+      {
+       "name": "data",
+       "type": "Mapping | none",
+       "keyword_only": true,
+       "default": null
+      }
+     ],
+     "returns": "LogEntry",
+     "doc": "Add one line (`person`: about the person this run or call is for). Raises ValueError for an empty text or a kind that is not one short word."
+    }
+   ]
+  },
   "ModelAdapter": {
    "doc": "Talks to one provider's API: one `complete` call is one request, returning the raw text. The core does the rest (fallback between candidates, schema validation, spacing, images for models that cannot see). `messages` use roles `system`, `user` and `assistant`. With `schema`, ask the API for JSON matching it (natively if it can, otherwise in the prompt). `images` go with the last user message. Raise NotConfigured when the provider cannot be used; any other exception moves on to the next candidate. An adapter may also define `async list_models()`, the models its provider offers: IDs, or (ID, release date or datetime) pairs so a provider's `models_since` setting can apply. One that can call tools sets `supports_tools = True` and takes `tools` (1.7): it offers them as the API's functions, returns the calls in `tool_calls`, and translates `tool_calls`/`replay` on assistant messages and `tool` messages into the API's own form. The core passes `tools` only when a request has some.",
    "attributes": [],
@@ -2415,6 +2441,10 @@
     {
      "name": "access",
      "type": "str"
+    },
+    {
+     "name": "logbook",
+     "type": "Logbook"
     }
    ],
    "methods": [
@@ -2443,19 +2473,6 @@
      ],
      "returns": "str",
      "doc": "`prompt`, with async parts awaited (added in 1.14): each in turn, for at most a few seconds (one that takes longer is left out, and logged). Render once per turn: a part may cost a lookup."
-    },
-    {
-     "name": "diary",
-     "async": false,
-     "parameters": [
-      {
-       "name": "persona",
-       "type": "str",
-       "keyword_only": false
-      }
-     ],
-     "returns": "Diary",
-     "doc": "The persona's notes about the trigger's sender. Notes are filed in the conversation they were written in; with the assignment's `diary_scope` option, those of every conversation (same interface) sharing that name are read and corrected together."
     },
     {
      "name": "inbox",
@@ -2671,7 +2688,7 @@
    ]
   },
   "ToolContext": {
-   "doc": "Handles the core gives a capability for one call. `display` is what the calling conversation can show (for example its upload limit). `files` are the files people attached to the run's requests, oldest first; `own_files` only those the person who started the run attached (in a group, others may add messages to a run). `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`). `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it. `persona` (added in 1.14) is the persona whose turn made the call, as the engine said (`Tools.call`), or the run's only persona; \"\" when nobody in particular (a group run whose engine did not say, a typed command, a call carried out once the owner approved it).",
+   "doc": "Handles the core gives a capability for one call. `display` is what the calling conversation can show (for example its upload limit). `files` are the files people attached to the run's requests, oldest first; `own_files` only those the person who started the run attached (in a group, others may add messages to a run). `schedule` delivers a message to this conversation once, later; it survives restarts. Interfaces receive it as a notice with code `reminder` (`data`: `scheduled_id`, `sender_id`, `sender_name`). `history` (added in 1.6) reads the calling conversation's history (`recent`, `search`, `summary`), for capabilities that carry a conversation somewhere else or work from it; capabilities cannot change it. `logbook` (added in 1.15) is the conversation's log, for what a person may want to find later. `persona` (added in 1.14) is the persona whose turn made the call, as the engine said (`Tools.call`), or the run's only persona; \"\" when nobody in particular (a group run whose engine did not say, a typed command, a call carried out once the owner approved it).",
    "attributes": [
     {
      "name": "address",
@@ -2861,7 +2878,7 @@
    ]
   },
   "WatchContext": {
-   "doc": "What a watcher may use for one exchange. `models` calls models with the persona's profile unless a request names another; the calls are counted in the run's usage (`watcher_calls`, tokens) but not against its budget, since the run may be over. `history` reads the conversation (what others said around her message); `store` is the module's own, scoped as `Session.store`, with the exchange's person and persona; `facts` publishes for interfaces.",
+   "doc": "What a watcher may use for one exchange. `models` calls models with the persona's profile unless a request names another; the calls are counted in the run's usage (`watcher_calls`, tokens) but not against its budget, since the run may be over. `history` reads the conversation (what others said around her message); `store` is the module's own, scoped as `Session.store`, with the exchange's person and persona; `facts` publishes for interfaces; `logbook` (added in 1.15) is the conversation's log, as `Session.logbook`.",
    "attributes": [
     {
      "name": "models",
@@ -2874,6 +2891,10 @@
     {
      "name": "facts",
      "type": "Facts"
+    },
+    {
+     "name": "logbook",
+     "type": "Logbook"
     }
    ],
    "methods": [

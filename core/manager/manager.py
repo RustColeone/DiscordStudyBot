@@ -25,6 +25,7 @@ from contracts import (SHUTDOWN, TIERS, Action, Address, Capability, Command, De
                        PromptPart, Reply, Request, Risk, RunYield, Sender, ToolResult, Watcher)
 from core.audit import Audit
 from core.manager.facts import FactsDesk
+from core.manager.logbook import LINES_KEPT, MAX_TEXT
 from core.manager.handles import SUMMARIES, SessionHandle, ToolContextHandle, WatchContextHandle, local_time
 from core.manager.model_choice import ModelChoices
 from core.manager.routines import Caller, RoutineDesk
@@ -48,9 +49,11 @@ BUILTIN_COMMANDS = (
     Command("cancel", "Cancel your open work here, or a run by ID",
             (Option("target", "A run ID (or, for the owner, a conversation address)"),)),
     Command("tools", "List the tools available here"),
-    Command("memory", "Read, forget or clear what personas keep about you here",
+    Command("memory", "Read, forget or clear the notes kept about you here",
             (Option("args", "[persona] [page] | forget <note-id> | clear [persona]"),),
             examples=("", "forget 12", "clear")),
+    Command("log", "Read this chat's log, or remove lines of it",
+            (Option("args", "[page] | forget <id> | clear"),), examples=("", "forget 12", "clear")),
     Command("call", "Run any capability directly with JSON arguments (owner)",
             (Option("capability", "Capability name, e.g. core.set_rule", required=True),
              Option("arguments", "JSON object")), template="{capability}[ {arguments}]", access="creator",
@@ -351,61 +354,6 @@ class Manager:
         """The module that registered an engine (`engine:<name>`), for its stores."""
         return self._origin.get(key, "core")
 
-    @staticmethod
-    def diary_scope(options: Mapping[str, Any]) -> str:
-        """The assignment's `diary_scope` name, or "" (each conversation keeps its own notes). A name is text
-        (a number is taken as its digits); anything else, `false` included, means no scope."""
-        value = options.get("diary_scope")
-        if isinstance(value, int) and not isinstance(value, bool):
-            value = str(value)
-        return value.strip()[:80] if isinstance(value, str) else ""
-
-    def diary_chats(self, address: str, options: Mapping[str, Any], subject: str) -> list[str]:
-        """The conversations whose notes about this person are read together here: this one first, then, when
-        its assignment sets a `diary_scope`, every other conversation of the same interface whose assignment
-        sets the same name and that holds notes about the person. A note is always filed in the conversation
-        it was written in; the scope only decides what is read together, so changing it moves nothing. The
-        same interface only: a sender ID names a person on one platform, and another may reuse it."""
-        name = self.diary_scope(options)
-        if not name or not subject:
-            return [address]
-        chats = [address]
-        for other in self.tank.note_addresses(subject, Address.parse(address).interface):
-            if other == address:
-                continue
-            try:
-                assignment = self.assignment_for(Address.parse(other))
-            except ValueError:
-                continue
-            if assignment is not None and self.diary_scope(assignment.options) == name:
-                chats.append(other)
-        return chats
-
-    def _refile_shared_diaries(self) -> None:
-        """Once, for notes the previous version filed under a scope's own key: file each in a conversation of
-        that scope, the latest one its person spoke in, so recall and `$memory` find them again. A note whose
-        scope no conversation names any more stays where it is (it was out of reach already)."""
-        moved = kept = 0
-        for row in self.tank.legacy_shared_notes():
-            name = row["address"][len(":scope:"):]
-            interface, _, sender = row["subject"].partition(":")
-            target = None
-            for chat in self.tank.last_chats(sender, interface) if sender else []:
-                try:
-                    assignment = self.assignment_for(Address.parse(chat))
-                except ValueError:
-                    continue
-                if assignment is not None and self.diary_scope(assignment.options) == name:
-                    target = chat
-                    break
-            if target is None:
-                kept += 1
-                continue
-            self.tank.refile_note(row["id"], target, sender)
-            moved += 1
-        if moved or kept:
-            self.audit.record("diary_refiled", moved=moved, unplaced=kept)
-
     def register_capability(self, capability: Capability, extension: str) -> None:
         if capability.name in self.capabilities:
             raise ValueError(f"Capability {capability.name!r} is already registered")
@@ -453,7 +401,6 @@ class Manager:
         self._stopping = False
         self.stamina.start()
         self._clean_workspaces()
-        self._refile_shared_diaries()
         # Decisions the stop cut off are reported first, for running runs too (a room keeps running while one job
         # waits for its approval): without awaiting, as the gateway already takes `$approve`, and before any run
         # starts, so each finds its outcomes. Then the running runs go on, then the waiting ones are resumed.
@@ -1010,6 +957,10 @@ class Manager:
         self.tank.finish_action(run_id, key, result.to_dict())
         self.audit.record("tool_call", run=run_id, tool=name, risk=tier.value, status=result.status,
                           code=result.error_code, duration_s=round(time.monotonic() - started, 3))
+        if result.status == "success" and tier in (Risk.WRITE, Risk.CRITICAL):  # for `$log`, and what she did for her turn
+            self.tank.add_log(record.address, "core", "command" if record.engine == COMMAND_ENGINE else "action",
+                              f"{name}: {' '.join(result.summary.split())}"[:MAX_TEXT], subject=context.sender.id,
+                              persona=context.persona, keep=LINES_KEPT)
         return result
 
     # ---- approval ---------------------------------------------------------------------------------
@@ -1545,9 +1496,9 @@ class Manager:
         # their approval, and the creator-only built-ins are closed to it.
         vouched = self.vouched(request)
         # Forgetting is the person's own decision too: a routine a model set up may read $memory, never clear it.
-        erases = name == "memory" and rest.split()[:1] and rest.split()[0].lower() in ("clear", "forget")
+        erases = name in ("memory", "log") and rest.split()[:1] and rest.split()[0].lower() in ("clear", "forget")
         if not vouched and (name in ("approve", "deny", "admin", "call", "setup", "permissions") or erases):
-            shown = f"$memory {rest.split()[0].lower()}" if erases else f"${name}"
+            shown = f"${name} {rest.split()[0].lower()}" if erases else f"${name}"
             await say(f"A routine set up through a tool cannot use {shown}; type `$routine` yourself for that.")
             return
         if name in ("approve", "deny"):
@@ -1568,6 +1519,8 @@ class Manager:
                                       run_id=cancelled))
         elif name == "memory":
             await say(self.memory_command(rest, request), private=True)
+        elif name == "log":
+            await say(self.log_command(rest, request), private=True)
         elif name == "admin" and rest.split()[:1] == ["restart"]:
             if level < LEVELS["creator"]:
                 await say("Only the creator can restart the bot.", private=True)
@@ -1798,22 +1751,17 @@ class Manager:
         return "\n".join(lines)
 
     def memory_command(self, text: str, request: Request) -> str:
-        """`$memory`: what personas keep about the sender in this conversation (or in the conversations sharing
-        its `diary_scope`); only theirs. Also this chat's rolling summary (`summary`, `clear summary`)."""
-        conversation = str(request.address)
-        assignment = self.assignment_for(request.address)
-        options = assignment.options if assignment else {}
-        subject = request.sender.id
-        address = self.diary_chats(conversation, options, subject)  # this chat, and those sharing its memory
-        here = "in the chats that share this memory" if self.diary_scope(options) else "here"
+        """`$memory`: the notes personas keep about the sender here; only theirs. Also this chat's rolling summary
+        (`summary`, `clear summary`)."""
+        conversation, subject = str(request.address), request.sender.id
         code = (lambda value: f"`{value}`") if request.display.markdown else str
-        usage = (f"Personas keep short notes about you {here}.\n"
+        usage = (f"Personas keep short notes about you here.\n"
                  f"{code('$memory [persona] [page]')} read them\n"
                  f"{code('$memory forget <note-id>')} remove one note\n"
-                 f"{code('$memory clear [persona]')} remove all notes about you {here}, or one persona's\n"
+                 f"{code('$memory clear [persona]')} remove all notes about you here, or one persona's\n"
                  f"{code('$memory summary')} read this chat's summary; {code('$memory clear summary')} remove it")
         summaries = self.tank.store(SUMMARIES)
-        counts = self.tank.note_counts(address, subject)
+        counts = self.tank.log_counts(conversation, subject, kind="note")
 
         def persona_named(name: str) -> str | None:
             name = name.lower()
@@ -1841,39 +1789,74 @@ class Manager:
         if action == "forget":
             if len(parts) != 2 or not parts[1].lstrip("#").isdecimal() or len(parts[1]) > 18:
                 return usage
-            removed = self.tank.delete_notes(address, subject, note_id=int(parts[1].lstrip("#")))
-            self.audit.record("diary_forget", address=address, removed=removed)
-            return "Note removed." if removed else f"No note with that ID about you {here}."
+            removed = self.tank.delete_log(conversation, subject, entry_id=int(parts[1].lstrip("#")), kind="note")
+            self.audit.record("log_forget", address=conversation, removed=removed)
+            return "Note removed." if removed else "No note with that ID about you here."
         if action == "clear":
             persona = persona_named(parts[1]) if len(parts) == 2 else None
             if len(parts) > 2 or (len(parts) == 2 and persona is None):
                 return usage
-            removed = self.tank.delete_notes(address, subject, persona)
-            self.audit.record("diary_clear", address=address, persona=persona or "*", removed=removed)
-            return f"Removed {removed} note(s) about you {here}" + (f" from {label(persona)}." if persona else ".")
+            removed = self.tank.delete_log(conversation, subject, persona=persona, kind="note")
+            self.audit.record("log_clear", address=conversation, persona=persona or "*", removed=removed)
+            return f"Removed {removed} note(s) about you here" + (f" from {label(persona)}." if persona else ".")
         page_text = parts[-1] if parts and parts[-1].isdecimal() else "1"
         names = parts[:-1] if parts and parts[-1].isdecimal() else parts
         if not names and len(counts) != 1:
             if not counts:
-                return f"Nobody keeps notes about you {here}.\n" + usage
+                return "Nobody keeps notes about you here.\n" + usage
             return "\n".join([*(f"{label(name)}: {count} note(s)" for name, count in counts.items()), usage])
         persona = persona_named(" ".join(names)) if names else next(iter(counts))
         if persona is None or len(page_text) > 6:
             return usage
         count = counts.get(persona, 0)
         if not count:
-            return f"{label(persona)} keeps no notes about you {here}."
+            return f"{label(persona)} keeps no notes about you here."
         pages = (count + 19) // 20
         page = int(page_text)
         if not 1 <= page <= pages:
             return f"Page {page} not found; pages 1-{pages}."
         lines = [f"{label(persona)}'s notes about you (page {page}/{pages})"]
-        for note in self.tank.notes(persona, address, subject, 20, (page - 1) * 20):
-            day = dt.datetime.fromtimestamp(note.updated_at).astimezone().strftime("%Y-%m-%d")
-            lines.append(f"{code('#' + str(note.id))} {day} · {note.note}")
+        for note in self.tank.log_lines(conversation, 20, (page - 1) * 20, kind="note", subject=subject,
+                                        persona=persona):
+            day = dt.datetime.fromtimestamp(note.at).astimezone().strftime("%Y-%m-%d")
+            lines.append(f"{code('#' + str(note.id))} {day} · {note.text}")
         if page < pages:
             lines.append(f"Next: {code(f'$memory {persona} {page + 1}')}")
         return "\n".join(lines)
+
+    def log_command(self, text: str, request: Request) -> str:
+        """`$log`: what happened in this conversation, from the core and the modules. A member sees the lines about
+        them, an admin all of them; `forget <id>` and `clear` take away what one may see."""
+        conversation = str(request.address)
+        subject = None if LEVELS[self.access_of(request)] >= LEVELS["admin"] else request.sender.id
+        code = (lambda value: f"`{value}`") if request.display.markdown else str
+        usage = (f"{code('$log [page]')} read this chat's log\n{code('$log forget <id>')} remove one line\n"
+                 f"{code('$log clear')} remove all of it")
+        parts = text.split()
+        action = parts[0].lower() if parts else ""
+        if action == "forget":
+            if len(parts) != 2 or not parts[1].lstrip("#").isdecimal() or len(parts[1]) > 18:
+                return usage
+            removed = self.tank.delete_log(conversation, subject, entry_id=int(parts[1].lstrip("#")))
+            self.audit.record("log_forget", address=conversation, removed=removed)
+            return "Line removed." if removed else "No line with that ID that you can remove here."
+        if action == "clear":
+            if len(parts) > 1:
+                return usage
+            removed = self.tank.delete_log(conversation, subject)
+            self.audit.record("log_clear", address=conversation, persona="*", removed=removed)
+            return f"Removed {removed} line(s) of this chat's log."
+        if parts and (len(parts) > 1 or not action.isdecimal() or len(action) > 6):
+            return usage
+        page = int(action or 1)
+        lines = self.tank.log_lines(conversation, 20, (page - 1) * 20, subject=subject) if page >= 1 else []
+        if not lines:
+            return ("Nothing in this chat's log yet.\n" + usage) if page == 1 else f"Page {page} is empty."
+        shown = [f"This chat's log (page {page}, newest first)"]
+        for line in lines:
+            day = dt.datetime.fromtimestamp(line.at).astimezone().strftime("%Y-%m-%d %H:%M")
+            shown.append(f"{code('#' + str(line.id))} {day} · {line.module} · {line.kind}: {line.text}")
+        return "\n".join(shown)
 
     async def _command_run(self, request: Request, capability: Capability, text: str, owner: bool,
                            arguments: dict | None = None) -> None:

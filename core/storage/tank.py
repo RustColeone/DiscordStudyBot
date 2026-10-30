@@ -7,9 +7,9 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
-from contracts import DiaryNote, Event, FileRef, HistoryItem
+from contracts import Event, FileRef, HistoryItem, LogEntry
 from core.storage.sqlite import Database, ScopedStore, dumps, fold, loads
 
 SCHEMA = """
@@ -37,11 +37,11 @@ CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), call_key TEXT NOT NULL,
     name TEXT NOT NULL, arguments TEXT NOT NULL, address TEXT NOT NULL, status TEXT NOT NULL,
     created_at REAL NOT NULL, decided_at REAL, decided_by TEXT);
-CREATE TABLE IF NOT EXISTS diary (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, persona TEXT NOT NULL, address TEXT NOT NULL, subject TEXT NOT NULL,
-    key TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, importance INTEGER NOT NULL,
-    created_at REAL NOT NULL, updated_at REAL NOT NULL, UNIQUE(persona, address, subject, key));
-CREATE INDEX IF NOT EXISTS diary_scope ON diary(address, subject, persona);
+CREATE TABLE IF NOT EXISTS log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, module TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+    address TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', persona TEXT NOT NULL DEFAULT '', data TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS log_address ON log(address, id);
+CREATE INDEX IF NOT EXISTS log_person ON log(address, subject, persona);
 """
 
 ACTIVE = ("running", "waiting_input")
@@ -72,6 +72,12 @@ class Tank:
         self.db = Database(path, SCHEMA)
         if "files" not in {row[1] for row in self.db.query("PRAGMA table_info(messages)")}:
             self.db.execute("ALTER TABLE messages ADD COLUMN files TEXT")
+        if self.db.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='diary'"):  # the log's name before
+            with self.db.transaction() as db:
+                db.execute("INSERT INTO log(at,module,kind,text,address,subject,persona,data) SELECT updated_at,'core',"
+                           "'note',note,address,subject,persona,json_object('key',key,'kind',kind,'importance',importance)"
+                           " FROM diary")
+                db.execute("DROP TABLE diary")
 
     def close(self) -> None:
         self.db.close()
@@ -81,7 +87,7 @@ class Tank:
 
     def rename_persona(self, old: str, new: str, display_name: str) -> dict[str, int]:
         """Move what is filed under persona `old` to `new` (Persona.formerly): her memory and every module's stores
-        scoped by her, her diary notes, the runs she is in, and her name on what she said. What `new` already has
+        scoped by her, her lines in the log, the runs she is in, and her name on what she said. What `new` already has
         wins. Returns how many of each were moved (all zero once done)."""
         moved = {"stores": 0, "notes": 0, "runs": 0, "messages": 0}
         with self.db.transaction() as db:
@@ -102,8 +108,7 @@ class Tank:
                 db.execute("INSERT OR IGNORE INTO kv(scope, key, value) SELECT ?, key, value FROM kv WHERE scope=?",
                            (target, scope))
                 moved["stores"] += db.execute("DELETE FROM kv WHERE scope=?", (scope,)).rowcount
-            moved["notes"] = db.execute("UPDATE OR IGNORE diary SET persona=? WHERE persona=?", (new, old)).rowcount
-            db.execute("DELETE FROM diary WHERE persona=?", (old,))  # notes `new` already had under the same key
+            moved["notes"] = db.execute("UPDATE log SET persona=? WHERE persona=?", (new, old)).rowcount
             for row in db.query("SELECT id, personas, assignment FROM runs WHERE personas LIKE ?",
                                 ("%" + json.dumps(old) + "%",)):
                 personas = loads(row["personas"], [])
@@ -181,118 +186,51 @@ class Tank:
                            quoted_text=row["quoted_text"] or "",
                            files=tuple(FileRef(**item) for item in loads(row["files"], [])))
 
-    # ---- diaries ----------------------------------------------------------------------------------
+    # ---- the log -----------------------------------------------------------------------------------
     @staticmethod
-    def _note(row) -> DiaryNote:
-        return DiaryNote(row["id"], row["key"], row["kind"], row["note"], row["importance"], row["created_at"],
-                         row["updated_at"])
+    def _entry(row) -> LogEntry:
+        return LogEntry(row["id"], row["at"], row["module"], row["kind"], row["text"], row["address"], row["subject"],
+                        row["persona"], loads(row["data"], {}))
 
-    @staticmethod
-    def _chats(address: str | Sequence[str]) -> tuple[str, list[str]]:
-        """A diary query's chats: one address or several (a diary scope), as SQL and parameters."""
-        chats = [address] if isinstance(address, str) else list(address)
-        return f"address IN ({','.join('?' * len(chats))})", chats
-
-    def save_note(self, persona: str, address: str, subject: str, key: str, kind: str, note: str,
-                  importance: int, keep: int, shared: Sequence[str] = ()) -> bool:
-        """Upsert one note in `address`; beyond `keep` notes for this person there, the least important oldest
-        ones go. With `shared` (the other chats of a diary scope), a note of the same key in any of them is
-        updated where it is (the newest, if several), so a correction never leaves an older copy in view."""
-        now = time.time()
-        where, chats = self._chats([address, *shared])
+    def add_log(self, address: str, module: str, kind: str, text: str, *, subject: str = "", persona: str = "",
+                data: Mapping[str, Any] | None = None, keep: int = 2000) -> LogEntry:
+        """One new line; beyond `keep` lines in this conversation, the oldest go."""
         with self.db.transaction() as db:
-            row = db.one(f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=? AND key=? "
-                         "ORDER BY updated_at DESC, id DESC LIMIT 1", (persona, *chats, subject, key))
-            if row is not None:
-                if (row["kind"], row["note"], row["importance"]) == (kind, note, importance):
-                    return False
-                db.execute("UPDATE diary SET kind=?, note=?, importance=?, updated_at=? WHERE id=?",
-                           (kind, note, importance, now, row["id"]))
-                return True
-            db.execute("INSERT INTO diary(persona,address,subject,key,kind,note,importance,created_at,updated_at) "
-                       "VALUES(?,?,?,?,?,?,?,?,?)", (persona, address, subject, key, kind, note, importance, now, now))
-            db.execute("DELETE FROM diary WHERE id IN (SELECT id FROM diary WHERE persona=? AND address=? AND "
-                       "subject=? ORDER BY importance DESC, updated_at DESC, id DESC LIMIT -1 OFFSET ?)",
-                       (persona, address, subject, keep))
-            return True
+            cursor = db.execute("INSERT INTO log(at,module,kind,text,address,subject,persona,data) "
+                                "VALUES(?,?,?,?,?,?,?,?)", (time.time(), module, kind, text, address, subject, persona,
+                                                            dumps(dict(data or {}))))
+            db.execute("DELETE FROM log WHERE address=? AND id NOT IN (SELECT id FROM log WHERE address=? ORDER BY id "
+                       "DESC LIMIT ?)", (address, address, keep))
+            return self._entry(db.one("SELECT * FROM log WHERE id=?", (cursor.lastrowid,)))
 
-    def note(self, persona: str, address: str | Sequence[str], subject: str, key: str) -> DiaryNote | None:
-        where, chats = self._chats(address)
-        row = self.db.one(f"SELECT * FROM diary WHERE persona=? AND {where} AND subject=? AND key=? "
-                          "ORDER BY updated_at DESC, id DESC LIMIT 1", (persona, *chats, subject, key))
-        return self._note(row) if row is not None else None
-
-    def notes(self, persona: str, address: str | Sequence[str], subject: str, limit: int = 20, offset: int = 0,
-              terms: list[str] | None = None, newest: bool = False) -> list[DiaryNote]:
-        """Notes about one person, most important and newest first. `newest`: of several notes with one key
-        (chats of a diary scope that each kept one), only the newest, before any limit is applied."""
-        where, chats = self._chats(address)
-        sql = f"SELECT * FROM diary AS d WHERE persona=? AND {where} AND subject=?"
-        parameters: list[Any] = [persona, *chats, subject]
-        if newest and len(chats) > 1:
-            inner = where.replace("address", "n.address")
-            sql += (f" AND NOT EXISTS (SELECT 1 FROM diary AS n WHERE n.persona=d.persona AND n.subject=d.subject "
-                    f"AND n.key=d.key AND {inner} AND (n.updated_at > d.updated_at OR "
-                    "(n.updated_at = d.updated_at AND n.id > d.id)))")
-            parameters += chats
+    def log_lines(self, address: str, limit: int = 20, offset: int = 0, *, kind: str = "", subject: str | None = None,
+                  persona: str | None = None, terms: Sequence[str] = ()) -> list[LogEntry]:
+        """This conversation's lines, newest first; `terms`: those holding any of these words."""
+        sql, parameters = "SELECT * FROM log WHERE address=?", [address]
+        for column, value in (("kind", kind or None), ("subject", subject), ("persona", persona)):
+            if value is not None:
+                sql, parameters = f"{sql} AND {column}=?", [*parameters, value]
         if terms:
-            sql += " AND (" + " OR ".join("LOWER(note || ' ' || key) LIKE ? ESCAPE '\\'" for _ in terms) + ")"
-            parameters += ["%" + term.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-                           for term in terms]
-        sql += " ORDER BY importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?"
-        return [self._note(row) for row in self.db.query(sql, [*parameters, limit, offset])]
+            sql += " AND (" + " OR ".join("instr(lower(text), ?) > 0" for _ in terms) + ")"
+            parameters += [term.lower() for term in terms]
+        return [self._entry(row) for row in self.db.query(f"{sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+                                                          (*parameters, limit, offset))]
 
-    def note_counts(self, address: str | Sequence[str], subject: str) -> dict[str, int]:
-        where, chats = self._chats(address)
-        return {row["persona"]: row["n"] for row in self.db.query(
-            f"SELECT persona, COUNT(*) AS n FROM diary WHERE {where} AND subject=? GROUP BY persona ORDER BY persona",
-            (*chats, subject))}
+    def log_counts(self, address: str, subject: str | None = None, kind: str = "") -> dict[str, int]:
+        """How many lines each persona has here (about `subject`, of `kind`, when given)."""
+        sql, parameters = "SELECT persona, COUNT(*) AS n FROM log WHERE address=?", [address]
+        for column, value in (("subject", subject), ("kind", kind or None)):
+            if value is not None:
+                sql, parameters = f"{sql} AND {column}=?", [*parameters, value]
+        return {row["persona"]: row["n"] for row in self.db.query(f"{sql} GROUP BY persona ORDER BY persona",
+                                                                  parameters)}
 
-    def legacy_shared_notes(self) -> list[dict]:
-        """Notes filed under a diary scope's own key (`:scope:<name>`, subject `<interface>:<sender>`), as the
-        version before scopes became a filter kept them; `refile_note` moves each into a conversation."""
-        return [dict(row) for row in self.db.query(
-            "SELECT id, persona, address, subject, key, updated_at FROM diary WHERE substr(address, 1, 7)=':scope:' "
-            "ORDER BY id")]
-
-    def last_chats(self, sender_id: str, interface: str) -> list[str]:
-        """The conversations of one interface where this sender spoke, most recent first."""
-        prefix = interface + ":"
-        return [row["address"] for row in self.db.query(
-            "SELECT address, MAX(seq) AS last FROM messages WHERE direction='in' AND sender_id=? "
-            "AND substr(address, 1, ?)=? GROUP BY address ORDER BY last DESC", (sender_id, len(prefix), prefix))]
-
-    def refile_note(self, note_id: int, address: str, subject: str) -> None:
-        """File a note under another conversation and subject. If that one already holds the key, the newer of
-        the two notes is kept."""
-        with self.db.transaction() as db:
-            row = db.one("SELECT * FROM diary WHERE id=?", (note_id,))
-            if row is None:
-                return
-            other = db.one("SELECT * FROM diary WHERE persona=? AND address=? AND subject=? AND key=?",
-                           (row["persona"], address, subject, row["key"]))
-            if other is not None:
-                if other["updated_at"] >= row["updated_at"]:
-                    db.execute("DELETE FROM diary WHERE id=?", (note_id,))
-                    return
-                db.execute("DELETE FROM diary WHERE id=?", (other["id"],))
-            db.execute("UPDATE diary SET address=?, subject=? WHERE id=?", (address, subject, note_id))
-
-    def note_addresses(self, subject: str, interface: str) -> list[str]:
-        """The chats of one interface holding notes about this sender (a diary scope's candidates)."""
-        prefix = interface + ":"
-        return [row["address"] for row in self.db.query(
-            "SELECT DISTINCT address FROM diary WHERE subject=? AND substr(address, 1, ?)=? ORDER BY address",
-            (subject, len(prefix), prefix))]
-
-    def delete_notes(self, address: str | Sequence[str], subject: str, persona: str | None = None,
-                     note_id: int | None = None) -> int:
-        where, chats = self._chats(address)
-        sql, parameters = f"DELETE FROM diary WHERE {where} AND subject=?", [*chats, subject]
-        if persona is not None:
-            sql, parameters = sql + " AND persona=?", [*parameters, persona]
-        if note_id is not None:
-            sql, parameters = sql + " AND id=?", [*parameters, note_id]
+    def delete_log(self, address: str, subject: str | None = None, *, persona: str | None = None,
+                   entry_id: int | None = None, kind: str = "") -> int:
+        sql, parameters = "DELETE FROM log WHERE address=?", [address]
+        for column, value in (("subject", subject), ("persona", persona), ("id", entry_id), ("kind", kind or None)):
+            if value is not None:
+                sql, parameters = f"{sql} AND {column}=?", [*parameters, value]
         return self.db.execute(sql, parameters).rowcount
 
     def create_run(self, run: RunRecord) -> RunRecord:

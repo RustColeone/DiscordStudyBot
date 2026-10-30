@@ -74,7 +74,7 @@ Rules for engines:
 2. **MomoChat converses, Chimera works.** MomoChat does not plan multi-step work. A request bigger than a
    conversation goes to Chimera (`chimera.invite`).
 3. **Engines keep no memory of people.** A student's memory is the students module's, the same in every engine; an
-   agent has none. (No engine uses the core diary any more; the core still offers it.)
+   agent has none. (The core's log says what happened in a conversation, not who someone is.)
 4. **Chimera reads the memory** (who you are) but does not learn from its own work reports.
 5. **Anyone may bring a harness:** an engine module that declares what it needs. It can use agents without any
    memory, and students with theirs.

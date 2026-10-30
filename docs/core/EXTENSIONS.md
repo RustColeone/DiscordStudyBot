@@ -189,8 +189,8 @@ A persona may also carry (contracts 1.9):
 * `formerly`: persona names she had before. On every start, a former name no persona has now is read as hers:
   core.yml's assignments and `personas: <old name>: parts:` apply to her (the audit says
   `persona_renamed_in_config`; rename them there when convenient), and what the core keeps under the old name
-  moves to hers once (`persona_data_moved`, with counts): her memory, every module's stores scoped by her, diary
-  notes, `$model` choices, runtime assignments, facts, the runs she is in, and her name on what she said. What she
+  moves to hers once (`persona_data_moved`, with counts): her memory, every module's stores scoped by her, her lines
+  in the log, `$model` choices, runtime assignments, facts, the runs she is in, and her name on what she said. What she
   already has under the new name wins. A module that keeps its own data by persona name (the web UI's chats, say)
   does the same from `InterfacePort.personas()`. Let open runs finish before renaming someone.
 * `pictures`: kind → image file (`avatar`, square; `card`, 3:4; any kind a page knows). Interfaces get them, as
@@ -603,7 +603,8 @@ accepted; submit it again later. **Advance a read cursor only
 after `submit` returns.** Submit messages of one conversation in order; different conversations may
 be submitted concurrently. Messages starting with `$` and a letter are commands (subject to the
 `commands` rule): `$approve <id>`, `$deny <id>`, `$runs`, `$cancel [run-id|address]`, `$tools`,
-`$memory` (anyone: read, forget or clear what personas keep about them in this conversation),
+`$memory` (anyone: read, forget or clear the notes kept about them in this conversation), `$log` (the same for this
+chat's log: a member's own lines, an admin's all of them),
 `$admin` (admins: status, list, lock/unlock, own view on/off; the creator also adds and removes admins and can `$admin restart` a core run by its supervisor),
 `$routine` (anyone: repeat a message or command on a schedule; see Routine examples),
 `$setup` (the creator: modules on or off, and their declared settings; secrets only on the machine with
@@ -825,7 +826,7 @@ any other one (`$cancel`, a conversation cancelled).
 | `memory(name)` | Older: a persona's store shared by every module running it; prefer `store(persona=name)`. |
 | `prompt(name, place="stable")` | That persona's [prompt parts](#prompt-parts) at `stable` or `turn`, rendered in order and joined ("" when it has none). |
 | `await aprompt(name, place="stable")` | The same with async parts awaited (contracts 1.14). Render once per turn: a part may cost a lookup. |
-| `diary(name)` | That persona's notes about the trigger's sender, in this conversation or across those sharing its `diary_scope` (see below). |
+| `logbook` | This conversation's [log](#the-log): `write`, `recent`, `find`. `ToolContext.logbook` and `WatchContext.logbook` are the same (contracts 1.15). |
 | `history.recent(limit)` | This conversation's history, oldest first: every admitted request and `$command`, messages interfaces `observe`, relayed owner messages, and successfully delivered replies and files (`direction="out"`, `reply_to` = the request they answered). Non-admitted messages, notices, progress and failed or uncertain deliveries are not recorded. Items keep their attachments in `files` (request files, observed files, delivered files). Filter by `sender_id` yourself if needed. |
 | `history.search(text, limit)` | This conversation's messages containing `text` (any case), newest first, at most 100: further back than `recent` reaches (200). |
 | `history.summary()`, `history.summarize(text, upto)` | The conversation's rolling summary (`HistorySummary`: `text`, `upto`, `updated_at`), shared by every engine and persona in it. An engine compacting older history writes it (1 to 8000 characters; secrets are scrubbed and what is stored is kept within 8000) covering messages up to `upto`, a finite time (otherwise `ValueError`); people read and clear it with `$memory`. |
@@ -887,41 +888,41 @@ reference engine: state, events, tool calls, approvals, questions, images and re
   answers left out), then the turn's context (the time, her turn parts, such as a student's memory of the person,
   other open runs, what was said in this run before her, why she speaks if she was not the one asked), the message,
   and her turn so far. Images attached, sent shortly before (`history_image_minutes`) or found by tools are shown.
-* **Two styles.** `brief` (the default): she speaks as she goes, in her own voice. `full` (a personal AI chat client,
-  as Whale-chan's bot uses it): complete answers in Markdown, her notes while working shown as progress and only the
-  answer posted. `/new` (`/reset`, `/clear`) starts a fresh thread in any conversation.
+* **Three styles.** `brief` (the default): she speaks as she goes, in her own voice. `chat` (a chat app, as Whale-chan's
+  bot uses it): short and casual, her notes while working shown as progress and only the answer posted. `full` (a
+  personal AI chat client): the same, with complete answers in Markdown. `/new` (`/reset`, `/clear`) starts a fresh thread in any conversation.
 * **Her own impulse.** A request an interface marks `extra.speak_up` (with its text starting `⟨speak-up⟩ `) is her
   own wish to message someone: one step, no tools, from the motive.
-* **It keeps nothing of people.** No core diary: a student's memory is the students module's (its prompt part and
-  watcher), and an agent has none.
+* **It keeps nothing of people.** A student's memory is the students module's (its prompt part and watcher), and an
+  agent has none. Each turn shows the newest lines of the conversation's log from the last day (`log_lines`, 3).
 * Assignment options: `instructions`, `owner_instructions`, `style`, `effort`, `max_steps` (per speaker),
-  `max_turns`, `max_handoffs`, `max_tokens`, `timeout_s`, `tool_calls`, `history_limit`, `history_chars`,
+  `max_turns`, `max_handoffs`, `max_tokens`, `log_lines`, `timeout_s`, `tool_calls`, `history_limit`, `history_chars`,
   `history_scope: sender`, `history_image_minutes`, `compact`, `compact_every`, `compact_profile`, `chime_in`,
   `new_chat_text`, `quote: latest|trigger`. Module settings (`extensions/momochat/config.yml`) are their defaults.
 
-### Diaries
+### The log
 
-No engine in this repository keeps a diary any more (a student's memory is the students module's; an agent
-keeps nothing); the core still offers it to engines that want one.
+The log is what happened in a conversation, one line each, kept by the core for every module (contracts 1.15, in place
+of the diary, which only held what a persona noted of someone). A line has when, which module wrote it, a `kind` (one
+short word: `note`, `action`, `landed`, …), its text, and optional `data`, `subject` (the person it is about) and
+`persona`.
 
-`session.diary(persona)` returns a `Diary` about the person who sent the trigger, in this conversation
-only by default; a DM disclosure never shows up in a server. A note is always filed in the conversation it
-was written in. An assignment's `diary_scope: <name>` option makes a conversation also read the notes of every
-other conversation whose assignment sets the same name (the same character remembering the same person
-across them, like the web UI's chats, which only their owner reads). The scope is only a filter: turning
-it on, off or to another name moves nothing, so notes are never stranded. It spans one interface, since a
-sender ID names a person only there. A note written under a key that another conversation of the scope
-already holds updates that note where it is; if two hold the same key (from before they shared),
-`recall` gives the newest. `$memory`, `forget` and `clear` cover the whole scope. (Notes an earlier version filed under the scope
-itself are filed once, at start-up, in the scope's conversation their person spoke in last.) A scope name is text (a
-number counts as its digits); anything else, `false` included, means none. `recall(text, limit)` returns `DiaryNote`s, those
-matching words of `text` first. `write(key, kind, note, importance)` creates or replaces the note
-under `key` (`kind` is one of `DIARY_KINDS`: fact, episode, reflection). The core refuses
-(`ValueError`) invalid keys or values, notes over 400 characters, notes that copy the message instead
-of paraphrasing it, and more than 4 changed notes per run; it keeps at most 200 notes per persona and
-person in each conversation, dropping the least important oldest. Routine runs have no person: `available` is false,
-`recall` is empty and `write` raises. People manage their notes with `$memory`, so engines need no
-commands of their own for this.
+```python
+session.logbook.write("landed", "The Sunday fix landed", data={"task": "t-1"})   # also ToolContext and WatchContext
+session.logbook.write("note", "Prefers mornings", person=True, persona="gpt")    # about the person of this run
+session.logbook.recent(8)         # the newest lines of this conversation, oldest of them first; `kind=` narrows it
+session.logbook.find("sunday")    # the newest lines holding words of it
+```
+
+* **Who writes:** modules, through the handle they already have; a model only through a capability a module offers. The
+  core logs by itself every `write` or `critical` action that ran, so "what did you do?" always has an answer: kind
+  `action` for what a model did, `command` for what someone typed. Lines are never edited: a correction is a new line. Text is scrubbed of secrets and clipped to 500 characters,
+  and a conversation keeps its newest 2,000 lines.
+* **Who reads:** engines, and people with `$log` (a member the lines about them, an admin all of them; `forget <id>` and
+  `clear` remove what they may see). `$memory` shows and removes the `note` lines about you. MomoChat shows the newest
+  few lines of the last day in each turn (`log_lines`), leaving out notes and commands: a typed `$alias` is for one
+  student, not all of them.
+* **Not the audit log.** That stays the core's own record for the owner; models never read it.
 
 ### The included Discord interface
 

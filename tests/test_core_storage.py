@@ -151,7 +151,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
                                 FakeAdapter([]), clock=lambda: now[0])
         self.cores.append(core)
         HistoryHandle(core.manager, Address("chat", "group")).summarize("Long shared history.", upto=1.0)
-        core.tank.save_note("p", "chat:group", "boss", "k", "fact", "Boss likes tea", 3, 200)
+        core.tank.add_log("chat:group", "core", "note", "Boss likes tea", subject="boss", persona="p")
         for text in ("$memory clear summary", "$memory clear", "$memory forget 1"):
             await iface(core).say(f'tool core.add_routine {{"schedule": "every 1h", "text": "{text}"}}', sender="boss",
                                   conversation="group", is_direct=False, mentions_me=True, name="Boss")
@@ -162,116 +162,7 @@ class StorageTests(unittest.IsolatedAsyncioTestCase):
         refused = [text for text in iface(core).texts("group") if "A routine set up through a tool cannot use" in text]
         self.assertEqual(len(refused), 3)
         self.assertIsNotNone(HistoryHandle(core.manager, Address("chat", "group")).summary())
-        self.assertEqual(len(core.tank.notes("p", "chat:group", "boss")), 1)
-
-    # ---- diaries: filed where written; a scope reads several conversations' notes together ----------
-
-    # (Through a test engine that keeps a diary, tests/core_fixtures/diarist: `note <key> <importance> <text>`
-    # writes, anything else replies with the notes it recalls.)
-    WRITE = "note food.favorite 4 Likes spicy noodles"
-
-    def shared(self, *addresses, scope="mine"):
-        rule = {"engine": "diarist", "personas": ["p"], "options": {"diary_scope": scope}}
-        return {"extensions": [*make_config(self.tmp).raw["modules"]["paths"], str(FIXTURES / "diarist")],
-                "assignments": {"*": {"engine": "diarist", "personas": ["p"]},
-                                **{address: rule for address in addresses}}}
-
-    async def test_a_diary_scope_reads_its_conversations_notes_together(self):
-        core = await self.core(self.shared("chat:dm", "chat:group"))
-        for conversation in ("dm", "group", "elsewhere"):
-            await iface(core).say(self.WRITE if conversation == "dm" else "noodles?", conversation=conversation)
-            await settle(core)
-        self.assertEqual(iface(core).texts("group"), ["notes: Likes spicy noodles"])  # the group reads it
-        self.assertEqual(iface(core).texts("elsewhere"), ["notes: none"])  # elsewhere does not
-        self.assertEqual([n.key for n in core.tank.notes("p", "chat:dm", "alice")], ["food.favorite"])  # filed in dm
-        await iface(core).say("$memory", conversation="group")
-        await settle(core)
-        self.assertIn("Likes spicy noodles", iface(core).texts("group")[-1])
-        await iface(core).say("$memory", conversation="elsewhere")
-        await settle(core)
-        self.assertIn("Nobody keeps notes about you here", iface(core).texts("elsewhere")[-1])
-
-    async def test_changing_a_scope_moves_nothing(self):
-        core = await self.core(self.shared())
-        await iface(core).say(self.WRITE, conversation="dm")
-        await settle(core)
-        rows = lambda: [(n.id, n.note) for n in core.tank.notes("p", "chat:dm", "alice")]
-        before = rows()
-        self.assertEqual(len(before), 1)
-        for address in ("chat:dm", "chat:group"):  # turned on later: the dm's old note is shared as it is
-            core.manager.set_assignment(address, {"engine": "diarist", "personas": ["p"],
-                                                  "options": {"diary_scope": "mine"}})
-        await iface(core).say("$memory", conversation="group")
-        await settle(core)
-        self.assertIn("Likes spicy noodles", iface(core).texts("group")[-1])
-        core.manager.delete_assignment("chat:group")  # and off again: the group no longer reads it
-        await iface(core).say("$memory", conversation="group")
-        await settle(core)
-        self.assertIn("Nobody keeps notes about you here", iface(core).texts("group")[-1])
-        self.assertEqual(rows(), before)  # never moved or copied
-
-    async def test_a_correction_in_one_chat_updates_the_note_where_it_lives(self):
-        core = await self.core(self.shared("chat:dm", "chat:group"))
-        await iface(core).say(self.WRITE, conversation="dm")
-        await settle(core)
-        await iface(core).say("note food.favorite 4 Now prefers sushi over noodles", conversation="group")
-        await settle(core)
-        self.assertEqual([n.note for n in core.tank.notes("p", ["chat:dm", "chat:group"], "alice")],
-                         ["Now prefers sushi over noodles"])  # one note, still filed in the dm
-        self.assertEqual(core.tank.notes("p", "chat:group", "alice"), [])
-        await iface(core).say("$memory clear", conversation="group")
-        await settle(core)
-        self.assertIn("Removed 1 note(s) about you in the chats that share this memory", iface(core).texts("group")[-1])
-        self.assertEqual(core.tank.notes("p", "chat:dm", "alice"), [])
-
-    async def test_a_shared_diary_keeps_people_of_different_interfaces_apart(self):
-        core = await self.core(self.shared("chat:dm", "owner:dm"))
-        await iface(core).say(self.WRITE, conversation="dm")  # alice on chat
-        await settle(core)
-        await iface(core, "owner").say("noodles?", conversation="dm")  # a different alice, on owner
-        await settle(core)
-        self.assertEqual(iface(core, "owner").texts("dm"), ["notes: none"])
-        await iface(core, "owner").say("$memory clear", conversation="dm")
-        await settle(core)
-        self.assertEqual(len(core.tank.notes("p", "chat:dm", "alice")), 1)  # not hers to clear
-
-    async def test_recall_gives_the_newest_of_a_key_however_many_notes_outrank_it(self):
-        from types import SimpleNamespace
-        from core.manager.diary import DiaryHandle
-        core = await self.core()
-        tank = core.tank
-        tank.save_note("p", "chat:dm", "alice", "food.favorite", "fact", "Likes spicy noodles", 5, 200)
-        for index in range(6):
-            tank.save_note("p", "chat:dm", "alice", f"other.{index}", "fact", f"Important {index}", 5, 200)
-        tank.save_note("p", "chat:group", "alice", "food.favorite", "fact", "Now prefers sushi", 3, 200)  # newer
-        record = SimpleNamespace(id="r", address="chat:dm", origin="conversation")
-        diary = DiaryHandle(core.manager, record, "p", "hi", "alice", chats=["chat:dm", "chat:group"])
-        recalled = [note.note for note in diary.recall("", limit=50)]
-        self.assertIn("Now prefers sushi", recalled)
-        self.assertNotIn("Likes spicy noodles", recalled)
-        recalled = [note.note for note in diary.recall("food", limit=3)]
-        self.assertNotIn("Likes spicy noodles", recalled)
-
-    async def test_notes_the_previous_version_filed_under_a_scope_are_filed_in_a_chat_again(self):
-        core = await self.core(self.shared("chat:dm", "chat:group"))
-        core.tank.record_message("chat:dm", "in", "hi", sender_id="alice", at=100.0)
-        core.tank.record_message("chat:group", "in", "hello", sender_id="alice", at=200.0)  # where she spoke last
-        core.tank.save_note("p", ":scope:mine", "chat:alice", "food.favorite", "fact", "Likes spicy noodles", 4, 200)
-        core.tank.save_note("p", ":scope:gone", "chat:alice", "old.key", "fact", "From a scope nobody names", 4, 200)
-        core.tank.save_note("p", "chat:group", "alice", "food.favorite", "fact", "An older note", 4, 200)
-        core.tank.db.execute("UPDATE diary SET updated_at=1 WHERE note='An older note'")
-        core.manager._refile_shared_diaries()
-        self.assertEqual([n.note for n in core.tank.notes("p", "chat:group", "alice")], ["Likes spicy noodles"])
-        self.assertEqual([n.key for n in core.tank.notes("p", ":scope:gone", "chat:alice")], ["old.key"])
-        await iface(core).say("$memory", conversation="dm")
-        await settle(core)
-        self.assertIn("Likes spicy noodles", iface(core).texts("dm")[-1])
-
-    def test_a_scope_name_is_text_and_anything_else_means_none(self):
-        from core.manager.manager import Manager
-        names = [Manager.diary_scope({"diary_scope": value}) for value in
-                 (" mine ", 5, False, True, ["a"], {"a": 1}, None, "")]
-        self.assertEqual(names, ["mine", "5", "", "", "", "", "", ""])
+        self.assertEqual(len(core.tank.log_lines("chat:group", kind="note", subject="boss")), 1)
 
 
 if __name__ == "__main__":

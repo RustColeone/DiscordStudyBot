@@ -136,18 +136,17 @@ conversation and what runs there without asking are [permissions](#permissions),
 assignments.
 
 * **Budgets** cap model calls, tool calls and active seconds per run; exceeding them fails the run.
-* **Diaries.** Engines keep persona notes through `Session.diary`; the core enforces the note format,
-  paraphrasing, a per-run write limit and the subject (only the trigger's sender, never in routines).
+* **The log.** What happened in a conversation, one line each: modules write through `logbook` (sessions, tool calls,
+  watchers), and the core logs each write or critical action that ran. Engines read it, and people with `$log`.
 * **Unattended runs.** Routines fire through the gateway as `origin="routine"` requests in
   `routine:<name>`; their assignment and routes decide where results go, permissions what they may use
   (by default only `basic.*`). `trusted` routines act at the creator's level. Approvals still go to the
   control route and the run waits durably.
 * **`$commands`.** `$approve <id> [always]`, `$deny`, `$runs`, `$cancel`, `$tools`, `$help`, `$call` (owner
   runs any capability with JSON arguments), `$permissions` (creator: what applies here, the saved grants,
-  revoking one), `$memory` (anyone reads, forgets or clears what personas keep about them in this
-  conversation, or in those sharing its `diary_scope`; also reads this chat's rolling summary, which
-  admins, or the person in a direct chat, can clear; deliberately not a capability, so models cannot
-  delete notes), `$model` (admins: which
+  revoking one), `$memory` (anyone reads, forgets or clears the notes kept about them in this conversation; also reads
+  this chat's rolling summary, which admins, or the person in a direct chat, can clear; deliberately not a capability,
+  so models cannot delete notes), `$log` (the same for this chat's log: a member's own lines, an admin's all of them), `$model` (admins: which
   model each persona answers with here and what the providers offer, asked live; a choice per persona and
   conversation is tried before her profile, which stays the fallback; never offered to models), plus
   capabilities that declare a `command`.

@@ -2,7 +2,7 @@
 
 from contracts.capability import TIER_ORDER, Capability, Handler, Risk, ToolContext, ToolResult
 from contracts.commands import Command, Option
-from contracts.engine import (DIARY_KINDS, PART_PLACES, Activity, Diary, DiaryNote, Engine, EngineSpec, Event, History,
+from contracts.engine import (PART_PLACES, Activity, Engine, EngineSpec, Event, History, LogEntry, Logbook,
                               HistoryItem, HistorySummary, PartContext, Persona, PromptPart, RunYield, SHUTDOWN, Session,
                               TIERS, Tools)
 from contracts.extension import Contributions, Extension, ExtensionContext, Setting
@@ -25,19 +25,20 @@ from contracts.watchers import Exchange, WatchContext, Watcher
 #       owner; InterfacePort.stamina, InterfacePort.spending).
 # 1.13: 1.12 plus a persona's own default daily allowance (Persona.allowance).
 # 1.14: 1.13 plus async prompt parts (Session.aprompt renders them), whose persona a tool call is for
-# 1.15: 1.14 plus the effort "none" (no thinking), Persona.effort, how hard she thinks in a conversation, and
-#       AdapterResult.cost, what the provider says it charged
 #       (Tools.list and Tools.call take `persona`, ToolContext.persona) and capabilities offered to some personas
 #       only (Capability.personas).
+# 1.15: 1.14 plus the effort "none" (no thinking), Persona.effort, how hard she thinks in a conversation, and
+#       AdapterResult.cost, what the provider says it charged; the log (Session.logbook, ToolContext.logbook,
+#       WatchContext.logbook) in place of Session.diary, which no engine used
 CONTRACTS_VERSION = "1.15"
 
 __all__ = [
     "AdapterFactory", "AdapterResult", "Image", "ModelAdapter", "NotConfigured",
-    "Action", "Activity", "Address", "Command", "Option", "Capability", "Contributions", "CONTRACTS_VERSION", "DIARY_KINDS", "Delivery", "Diary",
-    "DiaryNote", "Display", "Engine",
+    "Action", "Activity", "Address", "Command", "Option", "Capability", "Contributions", "CONTRACTS_VERSION", "Delivery",
+    "Display", "Engine",
     "EngineSpec", "Event", "Exchange", "Extension", "ExtensionContext", "Facts", "FileRef", "Handler", "History",
     "HistoryItem",
-    "HistorySummary",
+    "HistorySummary", "LogEntry", "Logbook",
     "Interface", "InterfacePort", "PLACE_STATUS", "ModelError", "ModelRequest", "ModelResult", "Models", "Operation",
     "PART_PLACES", "PartContext", "Persona", "Prices", "PromptPart", "Reply", "Request", "Risk", "TIER_ORDER", "TIERS", "RunYield", "SHUTDOWN", "Sender", "Session", "Setting", "Store", "SubmitResult", "ToolContext",
     "ToolCall", "ToolResult", "ToolSpec", "Tools",

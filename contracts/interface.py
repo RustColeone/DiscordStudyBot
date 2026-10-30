@@ -144,9 +144,11 @@ class InterfacePort(Protocol):
 # The shape of a published `status` that describes a place people can go (a classroom, a lab), so any interface
 # can draw any other place: {"place": {"name", "icon", "note"}, "people": [{"key", "name", "avatar", "doing",
 # "title"}], "away": [keys of people from elsewhere who are here now], "tickets": [{"key", "by", "title", "link"}:
-# invitations to come here, held by people elsewhere]}. A key is the name lowercased, with only its letters and digits
+# invitations to come here, held by people elsewhere], "views": [{"name", "icon", "path", "order", "off", "note"}: the
+# tabs this place adds to every page's places bar, paths relative to its link, sorted by `order` across places; `off`
+# greys one, `note` says why], "you": {"path", "name"}: your tab in the header}. A key is the name lowercased, with only its letters and digits
 # kept, in any script ("Flash-chan" → "flashchan", "露娜" → "露娜"); an empty key matches nobody.
-PLACE_STATUS = ("place", "people", "away", "tickets")
+PLACE_STATUS = ("place", "people", "away", "tickets", "views", "you")
 
 
 class Interface(ABC):

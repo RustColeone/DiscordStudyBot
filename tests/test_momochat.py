@@ -355,7 +355,7 @@ class NativeToolCallTests(unittest.IsolatedAsyncioTestCase):
         # An agent keeps nothing of people (a student's memory is the students module's): no core diary, even asked.
         self.assertNotIn("remember", [tool.name for tool in adapter.calls[0]["tools"]])
         self.assertNotIn("diary", turn_context(adapter.calls[0]))
-        self.assertEqual(core.tank.notes("p", "chat:room", "alice"), [])
+        self.assertEqual(core.tank.log_lines("chat:room", kind="note"), [])
 
     async def test_wrong_calls_get_a_correction_then_the_step_is_asked_as_json(self):
         core, adapter = await self.core([calls("", ("basic.now", {"timezone": 5})),

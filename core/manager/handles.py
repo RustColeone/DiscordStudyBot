@@ -12,7 +12,7 @@ import time
 
 from contracts import (Activity, Address, Delivery, Display, Event, FileRef, HistoryItem, HistorySummary, ModelError,
                        ModelRequest, ModelResult, PART_PLACES, PartContext, Persona, Request, Sender, ToolResult)
-from core.manager.diary import DiaryHandle
+from core.manager.logbook import LogbookHandle
 from core.serialize import request_from_dict
 from core.storage.tank import RunRecord
 
@@ -172,13 +172,9 @@ class SessionHandle:
             raise ValueError("A session can only open memory for its own personas")
         return self._manager.tank.store("persona:" + persona)
 
-    def diary(self, persona: str) -> DiaryHandle:
-        if persona not in {item.name for item in self.personas}:
-            raise ValueError("A session can only open the diary of its own personas")
-        record = self._manager.tank.run(self.run_id)
-        subject = self.trigger.sender.id
-        return DiaryHandle(self._manager, record, persona, self.trigger.text, subject,
-                           chats=self._manager.diary_chats(record.address, self.options, subject))
+    @property
+    def logbook(self) -> LogbookHandle:
+        return LogbookHandle(self._manager, str(self.address), self._module, self.trigger.sender.id)
 
     def prompt(self, persona: str, place: str = "stable") -> str:
         match, context = self._part_context(persona, place)
@@ -253,6 +249,7 @@ class ToolContextHandle:
         self.history = ReadingHistory(HistoryHandle(manager, self.address))
         self.persona = persona if persona in record.personas else \
             (record.personas[0] if not persona and len(record.personas) == 1 else "")
+        self.logbook = LogbookHandle(manager, str(self.address), extension, self.sender.id)
 
     async def progress(self, text: str) -> None:
         await self._manager.progress(self.run_id, text)
@@ -291,6 +288,7 @@ class WatchContextHandle:
         self.models = WatcherModels(manager, exchange.run_id, exchange.persona.profile)
         self.history = ReadingHistory(HistoryHandle(manager, exchange.address))
         self.facts = manager.facts.handle(module)
+        self.logbook = LogbookHandle(manager, str(exchange.address), module, exchange.trigger.sender.id)
 
     def store(self, *, conversation: bool = False, persona: bool = False, person: bool = False):
         exchange = self._exchange

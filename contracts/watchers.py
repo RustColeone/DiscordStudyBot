@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
-from contracts.engine import History, Persona
+from contracts.engine import History, Logbook, Persona
 from contracts.messages import Address, Request
 from contracts.models import Models
 from contracts.stores import Facts, Store
@@ -42,11 +42,13 @@ class WatchContext(Protocol):
     `models` calls models with the persona's profile unless a request names another; the calls are counted in the
     run's usage (`watcher_calls`, tokens) but not against its budget, since the run may be over. `history` reads
     the conversation (what others said around her message); `store` is the module's own, scoped as
-    `Session.store`, with the exchange's person and persona; `facts` publishes for interfaces."""
+    `Session.store`, with the exchange's person and persona; `facts` publishes for interfaces; `logbook` (added in
+    1.15) is the conversation's log, as `Session.logbook`."""
 
     models: Models
     history: History
     facts: Facts
+    logbook: Logbook
 
     def store(self, *, conversation: bool = False, persona: bool = False, person: bool = False) -> Store: ...
 

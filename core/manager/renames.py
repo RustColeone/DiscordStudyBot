@@ -3,7 +3,7 @@
 
 At start, once every module is loaded, each old name no persona has now is read as hers: core.yml's assignments
 and prompt parts that name it, and everything the core keeps under it (her memory, the modules' stores scoped by
-her, diary notes, `$model` choices, runtime assignments, facts, open runs, her name on what she said). An engine's
+her, her lines in the log, `$model` choices, runtime assignments, facts, open runs, her name on what she said). An engine's
 old name is read as the engine in core.yml's assignments and the runtime ones, and its open runs carry on in it. It
 runs on every start and moves only what is still under the old name, so it is done once.
 """
